@@ -1,0 +1,8 @@
+{
+  "id": "msg_tool_1",
+  "model": "claude-sonnet-4-5",
+  "content": [
+    {"type": "tool_use", "id": "toolu_1", "name": "search", "input": {"q": "hi"}}
+  ],
+  "usage": {"input_tokens": 4, "output_tokens": 3}
+}

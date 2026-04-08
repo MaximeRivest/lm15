@@ -1,0 +1,38 @@
+{
+  "tests": [
+    {
+      "id": "models-dev.catalog.live",
+      "provider": "shared",
+      "probe": "models_dev_catalog",
+      "required": false,
+      "mode": "live"
+    },
+    {
+      "id": "openai.complete.live",
+      "provider": "openai",
+      "probe": "live_complete",
+      "required": false,
+      "mode": "live",
+      "model": "gpt-4.1-mini",
+      "prompt": "Reply with exactly: ok"
+    },
+    {
+      "id": "anthropic.complete.live",
+      "provider": "anthropic",
+      "probe": "live_complete",
+      "required": false,
+      "mode": "live",
+      "model": "claude-sonnet-4-5",
+      "prompt": "Reply with exactly: ok"
+    },
+    {
+      "id": "gemini.complete.live",
+      "provider": "gemini",
+      "probe": "live_complete",
+      "required": false,
+      "mode": "live",
+      "model": "gemini-2.0-flash-lite",
+      "prompt": "Reply with exactly: ok"
+    }
+  ]
+}

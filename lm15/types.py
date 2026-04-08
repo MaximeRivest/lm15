@@ -1,0 +1,345 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+
+Role = Literal["user", "assistant", "tool"]
+PartType = Literal[
+    "text",
+    "image",
+    "audio",
+    "video",
+    "document",
+    "tool_call",
+    "tool_result",
+    "thinking",
+    "refusal",
+    "citation",
+]
+FinishReason = Literal["stop", "length", "tool_call", "content_filter", "error"]
+DataSourceType = Literal["base64", "url", "file"]
+ResponseFormatType = Literal["text", "json", "json_schema"]
+StreamEventType = Literal["start", "delta", "part_start", "part_end", "end", "error"]
+
+
+@dataclass(slots=True, frozen=True)
+class DataSource:
+    type: DataSourceType
+    media_type: str | None = None
+    data: str | None = None
+    url: str | None = None
+    file_id: str | None = None
+    detail: Literal["low", "high", "auto"] | None = None
+
+    def __post_init__(self) -> None:
+        if self.type == "base64":
+            if not self.data:
+                raise ValueError("DataSource(type='base64') requires data")
+            if not self.media_type:
+                raise ValueError("DataSource(type='base64') requires media_type")
+        elif self.type == "url":
+            if not self.url:
+                raise ValueError("DataSource(type='url') requires url")
+        elif self.type == "file":
+            if not self.file_id:
+                raise ValueError("DataSource(type='file') requires file_id")
+        else:
+            raise ValueError(f"unsupported data source type: {self.type}")
+
+
+@dataclass(slots=True, frozen=True)
+class Part:
+    type: PartType
+    text: str | None = None
+    source: DataSource | None = None
+    id: str | None = None
+    name: str | None = None
+    input: dict[str, Any] | None = None
+    content: tuple["Part", ...] = field(default_factory=tuple)
+    is_error: bool | None = None
+    redacted: bool | None = None
+    summary: str | None = None
+    url: str | None = None
+    title: str | None = None
+    metadata: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.type in {"text", "thinking", "refusal"} and self.text is None:
+            raise ValueError(f"Part(type='{self.type}') requires text")
+        if self.type in {"image", "audio", "video", "document"} and self.source is None:
+            raise ValueError(f"Part(type='{self.type}') requires source")
+        if self.type == "tool_call":
+            if not self.id or not self.name or self.input is None:
+                raise ValueError("Part(type='tool_call') requires id, name, input")
+        if self.type == "tool_result":
+            if not self.id:
+                raise ValueError("Part(type='tool_result') requires id")
+
+    @staticmethod
+    def text_part(text: str) -> "Part":
+        return Part(type="text", text=text)
+
+    @staticmethod
+    def tool_call(id: str, name: str, input: dict[str, Any]) -> "Part":
+        return Part(type="tool_call", id=id, name=name, input=input)
+
+    @staticmethod
+    def tool_result(id: str, content: list["Part"], is_error: bool | None = None) -> "Part":
+        return Part(type="tool_result", id=id, content=tuple(content), is_error=is_error)
+
+    @staticmethod
+    def refusal(text: str) -> "Part":
+        return Part(type="refusal", text=text)
+
+    @staticmethod
+    def citation(text: str | None = None, url: str | None = None, title: str | None = None) -> "Part":
+        return Part(type="citation", text=text, url=url, title=title)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "Part":
+        source_value = value.get("source")
+        source = DataSource(**source_value) if isinstance(source_value, dict) else source_value
+        content = tuple(cls.from_dict(x) if isinstance(x, dict) else x for x in value.get("content", []))
+        return cls(
+            type=value["type"],
+            text=value.get("text"),
+            source=source,
+            id=value.get("id"),
+            name=value.get("name"),
+            input=value.get("input"),
+            content=content,
+            is_error=value.get("is_error"),
+            redacted=value.get("redacted"),
+            summary=value.get("summary"),
+            url=value.get("url"),
+            title=value.get("title"),
+            metadata=value.get("metadata"),
+        )
+
+
+@dataclass(slots=True, frozen=True)
+class Message:
+    role: Role
+    parts: tuple[Part, ...]
+    name: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.role not in {"user", "assistant", "tool"}:
+            raise ValueError(f"unsupported role: {self.role}")
+        if not self.parts:
+            raise ValueError("Message.parts cannot be empty")
+
+    @staticmethod
+    def user(text: str) -> "Message":
+        return Message(role="user", parts=(Part.text_part(text),))
+
+
+@dataclass(slots=True, frozen=True)
+class Tool:
+    type: Literal["function", "builtin"]
+    name: str
+    description: str | None = None
+    parameters: dict[str, Any] | None = None
+    builtin_config: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.type == "function" and self.parameters is None:
+            object.__setattr__(self, "parameters", {"type": "object", "properties": {}})
+
+
+@dataclass(slots=True, frozen=True)
+class ToolConfig:
+    mode: Literal["auto", "required", "none"] = "auto"
+    allowed: tuple[str, ...] = ()
+    parallel: bool | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class Config:
+    max_tokens: int | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    stop: tuple[str, ...] = ()
+    response_format: dict[str, Any] | None = None
+    tool_config: ToolConfig | None = None
+    reasoning: dict[str, Any] | None = None
+    stream: bool = False
+    provider: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.max_tokens is not None and self.max_tokens <= 0:
+            raise ValueError("max_tokens must be > 0")
+        if self.temperature is not None and self.temperature < 0:
+            raise ValueError("temperature must be >= 0")
+        if self.top_p is not None and not (0 <= self.top_p <= 1):
+            raise ValueError("top_p must be in [0, 1]")
+
+
+@dataclass(slots=True, frozen=True)
+class LMRequest:
+    model: str
+    messages: tuple[Message, ...]
+    system: str | tuple[Part, ...] | None = None
+    tools: tuple[Tool, ...] = ()
+    config: Config = field(default_factory=Config)
+
+    def __post_init__(self) -> None:
+        if not self.model:
+            raise ValueError("model is required")
+        if not self.messages:
+            raise ValueError("messages cannot be empty")
+        if isinstance(self.system, tuple) and not self.system:
+            raise ValueError("system parts cannot be empty")
+
+
+@dataclass(slots=True, frozen=True)
+class Usage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    reasoning_tokens: int | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class LMResponse:
+    id: str
+    model: str
+    message: Message
+    finish_reason: FinishReason
+    usage: Usage
+    provider: dict[str, Any] | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class StreamEvent:
+    type: StreamEventType
+    id: str | None = None
+    model: str | None = None
+    part_index: int | None = None
+    delta: dict[str, Any] | None = None
+    part_type: str | None = None
+    finish_reason: FinishReason | None = None
+    usage: Usage | None = None
+    error: dict[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        if self.type == "delta" and self.delta is None:
+            raise ValueError("StreamEvent(type='delta') requires delta")
+        if self.type == "error" and self.error is None:
+            raise ValueError("StreamEvent(type='error') requires error")
+
+
+@dataclass(slots=True, frozen=True)
+class EmbeddingRequest:
+    model: str
+    inputs: tuple[str, ...]
+    provider: dict[str, Any] | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class EmbeddingResponse:
+    model: str
+    vectors: tuple[tuple[float, ...], ...]
+    usage: Usage = field(default_factory=Usage)
+    provider: dict[str, Any] | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FileUploadRequest:
+    model: str | None = None
+    filename: str = "file.bin"
+    bytes_data: bytes = b""
+    media_type: str = "application/octet-stream"
+    provider: dict[str, Any] | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class FileUploadResponse:
+    id: str
+    provider: dict[str, Any] | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class BatchRequest:
+    model: str
+    requests: tuple[LMRequest, ...]
+    provider: dict[str, Any] | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class BatchResponse:
+    id: str
+    status: str
+    provider: dict[str, Any] | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class ImageGenerationRequest:
+    model: str
+    prompt: str
+    size: str | None = None
+    provider: dict[str, Any] | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class ImageGenerationResponse:
+    images: tuple[DataSource, ...]
+    provider: dict[str, Any] | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class AudioGenerationRequest:
+    model: str
+    prompt: str
+    voice: str | None = None
+    format: str | None = None
+    provider: dict[str, Any] | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class AudioGenerationResponse:
+    audio: DataSource
+    provider: dict[str, Any] | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class AudioFormat:
+    encoding: Literal["pcm16", "opus", "mp3", "aac"]
+    sample_rate: int
+    channels: int = 1
+
+
+@dataclass(slots=True, frozen=True)
+class LiveConfig:
+    model: str
+    system: str | tuple[Part, ...] | None = None
+    tools: tuple[Tool, ...] = ()
+    voice: str | None = None
+    input_format: AudioFormat | None = None
+    output_format: AudioFormat | None = None
+    provider: dict[str, Any] | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class LiveClientEvent:
+    type: Literal["audio", "video", "text", "tool_result", "interrupt", "end_audio"]
+    data: str | None = None
+    text: str | None = None
+    id: str | None = None
+    content: tuple[Part, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class LiveServerEvent:
+    type: Literal["audio", "text", "tool_call", "interrupted", "turn_end", "error"]
+    data: str | None = None
+    text: str | None = None
+    id: str | None = None
+    name: str | None = None
+    input: dict[str, Any] | None = None
+    usage: Usage | None = None
+    error: dict[str, str] | None = None

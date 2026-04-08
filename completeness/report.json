@@ -1,0 +1,168 @@
+{
+  "summary": {
+    "required_total": 15,
+    "required_passed": 14,
+    "required_failed": 0,
+    "required_skipped": 1,
+    "score": 1.0
+  },
+  "providers": {
+    "openai": {
+      "pass": 4,
+      "fail": 0,
+      "skip": 0
+    },
+    "anthropic": {
+      "pass": 4,
+      "fail": 0,
+      "skip": 0
+    },
+    "gemini": {
+      "pass": 4,
+      "fail": 0,
+      "skip": 0
+    },
+    "shared": {
+      "pass": 2,
+      "fail": 0,
+      "skip": 1
+    }
+  },
+  "tests": [
+    {
+      "id": "openai.complete.fixture",
+      "provider": "openai",
+      "probe": "fixture_complete",
+      "required": true,
+      "mode": "fixture",
+      "status": "pass",
+      "details": "normalized response parsed"
+    },
+    {
+      "id": "anthropic.complete.fixture",
+      "provider": "anthropic",
+      "probe": "fixture_complete",
+      "required": true,
+      "mode": "fixture",
+      "status": "pass",
+      "details": "normalized response parsed"
+    },
+    {
+      "id": "gemini.complete.fixture",
+      "provider": "gemini",
+      "probe": "fixture_complete",
+      "required": true,
+      "mode": "fixture",
+      "status": "pass",
+      "details": "normalized response parsed"
+    },
+    {
+      "id": "openai.stream.fixture",
+      "provider": "openai",
+      "probe": "fixture_stream",
+      "required": true,
+      "mode": "fixture",
+      "status": "pass",
+      "details": "events=start,delta,end"
+    },
+    {
+      "id": "anthropic.stream.fixture",
+      "provider": "anthropic",
+      "probe": "fixture_stream",
+      "required": true,
+      "mode": "fixture",
+      "status": "pass",
+      "details": "events=start,delta,end"
+    },
+    {
+      "id": "gemini.stream.fixture",
+      "provider": "gemini",
+      "probe": "fixture_stream",
+      "required": true,
+      "mode": "fixture",
+      "status": "pass",
+      "details": "events=delta"
+    },
+    {
+      "id": "openai.tool.fixture",
+      "provider": "openai",
+      "probe": "fixture_tool_call",
+      "required": true,
+      "mode": "fixture",
+      "status": "pass",
+      "details": "tool call normalized"
+    },
+    {
+      "id": "openai.extended.fixture",
+      "provider": "openai",
+      "probe": "openai_extended",
+      "required": true,
+      "mode": "fixture",
+      "status": "pass",
+      "details": "openai extended endpoints normalized"
+    },
+    {
+      "id": "anthropic.tool.fixture",
+      "provider": "anthropic",
+      "probe": "fixture_tool_call",
+      "required": true,
+      "mode": "fixture",
+      "status": "pass",
+      "details": "tool call normalized"
+    },
+    {
+      "id": "anthropic.extended.fixture",
+      "provider": "anthropic",
+      "probe": "anthropic_extended",
+      "required": true,
+      "mode": "fixture",
+      "status": "pass",
+      "details": "anthropic files+batches normalized"
+    },
+    {
+      "id": "gemini.tool.fixture",
+      "provider": "gemini",
+      "probe": "fixture_tool_call",
+      "required": true,
+      "mode": "fixture",
+      "status": "pass",
+      "details": "tool call normalized"
+    },
+    {
+      "id": "gemini.extended.fixture",
+      "provider": "gemini",
+      "probe": "gemini_extended",
+      "required": true,
+      "mode": "fixture",
+      "status": "pass",
+      "details": "gemini extended endpoints normalized"
+    },
+    {
+      "id": "errors.mapping.fixture",
+      "provider": "shared",
+      "probe": "error_mapping",
+      "required": true,
+      "mode": "fixture",
+      "status": "pass",
+      "details": "http error mapping matches taxonomy"
+    },
+    {
+      "id": "adapter.contract.fixture",
+      "provider": "shared",
+      "probe": "adapter_contract",
+      "required": true,
+      "mode": "fixture",
+      "status": "pass",
+      "details": "all adapters expose full plugin contract"
+    },
+    {
+      "id": "transport.pycurl_stream.fixture",
+      "provider": "shared",
+      "probe": "transport_streaming",
+      "required": true,
+      "mode": "fixture",
+      "status": "skip",
+      "details": "pycurl not installed"
+    }
+  ]
+}

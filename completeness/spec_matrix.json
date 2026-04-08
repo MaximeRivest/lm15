@@ -1,0 +1,22 @@
+{
+  "tests": [
+    {"id": "openai.complete.fixture", "provider": "openai", "probe": "fixture_complete", "required": true, "mode": "fixture"},
+    {"id": "anthropic.complete.fixture", "provider": "anthropic", "probe": "fixture_complete", "required": true, "mode": "fixture"},
+    {"id": "gemini.complete.fixture", "provider": "gemini", "probe": "fixture_complete", "required": true, "mode": "fixture"},
+
+    {"id": "openai.stream.fixture", "provider": "openai", "probe": "fixture_stream", "required": true, "mode": "fixture"},
+    {"id": "anthropic.stream.fixture", "provider": "anthropic", "probe": "fixture_stream", "required": true, "mode": "fixture"},
+    {"id": "gemini.stream.fixture", "provider": "gemini", "probe": "fixture_stream", "required": true, "mode": "fixture"},
+
+    {"id": "openai.tool.fixture", "provider": "openai", "probe": "fixture_tool_call", "required": true, "mode": "fixture"},
+    {"id": "openai.extended.fixture", "provider": "openai", "probe": "openai_extended", "required": true, "mode": "fixture"},
+    {"id": "anthropic.tool.fixture", "provider": "anthropic", "probe": "fixture_tool_call", "required": true, "mode": "fixture"},
+    {"id": "anthropic.extended.fixture", "provider": "anthropic", "probe": "anthropic_extended", "required": true, "mode": "fixture"},
+    {"id": "gemini.tool.fixture", "provider": "gemini", "probe": "fixture_tool_call", "required": true, "mode": "fixture"},
+    {"id": "gemini.extended.fixture", "provider": "gemini", "probe": "gemini_extended", "required": true, "mode": "fixture"},
+
+    {"id": "errors.mapping.fixture", "provider": "shared", "probe": "error_mapping", "required": true, "mode": "fixture"},
+    {"id": "adapter.contract.fixture", "provider": "shared", "probe": "adapter_contract", "required": true, "mode": "fixture"},
+    {"id": "transport.pycurl_stream.fixture", "provider": "shared", "probe": "transport_streaming", "required": true, "mode": "fixture"}
+  ]
+}

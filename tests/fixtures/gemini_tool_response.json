@@ -1,0 +1,17 @@
+{
+  "responseId": "gr_tool_1",
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {"functionCall": {"id": "fc_1", "name": "search", "args": {"q": "hi"}}}
+        ]
+      }
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 2,
+    "candidatesTokenCount": 2,
+    "totalTokenCount": 4
+  }
+}

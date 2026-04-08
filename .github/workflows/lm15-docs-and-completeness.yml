@@ -1,0 +1,44 @@
+name: LM15 Docs and Completeness
+
+on:
+  push:
+    paths:
+      - 'lm15/**'
+      - 'tests/**'
+      - 'docs/**'
+      - 'examples/**'
+      - 'completeness/**'
+      - 'pyproject.toml'
+      - 'README.md'
+      - '.github/workflows/lm15-docs-and-completeness.yml'
+  pull_request:
+    paths:
+      - 'lm15/**'
+      - 'tests/**'
+      - 'docs/**'
+      - 'examples/**'
+      - 'completeness/**'
+      - 'pyproject.toml'
+      - 'README.md'
+      - '.github/workflows/lm15-docs-and-completeness.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Validate docs/examples
+        run: python examples/validate_examples.py
+
+      - name: Completeness fixture gate
+        run: python completeness/runner.py --mode fixture --fail-under 1.0

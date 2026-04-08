@@ -1,0 +1,15 @@
+{
+  "responseId": "gr_1",
+  "candidates": [
+    {
+      "content": {
+        "parts": [{"text": "ok"}]
+      }
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 2,
+    "candidatesTokenCount": 1,
+    "totalTokenCount": 3
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "resp_tool_1",
+  "model": "gpt-4.1-mini",
+  "output": [
+    {
+      "type": "function_call",
+      "call_id": "call_1",
+      "name": "search",
+      "arguments": "{\"q\":\"hi\"}"
+    }
+  ],
+  "usage": {"input_tokens": 3, "output_tokens": 4, "total_tokens": 7}
+}
