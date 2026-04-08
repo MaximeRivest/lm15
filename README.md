@@ -1,5 +1,9 @@
 # lm15 (Universal LM) — thin core, full plugin contract
 
+[![PyPI version](https://img.shields.io/pypi/v/lm15.svg)](https://pypi.org/project/lm15/)
+[![Python versions](https://img.shields.io/pypi/pyversions/lm15.svg)](https://pypi.org/project/lm15/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A universal LM core optimized for low import/runtime overhead with provider plugins.
 
 ## Core architecture
@@ -30,7 +34,7 @@ LM15 auto-discovers installed entry-points in group `lm15.providers`.
 ```toml
 # in external package pyproject.toml
 [project.entry-points."lm15.providers"]
-myprovider = "ulm_x_myprovider:build_adapter"
+myprovider = "lm15_x_myprovider:build_adapter"
 ```
 
 ```python
@@ -68,6 +72,12 @@ uv run python -m build
 # upload to PyPI
 # twine upload dist/*
 ```
+
+## Known limitations
+
+- Realtime/live protocol parity is not fully implemented across all providers.
+- Completeness score is tied to the current fixture matrix; it is not a guarantee of full vendor API parity.
+- Provider-specific advanced options are partially passthrough (`config.provider`) and not all are normalized.
 
 ## Environment variables
 

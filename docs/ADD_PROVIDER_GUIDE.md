@@ -252,7 +252,7 @@ You can ship a provider as a standalone package `lm15-x-<provider>`.
 
 ```toml
 [project.entry-points."lm15.providers"]
-newprovider = "ulm_x_newprovider:build_adapter"
+newprovider = "lm15_x_newprovider:build_adapter"
 ```
 
 Entry-point target can be:

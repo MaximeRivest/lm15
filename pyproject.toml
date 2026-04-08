@@ -15,6 +15,10 @@ keywords = ["llm", "ai", "openai", "anthropic", "gemini", "adapters", "streaming
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent"
 ]
@@ -44,6 +48,12 @@ packages = ["lm15"]
 [tool.hatch.build.targets.sdist]
 include = [
   "lm15",
+  "tests",
+  "docs",
+  "examples",
+  "completeness",
   "README.md",
+  "CHANGELOG.md",
+  "LICENSE",
   "pyproject.toml"
 ]

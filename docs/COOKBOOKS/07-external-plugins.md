@@ -13,13 +13,13 @@ version = "0.1.0"
 dependencies = ["lm15"]
 
 [project.entry-points."lm15.providers"]
-myprovider = "ulm_x_myprovider:build_adapter"
+myprovider = "lm15_x_myprovider:build_adapter"
 ```
 
 ## External package module
 
 ```python
-# ulm_x_myprovider.py
+# lm15_x_myprovider.py
 from lm15.features import EndpointSupport, ProviderManifest
 
 class MyAdapter:

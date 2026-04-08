@@ -1,3 +1,5 @@
+__version__ = "0.1.0"
+
 from .capabilities import hydrate_with_specs
 from .client import UniversalLM
 from .middleware import with_cache, with_history, with_retries
@@ -49,6 +51,7 @@ def build_default(
 
 
 __all__ = [
+    "__version__",
     "UniversalLM",
     "build_default",
     "TransportPolicy",
