@@ -31,6 +31,18 @@ from ..types import (
     StreamEvent,
     Usage,
 )
+from ..errors import (
+    AuthError,
+    BillingError,
+    ContextLengthError,
+    InvalidRequestError,
+    ProviderError,
+    RateLimitError,
+    ServerError,
+    TimeoutError,
+    canonical_error_code,
+    map_http_error,
+)
 from .base import BaseProviderAdapter
 
 
@@ -58,6 +70,102 @@ class GeminiAdapter(BaseProviderAdapter):
         audio=True,
     )
     manifest: ClassVar[ProviderManifest] = ProviderManifest(provider="gemini", supports=supports, auth_modes=("query-api-key", "bearer"), env_keys=("GEMINI_API_KEY", "GOOGLE_API_KEY"))
+
+    _error_status_map: ClassVar[dict[str, type[ProviderError]]] = {
+        "INVALID_ARGUMENT": InvalidRequestError,
+        "FAILED_PRECONDITION": BillingError,
+        "PERMISSION_DENIED": AuthError,
+        "NOT_FOUND": InvalidRequestError,
+        "RESOURCE_EXHAUSTED": RateLimitError,
+        "INTERNAL": ServerError,
+        "UNAVAILABLE": ServerError,
+        "DEADLINE_EXCEEDED": TimeoutError,
+    }
+
+    @staticmethod
+    def _is_context_length_message(msg: str) -> bool:
+        msg_lower = msg.lower()
+        return (
+            ("token" in msg_lower and ("limit" in msg_lower or "exceed" in msg_lower))
+            or "too long" in msg_lower
+            or "context is too long" in msg_lower
+            or "context length" in msg_lower
+        )
+
+    def _stream_error(self, provider_code: str, message: str) -> dict[str, str]:
+        cls = self._error_status_map.get(provider_code, ProviderError)
+        if self._is_context_length_message(message):
+            cls = ContextLengthError
+        return {
+            "code": canonical_error_code(cls),
+            "message": message,
+            "provider_code": provider_code or "provider",
+        }
+
+    @staticmethod
+    def _is_candidate_finish_error(finish_reason: str) -> bool:
+        return finish_reason in {
+            "SAFETY",
+            "RECITATION",
+            "LANGUAGE",
+            "BLOCKLIST",
+            "PROHIBITED_CONTENT",
+            "SPII",
+            "MALFORMED_FUNCTION_CALL",
+            "IMAGE_SAFETY",
+            "IMAGE_PROHIBITED_CONTENT",
+            "IMAGE_OTHER",
+            "NO_IMAGE",
+            "IMAGE_RECITATION",
+            "UNEXPECTED_TOOL_CALL",
+            "TOO_MANY_TOOL_CALLS",
+            "MISSING_THOUGHT_SIGNATURE",
+            "MALFORMED_RESPONSE",
+        }
+
+    def _inband_error(self, data: dict[str, Any]) -> ProviderError | None:
+        prompt_feedback = data.get("promptFeedback")
+        if isinstance(prompt_feedback, dict):
+            block_reason = str(prompt_feedback.get("blockReason") or "")
+            if block_reason and block_reason != "BLOCK_REASON_UNSPECIFIED":
+                return InvalidRequestError(f"Prompt blocked: {block_reason}")
+
+        candidate = (data.get("candidates") or [{}])[0]
+        finish_reason = str(candidate.get("finishReason") or "")
+        if self._is_candidate_finish_error(finish_reason):
+            finish_message = str(candidate.get("finishMessage") or "")
+            msg = finish_message or f"Candidate blocked: {finish_reason}"
+            return InvalidRequestError(msg)
+
+        return None
+
+    def normalize_error(self, status: int, body: str) -> ProviderError:
+        """Extract message from Gemini error shape: ``{"error": {"message": "...", "status": "...", "code": ...}}``.
+
+        Source: https://ai.google.dev/gemini-api/docs/troubleshooting
+        """
+        try:
+            data = json.loads(body)
+            err = data.get("error", {})
+            msg = err.get("message", "") if isinstance(err, dict) else str(err)
+            err_status = err.get("status", "") if isinstance(err, dict) else ""
+            # Context overflow: Gemini conflates this with RESOURCE_EXHAUSTED
+            # (429) and INTERNAL (500). No structured code exists — message
+            # matching is the only option.
+            if self._is_context_length_message(msg):
+                return ContextLengthError(msg)
+
+            # Structured error.status → typed error class.
+            # Exhaustive per Gemini docs as of 2025-06.
+            cls = self._error_status_map.get(err_status)
+            if cls:
+                return cls(msg)
+
+            if err_status and err_status not in msg:
+                msg = f"{msg} ({err_status})"
+        except Exception:
+            msg = body.strip()[:200] or f"HTTP {status}"
+        return map_http_error(status, msg)
 
     def _model_path(self, model: str) -> str:
         return model if model.startswith("models/") else f"models/{model}"
@@ -222,6 +330,11 @@ class GeminiAdapter(BaseProviderAdapter):
 
     def parse_response(self, request: LMRequest, response: HttpResponse) -> LMResponse:
         data = response.json()
+
+        inband_err = self._inband_error(data)
+        if inband_err is not None:
+            raise inband_err
+
         candidate = (data.get("candidates") or [{}])[0]
         content = candidate.get("content", {})
         parts = self._parse_candidate_parts(content.get("parts", []))
@@ -248,7 +361,20 @@ class GeminiAdapter(BaseProviderAdapter):
         payload = json.loads(raw_event.data)
         if "error" in payload:
             e = payload["error"]
-            return StreamEvent(type="error", error={"code": str(e.get("code", "provider")), "message": e.get("message", "")})
+            provider_code = str(e.get("status") or e.get("code") or "provider") if isinstance(e, dict) else "provider"
+            message = str(e.get("message", "")) if isinstance(e, dict) else ""
+            return StreamEvent(type="error", error=self._stream_error(provider_code, message))
+
+        inband_err = self._inband_error(payload)
+        if inband_err is not None:
+            return StreamEvent(
+                type="error",
+                error={
+                    "code": canonical_error_code(inband_err),
+                    "provider_code": "inband_finish_reason",
+                    "message": str(inband_err),
+                },
+            )
 
         cands = payload.get("candidates") or []
         if not cands:

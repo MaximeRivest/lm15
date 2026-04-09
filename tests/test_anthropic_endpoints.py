@@ -7,7 +7,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from lm15.errors import ContextLengthError, RateLimitError
 from lm15.providers.anthropic import AnthropicAdapter
+from lm15.sse import SSEEvent
 from lm15.transports.base import HttpRequest, HttpResponse
 from lm15.types import BatchRequest, Config, FileUploadRequest, LMRequest, Message
 
@@ -55,6 +57,43 @@ class AnthropicEndpointsTests(unittest.TestCase):
         out = self.adapter.batch_submit(BatchRequest(model="claude-sonnet-4-5", requests=(req, req)))
         self.assertEqual(out.id, "batch_abc")
         self.assertEqual(out.status, "in_progress")
+
+    def test_normalize_error_context_length_detection(self):
+        body = json.dumps(
+            {
+                "type": "error",
+                "error": {"type": "invalid_request_error", "message": "Input context length exceeded token limit."},
+                "request_id": "req_123",
+            }
+        )
+        err = self.adapter.normalize_error(400, body)
+        self.assertIsInstance(err, ContextLengthError)
+        self.assertIn("req_123", str(err))
+
+    def test_normalize_error_rate_limit_mapping(self):
+        body = json.dumps({"type": "error", "error": {"type": "rate_limit_error", "message": "Too many requests"}})
+        err = self.adapter.normalize_error(429, body)
+        self.assertIsInstance(err, RateLimitError)
+
+    def test_parse_stream_event_error_nested_payload(self):
+        req = LMRequest(model="claude-sonnet-4-5", messages=(Message.user("hi"),), config=Config())
+        ev = self.adapter.parse_stream_event(req, SSEEvent(event=None, data='{"type":"error","error":{"type":"overloaded_error","message":"busy"}}'))
+        self.assertIsNotNone(ev)
+        self.assertEqual(ev.type, "error")
+        assert ev.error is not None
+        self.assertEqual(ev.error["code"], "server")
+        self.assertEqual(ev.error["provider_code"], "overloaded_error")
+        self.assertEqual(ev.error["message"], "busy")
+
+    def test_parse_stream_event_error_top_level_payload(self):
+        req = LMRequest(model="claude-sonnet-4-5", messages=(Message.user("hi"),), config=Config())
+        ev = self.adapter.parse_stream_event(req, SSEEvent(event=None, data='{"type":"error","code":"api_error","message":"boom"}'))
+        self.assertIsNotNone(ev)
+        self.assertEqual(ev.type, "error")
+        assert ev.error is not None
+        self.assertEqual(ev.error["code"], "server")
+        self.assertEqual(ev.error["provider_code"], "api_error")
+        self.assertEqual(ev.error["message"], "boom")
 
 
 if __name__ == "__main__":

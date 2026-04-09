@@ -21,3 +21,11 @@ LM15 normalizes SSE into `StreamEvent`.
 - Convert provider-specific stream payloads into normalized deltas.
 - Emit `error` on provider stream error events.
 - Emit `end` on completion markers.
+
+## Stream Error Shape
+
+`StreamEvent(type="error")` uses normalized error metadata:
+
+- `error.code`: canonical lm15 code (`auth`, `billing`, `rate_limit`, `invalid_request`, `context_length`, `timeout`, `server`, `provider`)
+- `error.provider_code`: provider-native code/status/type
+- `error.message`: provider message

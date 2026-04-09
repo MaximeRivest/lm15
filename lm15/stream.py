@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Callable, Iterator
 
+from .errors import error_class_for_canonical_code
 from .types import LMRequest, LMResponse, Message, Part, PartDelta, StreamEvent, Usage
 
 
@@ -95,7 +96,14 @@ class Stream:
 
             if event.type == "error":
                 self._done = True
-                raise RuntimeError((event.error or {}).get("message", "stream error"))
+                err = event.error or {}
+                code = str(err.get("code") or "provider")
+                message = str(err.get("message") or "stream error")
+                provider_code = str(err.get("provider_code") or "")
+                if provider_code and provider_code not in message:
+                    message = f"{message} (provider_code={provider_code})"
+                exc_cls = error_class_for_canonical_code(code)
+                raise exc_cls(message)
 
             if event.type == "end":
                 self._done = True

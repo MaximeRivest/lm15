@@ -29,6 +29,18 @@ from ..types import (
     StreamEvent,
     Usage,
 )
+from ..errors import (
+    AuthError,
+    BillingError,
+    ContextLengthError,
+    InvalidRequestError,
+    ProviderError,
+    RateLimitError,
+    ServerError,
+    TimeoutError,
+    canonical_error_code,
+    map_http_error,
+)
 from .base import BaseProviderAdapter
 from .common import message_to_openai_input
 
@@ -62,6 +74,83 @@ class OpenAIAdapter(BaseProviderAdapter):
         enterprise_variants=("azure-openai",),
         env_keys=("OPENAI_API_KEY",),
     )
+
+    # Responses API Response.error codes:
+    # https://developers.openai.com/api/reference/responses/create
+    _response_error_code_map: ClassVar[dict[str, type[ProviderError]]] = {
+        "server_error": ServerError,
+        "rate_limit_exceeded": RateLimitError,
+        "invalid_prompt": InvalidRequestError,
+        "vector_store_timeout": TimeoutError,
+        "invalid_image": InvalidRequestError,
+        "invalid_image_format": InvalidRequestError,
+        "invalid_base64_image": InvalidRequestError,
+        "invalid_image_url": InvalidRequestError,
+        "image_too_large": InvalidRequestError,
+        "image_too_small": InvalidRequestError,
+        "image_parse_error": InvalidRequestError,
+        "image_content_policy_violation": InvalidRequestError,
+        "invalid_image_mode": InvalidRequestError,
+        "image_file_too_large": InvalidRequestError,
+        "unsupported_image_media_type": InvalidRequestError,
+        "empty_image_file": InvalidRequestError,
+        "failed_to_download_image": InvalidRequestError,
+        "image_file_not_found": InvalidRequestError,
+    }
+
+    _stream_error_code_map: ClassVar[dict[str, type[ProviderError]]] = {
+        **_response_error_code_map,
+        "context_length_exceeded": ContextLengthError,
+        "invalid_api_key": AuthError,
+        "insufficient_quota": BillingError,
+        "authentication_error": AuthError,
+        "rate_limit_error": RateLimitError,
+    }
+
+    def _response_error(self, code: str, message: str) -> ProviderError:
+        cls = self._response_error_code_map.get(code, ServerError)
+        msg = message
+        if code and code not in msg:
+            msg = f"{msg} ({code})"
+        return cls(msg)
+
+    def _stream_error(self, provider_code: str, message: str) -> dict[str, str]:
+        cls = self._stream_error_code_map.get(provider_code, ProviderError)
+        return {
+            "code": canonical_error_code(cls),
+            "message": message,
+            "provider_code": provider_code or "provider",
+        }
+
+    def normalize_error(self, status: int, body: str) -> ProviderError:
+        """Extract message from OpenAI error shape.
+
+        Shape: ``{"error": {"message": "...", "type": "...", "code": "..."}}``
+        Source: https://developers.openai.com/docs/guides/error-codes
+        """
+        try:
+            data = json.loads(body)
+            err = data.get("error", {})
+            msg = err.get("message", "") if isinstance(err, dict) else str(err)
+            code = err.get("code", "") if isinstance(err, dict) else ""
+            err_type = err.get("type", "") if isinstance(err, dict) else ""
+
+            # Structured code/type detection
+            if code == "context_length_exceeded":
+                return ContextLengthError(msg)
+            # insufficient_quota is a billing issue, not a rate limit
+            if code == "insufficient_quota" or err_type == "insufficient_quota":
+                return BillingError(msg)
+            if code == "invalid_api_key" or err_type == "authentication_error":
+                return AuthError(msg)
+            if code == "rate_limit_exceeded" or err_type == "rate_limit_error":
+                return RateLimitError(msg)
+
+            if code and code not in msg:
+                msg = f"{msg} ({code})"
+        except Exception:
+            msg = body.strip()[:200] or f"HTTP {status}"
+        return map_http_error(status, msg)
 
     def _headers(self, content_type: str = "application/json") -> dict[str, str]:
         return {
@@ -110,6 +199,15 @@ class OpenAIAdapter(BaseProviderAdapter):
 
     def parse_response(self, request: LMRequest, response: HttpResponse) -> LMResponse:
         data = response.json()
+
+        # The Responses API can return in-band errors on 200 responses
+        # (e.g. background/async failures). Check Response.error field.
+        resp_error = data.get("error")
+        if resp_error and isinstance(resp_error, dict):
+            code = str(resp_error.get("code", ""))
+            msg = str(resp_error.get("message", str(resp_error)))
+            raise self._response_error(code, msg)
+
         parts: list[Part] = []
         for item in data.get("output", []):
             if item.get("type") == "message":
@@ -173,8 +271,15 @@ class OpenAIAdapter(BaseProviderAdapter):
             u = payload.get("response", {}).get("usage", {})
             usage = Usage(input_tokens=u.get("input_tokens", 0), output_tokens=u.get("output_tokens", 0), total_tokens=u.get("total_tokens", 0))
             return StreamEvent(type="end", finish_reason="stop", usage=usage)
-        if et == "response.error":
-            return StreamEvent(type="error", error={"code": "provider", "message": payload.get("message", "")})
+        if et in {"response.error", "error"}:
+            err = payload.get("error")
+            if isinstance(err, dict):
+                provider_code = str(err.get("code") or err.get("type") or payload.get("code") or "provider")
+                message = str(err.get("message") or payload.get("message") or "")
+            else:
+                provider_code = str(payload.get("code") or payload.get("error_type") or "provider")
+                message = str(payload.get("message") or "")
+            return StreamEvent(type="error", error=self._stream_error(provider_code, message))
         return None
 
     def embeddings(self, request: EmbeddingRequest) -> EmbeddingResponse:

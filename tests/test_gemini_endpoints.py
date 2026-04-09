@@ -7,7 +7,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from lm15.errors import InvalidRequestError
 from lm15.providers.gemini import GeminiAdapter
+from lm15.sse import SSEEvent
 from lm15.transports.base import HttpRequest, HttpResponse
 from lm15.types import AudioGenerationRequest, BatchRequest, Config, EmbeddingRequest, FileUploadRequest, ImageGenerationRequest, LMRequest, Message
 
@@ -83,6 +85,44 @@ class GeminiEndpointsTests(unittest.TestCase):
     def test_audio_generate(self):
         out = self.adapter.audio_generate(AudioGenerationRequest(model="gemini-2.0-flash-lite", prompt="say hi"))
         self.assertEqual(out.audio.media_type, "audio/wav")
+
+    def test_parse_stream_event_error_maps_to_canonical(self):
+        req = LMRequest(model="gemini-2.0-flash-lite", messages=(Message.user("hi"),), config=Config())
+        ev = self.adapter.parse_stream_event(
+            req,
+            SSEEvent(event=None, data='{"error":{"status":"RESOURCE_EXHAUSTED","message":"quota hit"}}'),
+        )
+        self.assertIsNotNone(ev)
+        self.assertEqual(ev.type, "error")
+        assert ev.error is not None
+        self.assertEqual(ev.error["code"], "rate_limit")
+        self.assertEqual(ev.error["provider_code"], "RESOURCE_EXHAUSTED")
+        self.assertEqual(ev.error["message"], "quota hit")
+
+    def test_parse_response_prompt_feedback_blocked_raises(self):
+        req = LMRequest(model="gemini-2.0-flash-lite", messages=(Message.user("hi"),), config=Config())
+        resp = HttpResponse(200, {}, json.dumps({"promptFeedback": {"blockReason": "SAFETY"}}).encode())
+        with self.assertRaises(InvalidRequestError):
+            self.adapter.parse_response(req, resp)
+
+    def test_parse_response_finish_reason_blocked_raises(self):
+        req = LMRequest(model="gemini-2.0-flash-lite", messages=(Message.user("hi"),), config=Config())
+        resp = HttpResponse(
+            200,
+            {},
+            json.dumps({"candidates": [{"finishReason": "RECITATION", "finishMessage": "recitation detected"}]}).encode(),
+        )
+        with self.assertRaises(InvalidRequestError):
+            self.adapter.parse_response(req, resp)
+
+    def test_parse_stream_event_prompt_feedback_blocked_maps_error(self):
+        req = LMRequest(model="gemini-2.0-flash-lite", messages=(Message.user("hi"),), config=Config())
+        ev = self.adapter.parse_stream_event(req, SSEEvent(event=None, data='{"promptFeedback":{"blockReason":"BLOCKLIST"}}'))
+        self.assertIsNotNone(ev)
+        self.assertEqual(ev.type, "error")
+        assert ev.error is not None
+        self.assertEqual(ev.error["code"], "invalid_request")
+        self.assertEqual(ev.error["provider_code"], "inband_finish_reason")
 
 
 if __name__ == "__main__":

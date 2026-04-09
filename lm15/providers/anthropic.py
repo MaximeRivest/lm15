@@ -22,6 +22,18 @@ from ..types import (
     StreamEvent,
     Usage,
 )
+from ..errors import (
+    AuthError,
+    BillingError,
+    ContextLengthError,
+    InvalidRequestError,
+    ProviderError,
+    RateLimitError,
+    ServerError,
+    TimeoutError,
+    canonical_error_code,
+    map_http_error,
+)
 from .base import BaseProviderAdapter
 from .common import ds_to_anthropic_source, parts_to_text
 
@@ -41,6 +53,80 @@ class AnthropicAdapter(BaseProviderAdapter):
     )
     supports: ClassVar[EndpointSupport] = EndpointSupport(complete=True, stream=True, files=True, batches=True)
     manifest: ClassVar[ProviderManifest] = ProviderManifest(provider="anthropic", supports=supports, auth_modes=("x-api-key",), env_keys=("ANTHROPIC_API_KEY",))
+
+    # https://platform.claude.com/docs/en/api/errors
+    _error_type_map: ClassVar[dict[str, type[ProviderError]]] = {
+        "authentication_error": AuthError,
+        "permission_error": AuthError,
+        "billing_error": BillingError,
+        "rate_limit_error": RateLimitError,
+        "request_too_large": InvalidRequestError,
+        "not_found_error": InvalidRequestError,
+        "invalid_request_error": InvalidRequestError,
+        "api_error": ServerError,
+        "overloaded_error": ServerError,
+        "timeout_error": TimeoutError,
+    }
+
+    @staticmethod
+    def _is_context_length_message(msg: str) -> bool:
+        m = msg.lower()
+        return (
+            "prompt is too long" in m
+            or "too many tokens" in m
+            or "context window" in m
+            or "context length" in m
+            or ("token" in m and ("limit" in m or "exceed" in m))
+        )
+
+    def _stream_error(self, provider_code: str, message: str) -> dict[str, str]:
+        cls = self._error_type_map.get(provider_code, ProviderError)
+        if provider_code == "invalid_request_error" and self._is_context_length_message(message):
+            cls = ContextLengthError
+        return {
+            "code": canonical_error_code(cls),
+            "message": message,
+            "provider_code": provider_code or "provider",
+        }
+
+    def normalize_error(self, status: int, body: str) -> ProviderError:
+        """Extract message from Anthropic error shape.
+
+        Shape: ``{"type": "error", "error": {"type": "...", "message": "..."}}``
+        Source: https://docs.anthropic.com/en/api/errors
+
+        ``error.type`` is the structured signal for most errors. The one
+        exception is context overflow, which shares the generic
+        ``invalid_request_error`` type with all other 400s — message
+        matching is the only option there.
+        """
+        try:
+            data = json.loads(body)
+            err = data.get("error", {})
+            msg = err.get("message", "") if isinstance(err, dict) else str(err)
+            err_type = err.get("type", "") if isinstance(err, dict) else ""
+            request_id = data.get("request_id", "") if isinstance(data, dict) else ""
+
+            # Context overflow: no structured code, only message matching.
+            if err_type == "invalid_request_error" and self._is_context_length_message(msg):
+                if request_id and request_id not in msg:
+                    msg = f"{msg} (request_id={request_id})"
+                return ContextLengthError(msg)
+
+            # Structured error.type → typed error class.
+            cls = self._error_type_map.get(err_type)
+            if cls:
+                if request_id and request_id not in msg:
+                    msg = f"{msg} (request_id={request_id})"
+                return cls(msg)
+
+            if err_type and err_type not in msg:
+                msg = f"{msg} ({err_type})"
+            if request_id and request_id not in msg:
+                msg = f"{msg} (request_id={request_id})"
+        except Exception:
+            msg = body.strip()[:200] or f"HTTP {status}"
+        return map_http_error(status, msg)
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -177,8 +263,14 @@ class AnthropicAdapter(BaseProviderAdapter):
         if et == "message_stop":
             return StreamEvent(type="end", finish_reason="stop")
         if et == "error":
-            e = payload.get("error", {})
-            return StreamEvent(type="error", error={"code": e.get("type", "provider"), "message": e.get("message", "")})
+            e = payload.get("error")
+            if isinstance(e, dict):
+                provider_code = str(e.get("type") or e.get("code") or payload.get("code") or "provider")
+                message = str(e.get("message") or payload.get("message") or "")
+            else:
+                provider_code = str(payload.get("code") or payload.get("error_type") or "provider")
+                message = str(payload.get("message") or "")
+            return StreamEvent(type="error", error=self._stream_error(provider_code, message))
         return None
 
     def file_upload(self, request: FileUploadRequest) -> FileUploadResponse:

@@ -8,7 +8,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from lm15.api import complete, model, upload
 from lm15.client import UniversalLM
+from lm15.errors import RateLimitError
 from lm15.features import EndpointSupport, ProviderManifest
+from lm15.model import Model
 from lm15.protocols import Capabilities
 from lm15.types import FileUploadRequest, FileUploadResponse, LMRequest, LMResponse, Message, Part, StreamEvent, Tool, Usage
 
@@ -47,6 +49,18 @@ class FakeAdapter:
 
     def file_upload(self, request: FileUploadRequest) -> FileUploadResponse:
         return FileUploadResponse(id="file_123")
+
+
+class ErrorStreamAdapter(FakeAdapter):
+    provider = "anthropic"
+    manifest = ProviderManifest(provider="anthropic", supports=FakeAdapter.supports)
+
+    def stream(self, request: LMRequest):
+        yield StreamEvent(type="start", id="s1", model=request.model)
+        yield StreamEvent(
+            type="error",
+            error={"code": "rate_limit", "provider_code": "rate_limit_error", "message": "Too many requests"},
+        )
 
 
 class APIV2Tests(unittest.TestCase):
@@ -102,6 +116,16 @@ class APIV2Tests(unittest.TestCase):
 
         doc = Part.document(data="YmFzZTY0", media_type="application/pdf", cache=True)
         self.assertEqual(doc.metadata, {"cache": True})
+
+    def test_stream_error_raises_typed_provider_error(self):
+        lm = UniversalLM()
+        lm.register(ErrorStreamAdapter())
+        m = Model(lm=lm, model="claude-sonnet-4-5", provider="anthropic")
+
+        stream_obj = m.stream("hi")
+        with self.assertRaises(RateLimitError) as ctx:
+            list(stream_obj.text)
+        self.assertIn("provider_code=rate_limit_error", str(ctx.exception))
 
 
 if __name__ == "__main__":

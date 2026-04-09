@@ -6,6 +6,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Iterator
+from urllib.error import HTTPError
 
 from ..errors import TransportError
 from .base import HttpRequest, HttpResponse, Transport, TransportPolicy
@@ -40,6 +41,18 @@ class UrlLibTransport(Transport):
                 with urllib.request.urlopen(native_req, timeout=timeout) as r:
                     headers = {k.lower(): v for k, v in r.headers.items()}
                     return HttpResponse(status=r.status, headers=headers, body=r.read())
+            except HTTPError as e:
+                if attempt + 1 == attempts:
+                    # Return as HttpResponse so the adapter's normalize_error
+                    # can produce a typed, user-friendly error (AuthError, etc.)
+                    body = b""
+                    try:
+                        body = e.read()
+                    except Exception:
+                        pass
+                    headers = {k.lower(): v for k, v in e.headers.items()} if e.headers else {}
+                    return HttpResponse(status=e.code, headers=headers, body=body)
+                time.sleep((self.policy.backoff_base_ms / 1000.0) * (2**attempt))
             except Exception as e:
                 if attempt + 1 == attempts:
                     raise TransportError(str(e)) from e
@@ -55,5 +68,13 @@ class UrlLibTransport(Transport):
                     if not line:
                         break
                     yield line
+        except HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            msg = f"HTTP {e.code}: {body}" if body else str(e)
+            raise TransportError(msg) from e
         except Exception as e:
             raise TransportError(str(e)) from e

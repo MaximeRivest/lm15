@@ -175,7 +175,7 @@ Map provider stream frames to LM15 `StreamEvent`:
 ### Rules
 
 - Return `None` for ignorable events.
-- Emit `error` with normalized `{code, message}`.
+- Emit `error` with normalized `{code, provider_code, message}`.
 - Never leak provider event shapes directly.
 
 ---

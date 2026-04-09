@@ -7,7 +7,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from lm15.errors import InvalidRequestError, TimeoutError
 from lm15.providers.openai import OpenAIAdapter
+from lm15.sse import SSEEvent
 from lm15.transports.base import HttpRequest, HttpResponse
 from lm15.types import AudioGenerationRequest, BatchRequest, Config, EmbeddingRequest, FileUploadRequest, ImageGenerationRequest, LMRequest, Message
 
@@ -69,6 +71,38 @@ class OpenAIEndpointsTests(unittest.TestCase):
         out = self.adapter.audio_generate(AudioGenerationRequest(model="gpt-4o-mini-tts", prompt="say hi"))
         self.assertEqual(out.audio.media_type, "audio/wav")
         self.assertTrue(out.audio.data)
+
+    def test_parse_response_inband_error_maps_invalid_image(self):
+        req = LMRequest(model="gpt-4.1-mini", messages=(Message.user("hi"),), config=Config())
+        resp = HttpResponse(200, {}, json.dumps({"error": {"code": "invalid_image", "message": "bad image"}}).encode())
+        with self.assertRaises(InvalidRequestError):
+            self.adapter.parse_response(req, resp)
+
+    def test_parse_response_inband_error_maps_vector_store_timeout(self):
+        req = LMRequest(model="gpt-4.1-mini", messages=(Message.user("hi"),), config=Config())
+        resp = HttpResponse(200, {}, json.dumps({"error": {"code": "vector_store_timeout", "message": "timed out"}}).encode())
+        with self.assertRaises(TimeoutError):
+            self.adapter.parse_response(req, resp)
+
+    def test_parse_stream_event_response_error_preserves_code(self):
+        req = LMRequest(model="gpt-4.1-mini", messages=(Message.user("hi"),), config=Config())
+        ev = self.adapter.parse_stream_event(req, SSEEvent(event=None, data='{"type":"response.error","code":"rate_limit_exceeded","message":"slow down"}'))
+        self.assertIsNotNone(ev)
+        self.assertEqual(ev.type, "error")
+        assert ev.error is not None
+        self.assertEqual(ev.error["code"], "rate_limit")
+        self.assertEqual(ev.error["provider_code"], "rate_limit_exceeded")
+        self.assertEqual(ev.error["message"], "slow down")
+
+    def test_parse_stream_event_error_nested_payload(self):
+        req = LMRequest(model="gpt-4.1-mini", messages=(Message.user("hi"),), config=Config())
+        ev = self.adapter.parse_stream_event(req, SSEEvent(event=None, data='{"type":"error","error":{"code":"server_error","message":"boom"}}'))
+        self.assertIsNotNone(ev)
+        self.assertEqual(ev.type, "error")
+        assert ev.error is not None
+        self.assertEqual(ev.error["code"], "server")
+        self.assertEqual(ev.error["provider_code"], "server_error")
+        self.assertEqual(ev.error["message"], "boom")
 
 
 if __name__ == "__main__":
