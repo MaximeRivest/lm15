@@ -30,6 +30,7 @@ def load_plugins(
     group: str = ENTRY_POINT_GROUP,
     continue_on_error: bool = True,
     plugin_kwargs: dict[str, dict[str, Any]] | None = None,
+    allowlist: set[str] | None = None,
 ) -> PluginLoadResult:
     loaded: list[str] = []
     failed: list[str] = []
@@ -37,6 +38,8 @@ def load_plugins(
 
     for ep in discover_provider_entry_points(group=group):
         name = ep.name
+        if allowlist is not None and name not in allowlist:
+            continue
         try:
             obj = ep.load()
             kwargs = plugin_kwargs.get(name, {})

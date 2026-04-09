@@ -5,7 +5,7 @@ try:
 except Exception:
     __version__ = "0.0.0+dev"
 
-from .api import complete, model, providers, stream, upload
+from .api import complete, model, models, providers, providers_info, stream, upload
 from .capabilities import hydrate_with_specs
 from .client import UniversalLM
 from .middleware import with_cache, with_history, with_retries
@@ -13,6 +13,7 @@ from .model import HistoryEntry
 from .stream import Stream, StreamChunk
 from .model_catalog import build_provider_model_index, fetch_models_dev
 from .plugins import discover_provider_entry_points, load_plugins
+from .repl import enable_repl_errors, repl_debug
 from .transports.base import TransportPolicy
 from .types import (
     AudioFormat,
@@ -47,7 +48,7 @@ def build_default(
     use_pycurl: bool = True,
     policy: TransportPolicy | None = None,
     hydrate_models_dev_catalog: bool = False,
-    discover_plugins: bool = True,
+    discover_plugins: bool = False,
     api_key: str | dict[str, str] | None = None,
     provider_hint: str | None = None,
     env: str | None = None,
@@ -65,6 +66,9 @@ def build_default(
     )
 
 
+enable_repl_errors()
+
+
 __all__ = [
     "__version__",
     "UniversalLM",
@@ -74,6 +78,8 @@ __all__ = [
     "model",
     "upload",
     "providers",
+    "providers_info",
+    "models",
     "Stream",
     "StreamChunk",
     "HistoryEntry",
@@ -86,6 +92,8 @@ __all__ = [
     "discover_provider_entry_points",
     "fetch_models_dev",
     "build_provider_model_index",
+    "enable_repl_errors",
+    "repl_debug",
     "Config",
     "DataSource",
     "LMRequest",

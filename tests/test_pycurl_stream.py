@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from lm15.errors import TransportError
 from lm15.transports.base import HttpRequest
 from lm15.transports.pycurl_transport import PyCurlTransport
 
@@ -49,6 +50,24 @@ class PyCurlStreamTests(unittest.TestCase):
             self.assertTrue(any(b"data: a" in x for x in lines))
             self.assertTrue(any(b"data: b" in x for x in lines))
             self.assertTrue(any(b"data: c" in x for x in lines))
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_http_error_raises(self):
+        try:
+            import pycurl  # noqa: F401
+        except Exception:
+            self.skipTest("pycurl not installed")
+
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), _SSEHandler)
+        th = threading.Thread(target=srv.serve_forever, daemon=True)
+        th.start()
+        try:
+            t = PyCurlTransport()
+            req = HttpRequest(method="GET", url=f"http://127.0.0.1:{srv.server_port}/not-found")
+            with self.assertRaises(TransportError):
+                list(t.stream(req))
         finally:
             srv.shutdown()
             srv.server_close()

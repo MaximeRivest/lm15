@@ -242,6 +242,16 @@ class GeminiAdapter(BaseProviderAdapter):
             payload.update(passthrough)
         return payload
 
+    def _auth_headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
+        headers = {"x-goog-api-key": self.api_key}
+        if extra:
+            headers.update(extra)
+        return headers
+
+    @staticmethod
+    def _auth_params(extra: dict[str, str] | None = None) -> dict[str, str]:
+        return dict(extra or {})
+
     def _apply_prompt_cache(self, request: LMRequest, payload: dict[str, Any]) -> None:
         contents = payload.get("contents") or []
         if len(contents) < 2:
@@ -266,8 +276,8 @@ class GeminiAdapter(BaseProviderAdapter):
             req = HttpRequest(
                 method="POST",
                 url=f"{self.base_url}/cachedContents",
-                headers={"Content-Type": "application/json"},
-                params={"key": self.api_key},
+                headers=self._auth_headers({"Content-Type": "application/json"}),
+                params=self._auth_params(),
                 json_body=body,
                 timeout=60.0,
             )
@@ -285,13 +295,11 @@ class GeminiAdapter(BaseProviderAdapter):
 
     def build_request(self, request: LMRequest, stream: bool) -> HttpRequest:
         endpoint = "streamGenerateContent" if stream else "generateContent"
-        params = {"key": self.api_key}
-        if stream:
-            params["alt"] = "sse"
+        params = self._auth_params({"alt": "sse"} if stream else None)
         return HttpRequest(
             method="POST",
             url=f"{self.base_url}/{self._model_path(request.model)}:{endpoint}",
-            headers={"Content-Type": "application/json"},
+            headers=self._auth_headers({"Content-Type": "application/json"}),
             params=params,
             json_body=self._payload(request),
             timeout=120.0 if stream else 60.0,
@@ -403,8 +411,8 @@ class GeminiAdapter(BaseProviderAdapter):
             req = HttpRequest(
                 method="POST",
                 url=f"{self.base_url}/{model_path}:embedContent",
-                headers={"Content-Type": "application/json"},
-                params={"key": self.api_key},
+                headers=self._auth_headers({"Content-Type": "application/json"}),
+                params=self._auth_params(),
                 json_body=payload,
                 timeout=60.0,
             )
@@ -422,8 +430,8 @@ class GeminiAdapter(BaseProviderAdapter):
         req = HttpRequest(
             method="POST",
             url=f"{self.base_url}/{model_path}:batchEmbedContents",
-            headers={"Content-Type": "application/json"},
-            params={"key": self.api_key},
+            headers=self._auth_headers({"Content-Type": "application/json"}),
+            params=self._auth_params(),
             json_body=payload,
             timeout=60.0,
         )
@@ -438,12 +446,14 @@ class GeminiAdapter(BaseProviderAdapter):
         req = HttpRequest(
             method="POST",
             url=f"{self.upload_base_url}/files",
-            headers={
-                "X-Goog-Upload-Protocol": "raw",
-                "X-Goog-Upload-File-Name": request.filename,
-                "Content-Type": request.media_type,
-            },
-            params={"key": self.api_key, **(request.provider or {})},
+            headers=self._auth_headers(
+                {
+                    "X-Goog-Upload-Protocol": "raw",
+                    "X-Goog-Upload-File-Name": request.filename,
+                    "Content-Type": request.media_type,
+                }
+            ),
+            params=self._auth_params(request.provider),
             body=request.bytes_data,
             timeout=120.0,
         )

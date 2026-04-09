@@ -62,6 +62,8 @@ class ProviderConformanceTests(unittest.TestCase):
         self.assertEqual(r.message.parts[0].text, "ok")
         self.assertEqual(r.usage.total_tokens, 3)
         self.assertIn(":generateContent", t.last_request.url)
+        self.assertNotIn("key", t.last_request.params)
+        self.assertEqual(t.last_request.headers.get("x-goog-api-key"), "k")
 
     def test_openai_stream_replay(self):
         lines = [

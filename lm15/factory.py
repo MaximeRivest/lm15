@@ -66,12 +66,13 @@ def _parse_env_file(
     return result
 
 
-def _push_env_file_to_environ(path: str | Path) -> None:
-    """Set all KEY=VALUE pairs from *path* into ``os.environ``.
+def _push_env_file_to_environ(path: str | Path, *, allowed_keys: set[str]) -> None:
+    """Set allowlisted KEY=VALUE pairs from *path* into ``os.environ``.
 
     Only sets variables that are not already present, so explicit
     environment variables still win.  This lets third-party plugins
-    discover keys from the user-specified ``env=`` file.
+    discover provider keys from the user-specified ``env=`` file
+    without importing unrelated environment variables.
     """
     try:
         text = Path(path).expanduser().read_text()
@@ -88,7 +89,7 @@ def _push_env_file_to_environ(path: str | Path) -> None:
         key, _, value = line.partition("=")
         key = key.strip()
         value = value.strip().strip("\"'")
-        if key and value:
+        if key and value and key in allowed_keys:
             os.environ.setdefault(key, value)
 
 
@@ -133,7 +134,7 @@ def build_default(
     use_pycurl: bool = True,
     policy: TransportPolicy | None = None,
     hydrate_models_dev: bool = False,
-    discover_plugins: bool = True,
+    discover_plugins: bool = False,
     api_key: str | dict[str, str] | None = None,
     provider_hint: str | None = None,
     env: str | Path | None = None,
@@ -159,7 +160,7 @@ def build_default(
         # Also set any KEY=VALUE from the file into os.environ so that
         # third-party plugins (which read os.getenv in their own factories)
         # can discover keys from the user-specified file.
-        _push_env_file_to_environ(env)
+        _push_env_file_to_environ(env, allowed_keys=set(env_key_map.keys()))
 
     client = UniversalLM()
 

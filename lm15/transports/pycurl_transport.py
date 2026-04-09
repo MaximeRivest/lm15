@@ -109,6 +109,16 @@ class PyCurlTransport(Transport):
             try:
                 c.setopt(c.WRITEFUNCTION, linebuf.feed)
                 c.perform()
+                status = int(c.getinfo(c.RESPONSE_CODE))
+                if status >= 400:
+                    linebuf.flush()
+                    payload = b""
+                    while not q.empty():
+                        item = q.get_nowait()
+                        if isinstance(item, bytes):
+                            payload += item
+                    message = payload.decode("utf-8", errors="replace") if payload else ""
+                    raise TransportError(f"HTTP {status}: {message}" if message else f"HTTP {status}")
                 linebuf.flush()
                 q.put(None)
             except Exception as e:  # pragma: no cover - transport thread exceptions are surfaced in iterator

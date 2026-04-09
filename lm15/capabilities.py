@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .errors import UnsupportedModelError
 from .model_catalog import ModelSpec
 from .protocols import Capabilities
 
@@ -58,7 +59,7 @@ class CapabilityResolver:
         for item in REGISTRY:
             if lower.startswith(item.pattern):
                 return item.provider
-        return "openai"
+        raise UnsupportedModelError(f"unable to resolve provider for model '{model}'")
 
     def resolve_capabilities(self, model: str) -> Capabilities:
         spec = self._model_index.get(model)
@@ -69,6 +70,9 @@ class CapabilityResolver:
             if lower.startswith(item.pattern):
                 return item.caps
         return REGISTRY[-1].caps
+
+    def known_models(self) -> tuple[str, ...]:
+        return tuple(self._model_index.keys())
 
 
 _DEFAULT_RESOLVER = CapabilityResolver()
@@ -84,3 +88,7 @@ def resolve_provider(model: str) -> str:
 
 def resolve_capabilities(model: str) -> Capabilities:
     return _DEFAULT_RESOLVER.resolve_capabilities(model)
+
+
+def known_models() -> tuple[str, ...]:
+    return _DEFAULT_RESOLVER.known_models()
