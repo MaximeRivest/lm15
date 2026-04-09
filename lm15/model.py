@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import inspect
+import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from .capabilities import resolve_provider
 from .client import UniversalLM
+from .errors import RateLimitError, ServerError, TimeoutError, TransportError
 from .stream import Stream
 from .types import Config, FileUploadRequest, LMRequest, LMResponse, Message, Part, Tool
 
@@ -318,7 +320,26 @@ class Model:
         if not parts:
             raise ValueError("no tool results matched pending calls")
 
-        return self(messages=[Message(role="tool", parts=tuple(parts))], provider=provider)
+        tool_message = Message(role="tool", parts=tuple(parts))
+        follow_messages = tuple(self._conversation) + (tool_message,)
+        request, _, _, _ = self._build_request(
+            prompt=None,
+            messages=list(follow_messages),
+            tools=None,
+            reasoning=None,
+            prefill=None,
+            output=None,
+            prompt_caching=None,
+            temperature=None,
+            max_tokens=None,
+            top_p=None,
+            stop=None,
+        )
+        resp = self._complete_with_cache(request, provider=provider or self.provider)
+        self._pending_tool_calls = resp.tool_calls
+        self.history.append(HistoryEntry(request=request, response=resp))
+        self._conversation = list(request.messages) + [resp.message]
+        return resp
 
     def _build_request(
         self,
@@ -409,14 +430,32 @@ class Model:
         return tuple(out), registry
 
     def _complete_with_cache(self, request: LMRequest, *, provider: str | None) -> LMResponse:
+        cache_key: str | None = None
         if self._local_cache is not None:
-            key = str((provider, request))
-            if key in self._local_cache:
-                return self._local_cache[key]
-            resp = self._lm.complete(request, provider=provider)
-            self._local_cache[key] = resp
-            return resp
-        return self._lm.complete(request, provider=provider)
+            cache_key = str((provider, request))
+            cached = self._local_cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+        attempts = max(int(self.retries), 0) + 1
+        last: Exception | None = None
+        for i in range(attempts):
+            try:
+                resp = self._lm.complete(request, provider=provider)
+                if self._local_cache is not None and cache_key is not None:
+                    self._local_cache[cache_key] = resp
+                return resp
+            except Exception as exc:
+                last = exc
+                if not self._is_retryable_error(exc) or i >= attempts - 1:
+                    raise
+                time.sleep(0.2 * (2**i))
+
+        raise RuntimeError("unreachable") from last
+
+    @staticmethod
+    def _is_retryable_error(exc: Exception) -> bool:
+        return isinstance(exc, (RateLimitError, TimeoutError, ServerError, TransportError))
 
     @staticmethod
     def _invoke_tool(fn: Callable[..., Any], payload: dict[str, Any]) -> Any:

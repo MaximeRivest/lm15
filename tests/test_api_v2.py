@@ -12,7 +12,7 @@ from lm15.errors import RateLimitError
 from lm15.features import EndpointSupport, ProviderManifest
 from lm15.model import Model
 from lm15.protocols import Capabilities
-from lm15.types import FileUploadRequest, FileUploadResponse, LMRequest, LMResponse, Message, Part, StreamEvent, Tool, Usage
+from lm15.types import FileUploadRequest, FileUploadResponse, LMRequest, LMResponse, Message, Part, PartDelta, StreamEvent, Tool, Usage
 
 
 class FakeAdapter:
@@ -126,6 +126,81 @@ class APIV2Tests(unittest.TestCase):
         with self.assertRaises(RateLimitError) as ctx:
             list(stream_obj.text)
         self.assertIn("provider_code=rate_limit_error", str(ctx.exception))
+
+    def test_stream_tool_call_materializes_in_response(self):
+        class ToolStreamAdapter(FakeAdapter):
+            def stream(self, request: LMRequest):
+                yield StreamEvent(type="start", id="s1", model=request.model)
+                yield StreamEvent(type="delta", part_index=0, delta=PartDelta(type="tool_call", input='{"city"'))
+                yield StreamEvent(type="delta", part_index=0, delta=PartDelta(type="tool_call", input=':"Montreal"}'))
+                yield StreamEvent(type="end", finish_reason="tool_call", usage=Usage(total_tokens=4))
+
+        lm = UniversalLM()
+        lm.register(ToolStreamAdapter())
+        m = Model(lm=lm, model="gpt-4.1-mini", provider="openai")
+
+        stream_obj = m.stream("weather")
+        list(stream_obj)
+        resp = stream_obj.response
+        self.assertEqual(resp.finish_reason, "tool_call")
+        self.assertEqual(len(resp.tool_calls), 1)
+        self.assertEqual(resp.tool_calls[0].input, {"city": "Montreal"})
+
+    def test_submit_tools_preserves_conversation_context(self):
+        class StrictToolAdapter:
+            provider = "openai"
+            capabilities = Capabilities()
+            supports = EndpointSupport(complete=True)
+            manifest = ProviderManifest(provider="openai", supports=supports)
+
+            def complete(self, request: LMRequest) -> LMResponse:
+                last = request.messages[-1]
+                if last.role == "user":
+                    return LMResponse(
+                        id="r1",
+                        model=request.model,
+                        message=Message(role="assistant", parts=(Part.tool_call("call_1", "get_weather", {"city": "Montreal"}),)),
+                        finish_reason="tool_call",
+                        usage=Usage(),
+                    )
+                prev = request.messages[-2] if len(request.messages) >= 2 else None
+                has_prev_tool_call = bool(prev and prev.role == "assistant" and any(p.type == "tool_call" for p in prev.parts))
+                text = "ok" if has_prev_tool_call else "missing_prev_tool_call"
+                return LMResponse(id="r2", model=request.model, message=Message.assistant(text), finish_reason="stop", usage=Usage())
+
+        lm = UniversalLM()
+        lm.register(StrictToolAdapter())
+        m = Model(lm=lm, model="gpt-4.1-mini", provider="openai")
+
+        first = m("weather", tools=[Tool(name="get_weather")])
+        self.assertEqual(first.finish_reason, "tool_call")
+        out = m.submit_tools({"call_1": "22C"})
+        self.assertEqual(out.text, "ok")
+
+    def test_model_retries_transient_errors(self):
+        class FlakyAdapter:
+            provider = "openai"
+            capabilities = Capabilities()
+            supports = EndpointSupport(complete=True)
+            manifest = ProviderManifest(provider="openai", supports=supports)
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def complete(self, request: LMRequest) -> LMResponse:
+                self.calls += 1
+                if self.calls < 3:
+                    raise RateLimitError("retry me")
+                return LMResponse(id="ok", model=request.model, message=Message.assistant("ok"), finish_reason="stop", usage=Usage())
+
+        lm = UniversalLM()
+        adapter = FlakyAdapter()
+        lm.register(adapter)
+
+        m = Model(lm=lm, model="gpt-4.1-mini", provider="openai", retries=2)
+        resp = m("hello")
+        self.assertEqual(resp.text, "ok")
+        self.assertEqual(adapter.calls, 3)
 
 
 if __name__ == "__main__":

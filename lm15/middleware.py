@@ -5,6 +5,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from .errors import RateLimitError, ServerError, TimeoutError, TransportError
 from .types import LMRequest, LMResponse, StreamEvent
 
 CompleteFn = Callable[[LMRequest], LMResponse]
@@ -60,12 +61,14 @@ def with_history(history: list[dict[str, Any]]) -> CompleteMiddleware:
 
 
 def with_retries(max_retries: int = 2, sleep_base: float = 0.2) -> CompleteMiddleware:
+    transient = (RateLimitError, TimeoutError, ServerError, TransportError)
+
     def middleware(req: LMRequest, nxt: CompleteFn) -> LMResponse:
         last: Exception | None = None
         for i in range(max_retries + 1):
             try:
                 return nxt(req)
-            except Exception as e:  # pragma: no cover - generic retry wrapper
+            except transient as e:
                 last = e
                 if i == max_retries:
                     raise

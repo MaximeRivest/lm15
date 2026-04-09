@@ -36,7 +36,8 @@ class Stream:
         self._started_model: str | None = None
         self._text_parts: list[str] = []
         self._thinking_parts: list[str] = []
-        self._tool_input: dict[int, str] = {}
+        self._tool_call_raw: dict[int, str] = {}
+        self._tool_call_meta: dict[int, dict[str, str | dict]] = {}
 
     def __iter__(self):
         return self
@@ -66,10 +67,17 @@ class Stream:
                     if dtype == "tool_call":
                         idx = event.part_index or 0
                         chunk = delta.get("input", "")
-                        agg = self._tool_input.get(idx, "") + chunk
-                        self._tool_input[idx] = agg
+                        chunk_s = chunk if isinstance(chunk, str) else json.dumps(chunk)
+                        agg = self._tool_call_raw.get(idx, "") + chunk_s
+                        self._tool_call_raw[idx] = agg
                         parsed = self._parse_json_best_effort(agg)
-                        return StreamChunk(type="tool_call", input=parsed)
+                        meta = self._tool_call_meta.setdefault(idx, {})
+                        if delta.get("id"):
+                            meta["id"] = str(delta["id"])
+                        if delta.get("name"):
+                            meta["name"] = str(delta["name"])
+                        meta["input"] = parsed
+                        return StreamChunk(type="tool_call", input=parsed, name=meta.get("name"))
                     if dtype == "audio":
                         return StreamChunk(type="audio", audio=Part.audio(data=delta.get("data", "")))
                     continue
@@ -86,10 +94,12 @@ class Stream:
                     if delta.type == "tool_call":
                         idx = event.part_index or 0
                         chunk = delta.input or ""
-                        agg = self._tool_input.get(idx, "") + chunk
-                        self._tool_input[idx] = agg
+                        agg = self._tool_call_raw.get(idx, "") + chunk
+                        self._tool_call_raw[idx] = agg
                         parsed = self._parse_json_best_effort(agg)
-                        return StreamChunk(type="tool_call", input=parsed)
+                        meta = self._tool_call_meta.setdefault(idx, {})
+                        meta["input"] = parsed
+                        return StreamChunk(type="tool_call", input=parsed, name=meta.get("name"))
                     if delta.type == "audio":
                         return StreamChunk(type="audio", audio=Part.audio(data=delta.data or ""))
                     continue
@@ -137,6 +147,13 @@ class Stream:
             parts.append(Part.thinking("".join(self._thinking_parts)))
         if self._text_parts:
             parts.append(Part.text_part("".join(self._text_parts)))
+        for idx in sorted(self._tool_call_meta):
+            meta = self._tool_call_meta[idx]
+            tc_input = meta.get("input")
+            payload = tc_input if isinstance(tc_input, dict) else {}
+            tc_id = str(meta.get("id") or f"tool_call_{idx}")
+            tc_name = str(meta.get("name") or "tool")
+            parts.append(Part.tool_call(tc_id, tc_name, payload))
         if not parts:
             parts = [Part.text_part("")]
 
