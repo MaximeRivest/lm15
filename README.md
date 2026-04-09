@@ -41,6 +41,16 @@ export ANTHROPIC_API_KEY=sk-ant-...
 export GEMINI_API_KEY=...         # or GOOGLE_API_KEY
 ```
 
+Discover what is available:
+
+```python
+import lm15
+
+print(lm15.providers_info())
+for m in lm15.models(provider="openai")[:5]:
+    print(m.id)
+```
+
 ## Usage
 
 ### Streaming
@@ -229,7 +239,7 @@ The v2 surface (`lm15.complete`, `lm15.model`, `Model`, `Stream`) is a thin laye
 | Completeness testing | [`docs/COMPLETENESS.md`](docs/COMPLETENESS.md) |
 | Production checklist | [`docs/PRODUCTION_CHECKLIST.md`](docs/PRODUCTION_CHECKLIST.md) |
 
-**Cookbooks v2:** [`docs/COOKBOOKS_V2/`](docs/COOKBOOKS_V2/) — 10 progressive examples:
+**Cookbooks v2:** [`docs/COOKBOOKS_V2/`](docs/COOKBOOKS_V2/) — practical examples + references:
 
 1. [Hello World](docs/COOKBOOKS_V2/01-hello-world.md)
 2. [Streaming](docs/COOKBOOKS_V2/02-streaming.md)
@@ -241,6 +251,8 @@ The v2 surface (`lm15.complete`, `lm15.model`, `Model`, `Stream`) is a thin laye
 8. [Prompt caching](docs/COOKBOOKS_V2/08-prompt-caching.md)
 9. [Model config](docs/COOKBOOKS_V2/09-model-config.md)
 10. [Building an agent](docs/COOKBOOKS_V2/10-agent.md)
+11. [complete()/stream() reference](docs/COOKBOOKS_V2/11-complete-reference.md)
+12. [Model discovery and provider status](docs/COOKBOOKS_V2/12-model-discovery.md)
 
 **Cookbooks v1 (low-level):** [`docs/COOKBOOKS/`](docs/COOKBOOKS/) — 8 examples using the internal `LMRequest`/`UniversalLM` API directly.
 

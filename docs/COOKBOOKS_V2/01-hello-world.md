@@ -256,6 +256,18 @@ resp = lm15.complete("gemini-2.5-flash", "Hello.", env=".env")
 
 Same code, same response type, same fields. The model name is the only thing that changes.
 
+If you're unsure which models are currently available, inspect live discovery first:
+
+```python
+import lm15
+
+print(lm15.providers_info(env=".env"))
+for m in lm15.models(provider="openai", env=".env")[:5]:
+    print(m.id)
+```
+
+> **Deep dive:** [Cookbook 12 — Model Discovery and Provider Status](12-model-discovery.md)
+
 ### Explicit provider
 
 If you use a custom or fine-tuned model whose name lm15 can't auto-detect:

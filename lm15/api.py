@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from .capabilities import resolve_provider
-from .factory import build_default, providers
+from .discovery import models as _models, providers_info as _providers_info
+from .factory import build_default, providers as _providers
 from .model import Model
 from .types import Part
 
@@ -106,6 +107,46 @@ def stream(
         top_p=top_p,
         stop=stop,
         provider=provider,
+    )
+
+
+def providers() -> dict[str, tuple[str, ...]]:
+    return _providers()
+
+
+def providers_info(
+    *,
+    live: bool = True,
+    refresh: bool = False,
+    timeout: float = 5.0,
+    api_key: str | dict[str, str] | None = None,
+    env: str | None = None,
+):
+    return _providers_info(live=live, refresh=refresh, timeout=timeout, api_key=api_key, env=env)
+
+
+def models(
+    *,
+    provider: str | None = None,
+    live: bool = True,
+    refresh: bool = False,
+    timeout: float = 5.0,
+    api_key: str | dict[str, str] | None = None,
+    env: str | None = None,
+    supports: set[str] | None = None,
+    input_modalities: set[str] | None = None,
+    output_modalities: set[str] | None = None,
+):
+    return _models(
+        provider=provider,
+        live=live,
+        refresh=refresh,
+        timeout=timeout,
+        api_key=api_key,
+        env=env,
+        supports=supports,
+        input_modalities=input_modalities,
+        output_modalities=output_modalities,
     )
 
 
