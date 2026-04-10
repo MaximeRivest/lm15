@@ -31,20 +31,31 @@ Most people only need #1 or #2. This cookbook shows all three so you know which 
 ```python
 import lm15
 
-resp = lm15.complete("gpt-4.1-mini", "say ok", env=".env")
+resp = lm15.complete("gpt-5.4-nano", "say ok", env=".env")
 print(resp.text)
 ```
-```output | ✓ 1.4s | 2 vars
-Ok
+```output | ✓ 650ms | 5 vars
+Ok.
 ```
 
 `complete()` is a **standalone function call**. You pass the model name and a prompt, you get a response. No setup, no state. Every call is independent.
 
 ```python
 # Each call knows nothing about the previous one
-resp1 = lm15.complete("gpt-4.1-mini", "My name is Max.", env=".env")
-resp2 = lm15.complete("gpt-4.1-mini", "What's my name?", env=".env")
+resp1 = lm15.complete("gpt-5.4-nano", "My name is Max.", env=".env")
+resp2 = lm15.complete("gpt-5.4-nano", "What's my name?", env=".env")
 print(resp2.text)  # It doesn't know — each call starts fresh
+```
+
+output | ✓ 3.0s | 5 vars
+I don’t know your name from this chat. If you tell me what you’d like me to call you, I’ll use it.
+    
+
+```python
+resp1.usage
+```
+```output | ✓ 1ms | 5 vars
+Usage(input_tokens=11, output_tokens=20, total_tokens=31, cache_read_tokens=0, cache_write_tokens=None, reasoning_tokens=0)
 ```
 
 Use `complete()` when you have a **single, self-contained question** and don't need conversation history.
