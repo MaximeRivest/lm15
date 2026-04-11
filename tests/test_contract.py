@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from lm15.types import AudioFormat, DataSource, LMRequest, LiveClientEvent, LiveConfig, LiveServerEvent, Message, Part, Usage
+from lm15.types import AudioFormat, DataSource, FunctionTool, LMRequest, LiveClientEvent, LiveConfig, LiveServerEvent, Message, Part, Tool, Usage
 
 
 class ContractTests(unittest.TestCase):
@@ -20,6 +20,14 @@ class ContractTests(unittest.TestCase):
         p = Part.from_dict({"type": "tool_call", "id": "c1", "name": "search", "input": {"q": "x"}})
         self.assertEqual(p.type, "tool_call")
         self.assertEqual(p.input["q"], "x")
+
+    def test_generic_runtime_dispatch_removed(self):
+        with self.assertRaises(TypeError):
+            Part(type="text", text="hi")
+        with self.assertRaises(TypeError):
+            Tool(name="search")
+        tool = FunctionTool(name="search", parameters={"type": "object", "properties": {}})
+        self.assertEqual(tool.type, "function")
 
     def test_request_requires_messages(self):
         with self.assertRaises(ValueError):

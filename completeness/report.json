@@ -1,7 +1,7 @@
 {
   "summary": {
-    "required_total": 15,
-    "required_passed": 14,
+    "required_total": 16,
+    "required_passed": 15,
     "required_failed": 0,
     "required_skipped": 1,
     "score": 1.0
@@ -23,7 +23,7 @@
       "skip": 0
     },
     "shared": {
-      "pass": 2,
+      "pass": 3,
       "fail": 0,
       "skip": 1
     }
@@ -36,7 +36,7 @@
       "required": true,
       "mode": "fixture",
       "status": "pass",
-      "details": "normalized response parsed"
+      "details": "matched frozen fixture: openai.basic_text"
     },
     {
       "id": "anthropic.complete.fixture",
@@ -45,7 +45,7 @@
       "required": true,
       "mode": "fixture",
       "status": "pass",
-      "details": "normalized response parsed"
+      "details": "matched frozen fixture: anthropic.basic_text"
     },
     {
       "id": "gemini.complete.fixture",
@@ -54,7 +54,7 @@
       "required": true,
       "mode": "fixture",
       "status": "pass",
-      "details": "normalized response parsed"
+      "details": "matched frozen fixture: gemini.basic_text"
     },
     {
       "id": "openai.stream.fixture",
@@ -63,7 +63,7 @@
       "required": true,
       "mode": "fixture",
       "status": "pass",
-      "details": "events=start,delta,end"
+      "details": "matched frozen fixture: openai.basic_text_stream"
     },
     {
       "id": "anthropic.stream.fixture",
@@ -72,7 +72,7 @@
       "required": true,
       "mode": "fixture",
       "status": "pass",
-      "details": "events=start,delta,end"
+      "details": "matched frozen fixture: anthropic.basic_text_stream"
     },
     {
       "id": "gemini.stream.fixture",
@@ -81,7 +81,7 @@
       "required": true,
       "mode": "fixture",
       "status": "pass",
-      "details": "events=delta"
+      "details": "matched frozen fixture: gemini.basic_text_stream"
     },
     {
       "id": "openai.tool.fixture",
@@ -90,7 +90,7 @@
       "required": true,
       "mode": "fixture",
       "status": "pass",
-      "details": "tool call normalized"
+      "details": "matched frozen fixture: openai.basic_tool_call"
     },
     {
       "id": "openai.extended.fixture",
@@ -108,7 +108,7 @@
       "required": true,
       "mode": "fixture",
       "status": "pass",
-      "details": "tool call normalized"
+      "details": "matched frozen fixture: anthropic.basic_tool_call"
     },
     {
       "id": "anthropic.extended.fixture",
@@ -126,7 +126,7 @@
       "required": true,
       "mode": "fixture",
       "status": "pass",
-      "details": "tool call normalized"
+      "details": "matched frozen fixture: gemini.basic_tool_call"
     },
     {
       "id": "gemini.extended.fixture",
@@ -144,7 +144,7 @@
       "required": true,
       "mode": "fixture",
       "status": "pass",
-      "details": "http error mapping matches taxonomy"
+      "details": "error mapping matches frozen fixtures"
     },
     {
       "id": "adapter.contract.fixture",
@@ -154,6 +154,15 @@
       "mode": "fixture",
       "status": "pass",
       "details": "all adapters expose full plugin contract"
+    },
+    {
+      "id": "live.contract.fixture",
+      "provider": "shared",
+      "probe": "live_contract",
+      "required": true,
+      "mode": "fixture",
+      "status": "pass",
+      "details": "live contract fixtures roundtrip through canonical serde"
     },
     {
       "id": "transport.pycurl_stream.fixture",

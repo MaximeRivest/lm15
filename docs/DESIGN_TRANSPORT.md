@@ -303,8 +303,8 @@ for event in session:
         case "tool_result": print(f"📎 {event.text}")     # result already sent
 
 # Manual: user handles it
-from lm15 import Tool
-weather = Tool(name="get_weather", description="Get weather", parameters={...})
+from lm15 import FunctionTool
+weather = FunctionTool(name="get_weather", description="Get weather", parameters={...})
 
 session = lm15.live("gemini-2.0-flash-live", tools=[weather])
 

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Iterator
 
 from .errors import RateLimitError, ServerError, TimeoutError, TransportError, error_class_for_canonical_code
-from .types import DataSource, LMRequest, LMResponse, Message, Part, PartDelta, StreamEvent, ToolCallInfo, Usage
+from .types import AudioPart, CitationPart, DataSource, ErrorInfo, ImagePart, LMRequest, LMResponse, Message, Part, PartDelta, StreamEvent, ToolCallInfo, ToolCallPart, Usage
 
 
 _RETRYABLE_ERRORS = (RateLimitError, TimeoutError, ServerError, TransportError)
@@ -20,8 +20,8 @@ class StreamChunk:
     text: str | None = None
     name: str | None = None
     input: dict | None = None
-    image: Part | None = None
-    audio: Part | None = None
+    image: ImagePart | None = None
+    audio: AudioPart | None = None
     response: LMResponse | None = None
 
 
@@ -42,9 +42,9 @@ class _RoundState:
     text_parts: list[str] = field(default_factory=list)
     thinking_parts: list[str] = field(default_factory=list)
     audio_chunks: list[str] = field(default_factory=list)
-    audio_parts: list[Part] = field(default_factory=list)
-    image_parts: list[Part] = field(default_factory=list)
-    citation_parts: list[Part] = field(default_factory=list)
+    audio_parts: list[AudioPart] = field(default_factory=list)
+    image_parts: list[ImagePart] = field(default_factory=list)
+    citation_parts: list[CitationPart] = field(default_factory=list)
     tool_call_raw: dict[int, str] = field(default_factory=dict)
     tool_call_meta: dict[int, dict[str, Any]] = field(default_factory=dict)
 
@@ -103,7 +103,7 @@ class _RoundState:
             chunks.append(StreamChunk(type="image", image=part))
         elif dtype == "citation":
             self.citation_parts.append(
-                Part.citation(
+                CitationPart(
                     text=_coerce_optional_str(delta.get("text")),
                     url=_coerce_optional_str(delta.get("url")),
                     title=_coerce_optional_str(delta.get("title")),
@@ -137,7 +137,9 @@ class _RoundState:
             parts.append(Part.text_part("".join(self.text_parts)))
         parts.extend(self.image_parts)
         if self.audio_chunks and not self.audio_parts:
-            parts.append(Part.audio(data="".join(self.audio_chunks)))
+            pcm_data = _concat_b64_chunks_to_bytes(self.audio_chunks)
+            wav_data = _pcm_to_wav(pcm_data)
+            parts.append(Part.audio(data=wav_data, media_type="audio/wav"))
         parts.extend(self.audio_parts)
         parts.extend(self.citation_parts)
 
@@ -229,23 +231,23 @@ class Result:
         return self.response.thinking
 
     @property
-    def tool_calls(self) -> list[Part]:
+    def tool_calls(self) -> list[ToolCallPart]:
         return self.response.tool_calls
 
     @property
-    def image(self) -> Part | None:
+    def image(self) -> ImagePart | None:
         return self.response.image
 
     @property
-    def images(self) -> list[Part]:
+    def images(self) -> list[ImagePart]:
         return self.response.images
 
     @property
-    def audio(self) -> Part | None:
+    def audio(self) -> AudioPart | None:
         return self.response.audio
 
     @property
-    def citations(self) -> list[Part]:
+    def citations(self) -> list[CitationPart]:
         return self.response.citations
 
     @property
@@ -397,7 +399,7 @@ class Result:
             self._callback_called = True
             self._on_finished(request, response)
 
-    def _execute_tool_call(self, tool_call: Part) -> _ExecutedTool | None:
+    def _execute_tool_call(self, tool_call: ToolCallPart) -> _ExecutedTool | None:
         info = ToolCallInfo(
             id=tool_call.id or "",
             name=tool_call.name or "tool",
@@ -541,7 +543,7 @@ def _coerce_optional_str(value: Any) -> str | None:
 
 
 def _exception_from_stream_error(event: StreamEvent) -> Exception:
-    err = event.error or {}
+    err = event.error or ErrorInfo(code="provider", message="stream error")
     code = str(err.get("code") or "provider")
     message = str(err.get("message") or "stream error")
     provider_code = str(err.get("provider_code") or "")
@@ -549,6 +551,60 @@ def _exception_from_stream_error(event: StreamEvent) -> Exception:
         message = f"{message} (provider_code={provider_code})"
     exc_cls = error_class_for_canonical_code(code)
     return exc_cls(message)
+
+
+def _concat_b64_chunks_to_bytes(chunks: list[str]) -> bytes:
+    """Decode each base64 chunk and concatenate raw bytes.
+
+    Individual SSE chunks are independently base64-encoded with their own
+    padding.  Concatenating the b64 strings directly produces invalid base64
+    (the ``=`` padding from early chunks corrupts the decode).  This function
+    decodes each chunk to raw bytes and concatenates the result.
+    """
+    import base64
+    raw = bytearray()
+    for chunk in chunks:
+        if not chunk:
+            continue
+        try:
+            raw.extend(base64.b64decode(chunk))
+        except Exception:
+            padded = chunk + "=" * (-len(chunk) % 4)
+            try:
+                raw.extend(base64.b64decode(padded))
+            except Exception:
+                pass
+    return bytes(raw)
+
+
+def _pcm_to_wav(pcm: bytes, sample_rate: int = 24000, channels: int = 1, bits: int = 16) -> bytes:
+    """Wrap raw PCM bytes in a WAV header so the result is playable.
+
+    Gemini Live returns raw PCM audio (``audio/L16;rate=24000``).  Without a
+    WAV header, media players can't open the file.
+    """
+    import struct
+    byte_rate = sample_rate * channels * bits // 8
+    block_align = channels * bits // 8
+    data_size = len(pcm)
+    # RIFF header + fmt chunk + data chunk
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF",
+        36 + data_size,     # file size - 8
+        b"WAVE",
+        b"fmt ",
+        16,                 # fmt chunk size
+        1,                  # PCM format
+        channels,
+        sample_rate,
+        byte_rate,
+        block_align,
+        bits,
+        b"data",
+        data_size,
+    )
+    return header + pcm
 
 
 def _parse_json_best_effort(raw: str | None) -> dict[str, Any]:
@@ -592,10 +648,10 @@ def _source_to_dict(source: DataSource) -> dict[str, Any]:
     }
 
 
-def _image_part_from_delta(delta: dict[str, Any]) -> Part:
+def _image_part_from_delta(delta: dict[str, Any]) -> ImagePart:
     source_payload = delta.get("source")
     if isinstance(source_payload, dict):
-        return Part(type="image", source=DataSource(**source_payload))
+        return ImagePart(source=DataSource(**source_payload))
     if delta.get("data") is not None:
         return Part.image(data=str(delta.get("data")), media_type=_coerce_optional_str(delta.get("media_type")) or "image/png")
     if delta.get("url") is not None:
@@ -605,10 +661,10 @@ def _image_part_from_delta(delta: dict[str, Any]) -> Part:
     raise ValueError("image delta requires source, data, url, or file_id")
 
 
-def _audio_part_from_delta(delta: dict[str, Any]) -> Part:
+def _audio_part_from_delta(delta: dict[str, Any]) -> AudioPart:
     source_payload = delta.get("source")
     if isinstance(source_payload, dict):
-        return Part(type="audio", source=DataSource(**source_payload))
+        return AudioPart(source=DataSource(**source_payload))
     if delta.get("data") is not None:
         return Part.audio(data=str(delta.get("data")), media_type=_coerce_optional_str(delta.get("media_type")) or "audio/wav")
     if delta.get("url") is not None:

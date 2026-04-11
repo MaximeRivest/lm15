@@ -13,7 +13,7 @@ from lm15.features import EndpointSupport, ProviderManifest
 from lm15.model import Model
 from lm15.protocols import Capabilities
 from lm15.result import response_to_events
-from lm15.types import DataSource, FileUploadRequest, FileUploadResponse, LMRequest, LMResponse, Message, Part, PartDelta, StreamEvent, Tool, Usage
+from lm15.types import AudioPart, DataSource, FileUploadRequest, FileUploadResponse, FunctionTool, ImagePart, LMRequest, LMResponse, Message, Part, PartDelta, StreamEvent, Tool, Usage
 
 
 class FakeAdapter:
@@ -102,7 +102,7 @@ class APIV2Tests(unittest.TestCase):
 
     def test_submit_tools_manual(self):
         gpt = model("gpt-4.1-mini")
-        resp = gpt("weather", tools=[Tool(name="get_weather")])
+        resp = gpt("weather", tools=[FunctionTool(name="get_weather")])
         self.assertEqual(resp.finish_reason, "tool_call")
         out = gpt.submit_tools({"call_1": "22C"})
         self.assertIn("22C", out.text or "")
@@ -175,7 +175,7 @@ class APIV2Tests(unittest.TestCase):
         lm.register(StrictToolAdapter())
         m = Model(lm=lm, model="gpt-4.1-mini", provider="openai")
 
-        first = m("weather", tools=[Tool(name="get_weather")])
+        first = m("weather", tools=[FunctionTool(name="get_weather")])
         self.assertEqual(first.finish_reason, "tool_call")
         out = m.submit_tools({"call_1": "22C"})
         self.assertEqual(out.text, "ok")
@@ -355,7 +355,7 @@ class TestResponseConvenience(unittest.TestCase):
         import base64
         raw = b"\x89PNG image data"
         encoded = base64.b64encode(raw).decode("ascii")
-        img_part = Part(type="image", source=DataSource(type="base64", data=encoded, media_type="image/png"))
+        img_part = ImagePart(source=DataSource(type="base64", data=encoded, media_type="image/png"))
         msg = Message(role="assistant", parts=(Part.text_part("Here's the image."), img_part))
         resp = LMResponse(id="r1", model="m", message=msg, finish_reason="stop", usage=Usage())
         self.assertEqual(resp.image_bytes, raw)
@@ -371,7 +371,7 @@ class TestResponseConvenience(unittest.TestCase):
         import base64
         raw = b"RIFF audio data"
         encoded = base64.b64encode(raw).decode("ascii")
-        aud_part = Part(type="audio", source=DataSource(type="base64", data=encoded, media_type="audio/wav"))
+        aud_part = AudioPart(source=DataSource(type="base64", data=encoded, media_type="audio/wav"))
         msg = Message(role="assistant", parts=(aud_part,))
         resp = LMResponse(id="r1", model="m", message=msg, finish_reason="stop", usage=Usage())
         self.assertEqual(resp.audio_bytes, raw)
@@ -564,7 +564,7 @@ class TestToolControlSeparation(unittest.TestCase):
         def weather_impl(city: str) -> str:
             return f"22C in {city}"
 
-        tool = Tool(
+        tool = FunctionTool(
             name="get_weather",
             description="Get weather",
             parameters={"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]},
@@ -577,7 +577,7 @@ class TestToolControlSeparation(unittest.TestCase):
 
     def test_tool_without_fn_manual(self):
         """Tool(no fn): explicit schema + manual (existing behavior)."""
-        tool = Tool(
+        tool = FunctionTool(
             name="get_weather",
             description="Get weather",
             parameters={"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]},

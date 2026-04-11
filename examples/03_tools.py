@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from lm15 import LMRequest, Message, Part, Tool, build_default
+from lm15 import FunctionTool, LMRequest, Message, Part, build_default
 
 
 def main() -> None:
@@ -20,7 +20,7 @@ def main() -> None:
 
     lm = build_default(use_pycurl=True)
     tools = (
-        Tool(
+        FunctionTool(
             name="get_weather",
             description="Get weather by city",
             parameters={"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]},

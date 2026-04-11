@@ -131,9 +131,9 @@ print(resp.text)
 ### Manual tools with `Tool`
 
 ```python
-from lm15 import Tool
+from lm15 import FunctionTool
 
-weather = Tool(
+weather = FunctionTool(
     name="get_weather",
     description="Get weather",
     parameters={"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]},

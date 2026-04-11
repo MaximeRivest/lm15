@@ -96,9 +96,9 @@ print(resp.text)  # "It's 22°C in Montreal."
 ### Tools (manual)
 
 ```python
-from lm15 import Tool
+from lm15 import FunctionTool
 
-weather = Tool(name="get_weather", description="Get weather", parameters={...})
+weather = FunctionTool(name="get_weather", description="Get weather", parameters={...})
 gpt = lm15.model("gpt-4.1-mini")
 
 resp = gpt.call("Weather in Montreal?", tools=[weather])
@@ -302,6 +302,7 @@ The high-level surface (`lm15.call`, `lm15.acall`, `lm15.model`, `Result`) is a 
 10. [Building an agent](docs/COOKBOOKS_V2/10-agent.md)
 11. [call()/acall()/Result reference](docs/COOKBOOKS_V2/11-complete-reference.md)
 12. [Model discovery and provider status](docs/COOKBOOKS_V2/12-model-discovery.md)
+13. [Live sessions (real-time audio & video)](docs/COOKBOOKS_V2/13-live.md)
 
 **Cookbooks v1 (low-level):** [`docs/COOKBOOKS/`](docs/COOKBOOKS/) — 8 examples using the internal `LMRequest`/`UniversalLM` API directly.
 

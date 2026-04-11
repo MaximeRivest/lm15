@@ -4,8 +4,11 @@ from typing import Any
 
 from .types import (
     AudioFormat,
+    BuiltinTool,
     Config,
     DataSource,
+    ErrorInfo,
+    FunctionTool,
     LMRequest,
     LMResponse,
     LiveClientEvent,
@@ -14,6 +17,7 @@ from .types import (
     Message,
     Part,
     PartDelta,
+    ReasoningConfig,
     StreamEvent,
     Tool,
     ToolConfig,
@@ -97,15 +101,25 @@ def message_to_dict(value: Message) -> dict[str, Any]:
 
 
 def tool_to_dict(value: Tool) -> dict[str, Any]:
-    return _clean_mapping(
-        {
-            "name": value.name,
-            "type": value.type,
-            "description": value.description,
-            "parameters": value.parameters,
-            "builtin_config": value.builtin_config,
-        }
-    )
+    if isinstance(value, BuiltinTool):
+        return _clean_mapping(
+            {
+                "name": value.name,
+                "type": value.type,
+                "description": value.description,
+                "builtin_config": value.builtin_config,
+            }
+        )
+    if isinstance(value, FunctionTool):
+        return _clean_mapping(
+            {
+                "name": value.name,
+                "type": value.type,
+                "description": value.description,
+                "parameters": value.parameters,
+            }
+        )
+    raise TypeError(f"unsupported tool type: {type(value)}")
 
 
 def tool_config_to_dict(value: ToolConfig) -> dict[str, Any]:
@@ -114,6 +128,26 @@ def tool_config_to_dict(value: ToolConfig) -> dict[str, Any]:
             "mode": value.mode,
             "allowed": list(value.allowed),
             "parallel": value.parallel,
+        }
+    )
+
+
+def reasoning_config_to_dict(value: ReasoningConfig) -> dict[str, Any]:
+    return _clean_mapping(
+        {
+            "enabled": value.enabled,
+            "budget": value.budget,
+            "effort": value.effort,
+        }
+    )
+
+
+def error_info_to_dict(value: ErrorInfo) -> dict[str, Any]:
+    return _clean_mapping(
+        {
+            "code": value.code,
+            "provider_code": value.provider_code,
+            "message": value.message,
         }
     )
 
@@ -128,7 +162,7 @@ def config_to_dict(value: Config) -> dict[str, Any]:
             "stop": list(value.stop),
             "response_format": value.response_format,
             "tool_config": tool_config_to_dict(value.tool_config) if value.tool_config is not None else None,
-            "reasoning": value.reasoning,
+            "reasoning": reasoning_config_to_dict(value.reasoning) if value.reasoning is not None else None,
             "provider": value.provider,
         }
     )
@@ -171,14 +205,13 @@ def request_to_dict(value: LMRequest) -> dict[str, Any]:
     else:
         system = value.system
 
-    cfg = config_to_dict(value.config)
     return _clean_mapping(
         {
             "model": value.model,
             "messages": [message_to_dict(x) for x in value.messages],
             "system": system,
             "tools": [tool_to_dict(x) for x in value.tools],
-            "config": cfg,
+            "config": config_to_dict(value.config),
         }
     )
 
@@ -238,7 +271,7 @@ def stream_event_to_dict(value: StreamEvent) -> dict[str, Any]:
             "part_type": value.part_type,
             "finish_reason": value.finish_reason,
             "usage": usage_to_dict(value.usage) if value.usage is not None else None,
-            "error": _clean_mapping(value.error) if value.error is not None else None,
+            "error": error_info_to_dict(value.error) if value.error is not None else None,
         }
     )
 
@@ -265,7 +298,7 @@ def live_server_event_to_dict(value: LiveServerEvent) -> dict[str, Any]:
             "name": value.name,
             "input": value.input,
             "usage": usage_to_dict(value.usage) if value.usage is not None else None,
-            "error": _clean_mapping(value.error) if value.error is not None else None,
+            "error": error_info_to_dict(value.error) if value.error is not None else None,
         }
     )
 
@@ -287,12 +320,16 @@ def message_from_dict(value: dict[str, Any]) -> Message:
 
 
 def tool_from_dict(value: dict[str, Any]) -> Tool:
-    return Tool(
+    if value.get("type") == "builtin":
+        return BuiltinTool(
+            name=value["name"],
+            description=value.get("description"),
+            builtin_config=value.get("builtin_config"),
+        )
+    return FunctionTool(
         name=value["name"],
-        type=value.get("type", "function"),
         description=value.get("description"),
         parameters=value.get("parameters"),
-        builtin_config=value.get("builtin_config"),
     )
 
 
@@ -301,6 +338,22 @@ def tool_config_from_dict(value: dict[str, Any]) -> ToolConfig:
         mode=value.get("mode", "auto"),
         allowed=tuple(value.get("allowed", [])),
         parallel=value.get("parallel"),
+    )
+
+
+def reasoning_config_from_dict(value: dict[str, Any]) -> ReasoningConfig:
+    return ReasoningConfig(
+        enabled=value["enabled"],
+        budget=value.get("budget"),
+        effort=value.get("effort"),
+    )
+
+
+def error_info_from_dict(value: dict[str, Any]) -> ErrorInfo:
+    return ErrorInfo(
+        code=value["code"],
+        provider_code=value.get("provider_code"),
+        message=value["message"],
     )
 
 
@@ -313,7 +366,7 @@ def config_from_dict(value: dict[str, Any]) -> Config:
         stop=tuple(value.get("stop", [])),
         response_format=value.get("response_format"),
         tool_config=tool_config_from_dict(value["tool_config"]) if isinstance(value.get("tool_config"), dict) else None,
-        reasoning=value.get("reasoning"),
+        reasoning=reasoning_config_from_dict(value["reasoning"]) if isinstance(value.get("reasoning"), dict) else None,
         provider=value.get("provider"),
     )
 
@@ -410,7 +463,7 @@ def stream_event_from_dict(value: dict[str, Any]) -> StreamEvent:
         part_type=value.get("part_type"),
         finish_reason=value.get("finish_reason"),
         usage=usage_from_dict(value["usage"]) if isinstance(value.get("usage"), dict) else None,
-        error=value.get("error"),
+        error=error_info_from_dict(value["error"]) if isinstance(value.get("error"), dict) else None,
     )
 
 
@@ -433,7 +486,7 @@ def live_server_event_from_dict(value: dict[str, Any]) -> LiveServerEvent:
         name=value.get("name"),
         input=value.get("input"),
         usage=usage_from_dict(value["usage"]) if isinstance(value.get("usage"), dict) else None,
-        error=value.get("error"),
+        error=error_info_from_dict(value["error"]) if isinstance(value.get("error"), dict) else None,
     )
 
 
@@ -444,6 +497,8 @@ __all__ = [
     "config_to_dict",
     "data_source_from_dict",
     "data_source_to_dict",
+    "error_info_from_dict",
+    "error_info_to_dict",
     "live_client_event_from_dict",
     "live_client_event_to_dict",
     "live_config_from_dict",
@@ -456,6 +511,8 @@ __all__ = [
     "part_delta_to_dict",
     "part_from_dict",
     "part_to_dict",
+    "reasoning_config_from_dict",
+    "reasoning_config_to_dict",
     "request_from_dict",
     "request_to_dict",
     "response_from_dict",

@@ -33,12 +33,15 @@ def repl_debug(enabled: bool = True) -> None:
 def _is_interactive() -> bool:
     if hasattr(sys, "ps1") or bool(getattr(sys.flags, "interactive", 0)):
         return True
-    try:
-        from IPython import get_ipython  # type: ignore
+    # Only check IPython if it's already imported; avoids ~200ms eager import.
+    if "IPython" in sys.modules:
+        try:
+            from IPython import get_ipython  # type: ignore
 
-        return get_ipython() is not None
-    except Exception:
-        return False
+            return get_ipython() is not None
+        except Exception:
+            pass
+    return False
 
 
 def _extract_model_name(message: str) -> str | None:

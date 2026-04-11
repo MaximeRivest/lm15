@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64 as _base64
 import hashlib
 import json
+import struct as _struct
 import urllib.parse
 import uuid
 from dataclasses import dataclass, field
@@ -15,16 +17,19 @@ from ..transports.base import HttpRequest, HttpResponse, Transport
 from ..types import (
     AudioGenerationRequest,
     AudioGenerationResponse,
+    AudioPart,
     BatchRequest,
     BatchResponse,
+    Config,
     DataSource,
+    DocumentPart,
     EmbeddingRequest,
     EmbeddingResponse,
     FileUploadRequest,
     FileUploadResponse,
     ImageGenerationRequest,
     ImageGenerationResponse,
-    Config,
+    ImagePart,
     LMRequest,
     LMResponse,
     LiveClientEvent,
@@ -243,8 +248,14 @@ class GeminiAdapter(BaseProviderAdapter):
         if prompt_caching:
             self._apply_prompt_cache(request, payload)
 
+        output_mode = provider_cfg.get("output")
+        if output_mode == "image":
+            payload.setdefault("generationConfig", {})["responseModalities"] = ["IMAGE"]
+        elif output_mode == "audio":
+            payload.setdefault("generationConfig", {})["responseModalities"] = ["AUDIO"]
+
         if provider_cfg:
-            passthrough = {k: v for k, v in provider_cfg.items() if k != "prompt_caching"}
+            passthrough = {k: v for k, v in provider_cfg.items() if k not in {"prompt_caching", "output"}}
             payload.update(passthrough)
         return payload
 
@@ -324,21 +335,21 @@ class GeminiAdapter(BaseProviderAdapter):
                 mime = inline.get("mimeType", "application/octet-stream")
                 data = inline.get("data", "")
                 if mime.startswith("image/"):
-                    parts.append(Part(type="image", source=DataSource(type="base64", media_type=mime, data=data)))
+                    parts.append(ImagePart(source=DataSource(type="base64", media_type=mime, data=data)))
                 elif mime.startswith("audio/"):
-                    parts.append(Part(type="audio", source=DataSource(type="base64", media_type=mime, data=data)))
+                    parts.append(AudioPart(source=DataSource(type="base64", media_type=mime, data=data)))
                 else:
-                    parts.append(Part(type="document", source=DataSource(type="base64", media_type=mime, data=data)))
+                    parts.append(DocumentPart(source=DataSource(type="base64", media_type=mime, data=data)))
             elif "fileData" in p:
                 fd = p["fileData"]
                 uri = fd.get("fileUri", "")
                 mime = fd.get("mimeType", "application/octet-stream")
                 if mime.startswith("image/"):
-                    parts.append(Part(type="image", source=DataSource(type="url", url=uri, media_type=mime)))
+                    parts.append(ImagePart(source=DataSource(type="url", url=uri, media_type=mime)))
                 elif mime.startswith("audio/"):
-                    parts.append(Part(type="audio", source=DataSource(type="url", url=uri, media_type=mime)))
+                    parts.append(AudioPart(source=DataSource(type="url", url=uri, media_type=mime)))
                 else:
-                    parts.append(Part(type="document", source=DataSource(type="url", url=uri, media_type=mime)))
+                    parts.append(DocumentPart(source=DataSource(type="url", url=uri, media_type=mime)))
 
         return parts
 
@@ -429,19 +440,59 @@ class GeminiAdapter(BaseProviderAdapter):
         model_name = request.model.lower()
         return "-live" in model_name or model_name.endswith("live")
 
+    @staticmethod
+    def _is_audio_native_live_model(model: str) -> bool:
+        """Return True for live models that only support AUDIO response modality."""
+        m = model.lower()
+        return "live-preview" in m or "native-audio" in m
+
+    @staticmethod
+    def _wav_to_pcm(data: bytes) -> tuple[bytes, int]:
+        """Extract raw PCM bytes and sample rate from a WAV file.
+
+        Returns ``(pcm_bytes, sample_rate)``.  Falls back to
+        ``(data, 16000)`` if the header cannot be parsed.
+        """
+        if len(data) >= 44 and data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+            sample_rate = _struct.unpack_from("<I", data, 24)[0]
+            pos = 12
+            while pos + 8 <= len(data):
+                chunk_id = data[pos : pos + 4]
+                chunk_size = _struct.unpack_from("<I", data, pos + 4)[0]
+                if chunk_id == b"data":
+                    return data[pos + 8 : pos + 8 + chunk_size], sample_rate
+                pos += 8 + chunk_size
+            return data[44:], sample_rate
+        return data, 16000
+
     def _stream_via_live_completion(self, request: LMRequest) -> Iterator[StreamEvent]:
         ws = self._live_connect(self._live_url())
         saw_tool_call = False
+        audio_native = self._is_audio_native_live_model(request.model)
+        acc_usage = Usage()
 
         try:
-            ws.send(json.dumps(self._live_setup_payload_from_request(request)))
-            ws.send(json.dumps(self._live_client_content_payload_from_request(request)))
+            setup_payload = self._live_setup_payload_from_request(request)
+            # Ensure generationConfig exists — server rejects empty setups
+            setup_inner = setup_payload.setdefault("setup", {})
+            if not audio_native:
+                setup_inner.setdefault("generationConfig", {}).setdefault("responseModalities", ["TEXT"])
+            ws.send(json.dumps(setup_payload))
+            self._wait_for_setup_complete(ws)
+            for msg in self._live_client_content_payload_from_request(request):
+                ws.send(json.dumps(msg))
 
             yield StreamEvent(type="start", model=request.model)
 
             while True:
                 raw = ws.recv()
                 events, turn_complete, usage = self._decode_live_completion_stream_events(raw)
+                # Accumulate usage across frames (live models spread it)
+                acc_usage = Usage(
+                    input_tokens=max(acc_usage.input_tokens, usage.input_tokens),
+                    output_tokens=max(acc_usage.output_tokens, usage.output_tokens),
+                    total_tokens=max(acc_usage.total_tokens, usage.total_tokens),
+                )
                 for evt in events:
                     if evt.type == "delta":
                         d = evt.delta
@@ -455,7 +506,7 @@ class GeminiAdapter(BaseProviderAdapter):
                         return
 
                 if turn_complete:
-                    yield StreamEvent(type="end", finish_reason="tool_call" if saw_tool_call else "stop", usage=usage)
+                    yield StreamEvent(type="end", finish_reason="tool_call" if saw_tool_call else "stop", usage=acc_usage)
                     return
         finally:
             try:
@@ -478,14 +529,52 @@ class GeminiAdapter(BaseProviderAdapter):
         payload = self._live_setup_payload(cfg)
 
         output = (request.config.provider or {}).get("output")
-        if output == "audio":
+        audio_native = self._is_audio_native_live_model(request.model)
+
+        if output == "audio" or audio_native:
             setup = payload.setdefault("setup", {})
-            generation = setup.setdefault("generationConfig", {})
-            generation["responseModalities"] = ["AUDIO"]
+            setup.setdefault("generationConfig", {})["responseModalities"] = ["AUDIO"]
+            if output != "audio":
+                # User wants text — enable output transcription to get text back
+                setup["outputAudioTranscription"] = {}
+            # When the request contains audio/video, disable automatic
+            # activity detection and use explicit activityStart/End to
+            # ensure all data is processed before the model responds.
+            has_media = any(
+                p.type in {"audio", "video"}
+                for m in request.messages
+                for p in m.parts
+            )
+            if has_media:
+                setup.setdefault("realtimeInputConfig", {})\
+                    .setdefault("automaticActivityDetection", {})["disabled"] = True
+        elif output == "image":
+            setup = payload.setdefault("setup", {})
+            setup.setdefault("generationConfig", {})["responseModalities"] = ["IMAGE"]
 
         return payload
 
-    def _live_client_content_payload_from_request(self, request: LMRequest) -> dict[str, Any]:
+    def _live_client_content_payload_from_request(self, request: LMRequest) -> list[dict[str, Any]]:
+        """Build payload(s) to send input content over a live completion.
+
+        Audio-native models (``live-preview``, ``native-audio``) only accept
+        ``realtimeInput``.  Non-audio-native models forced through the live
+        transport (``transport: "live"``) also prefer ``realtimeInput`` for
+        text-only prompts and fall back to ``clientContent`` for multi-turn
+        conversations.
+        """
+        audio_native = self._is_audio_native_live_model(request.model)
+
+        if audio_native:
+            return self._build_realtime_input_payloads(request)
+
+        # Non-audio-native: simple text → realtimeInput, else clientContent
+        if len(request.messages) == 1 and request.messages[0].role == "user":
+            parts = request.messages[0].parts
+            if all(p.type == "text" for p in parts):
+                text = "\n".join(p.text or "" for p in parts)
+                return [{"realtimeInput": {"text": text}}]
+
         turns = [
             {
                 "role": "model" if m.role == "assistant" else "user",
@@ -493,7 +582,52 @@ class GeminiAdapter(BaseProviderAdapter):
             }
             for m in request.messages
         ]
-        return {"clientContent": {"turns": turns, "turnComplete": True}}
+        return [{"clientContent": {"turns": turns, "turnComplete": True}}]
+
+    def _build_realtime_input_payloads(self, request: LMRequest) -> list[dict[str, Any]]:
+        """Convert all message parts into ``realtimeInput`` frames.
+
+        Audio parts are extracted from WAV into raw PCM so the live API
+        can process them.  Text parts are sent via ``realtimeInput.text``.
+
+        Text is sent **before** media so the model has the instruction
+        context before it starts processing the audio/video stream.
+        """
+        text_payloads: list[dict[str, Any]] = []
+        media_payloads: list[dict[str, Any]] = []
+        sent_audio = False
+
+        for msg in request.messages:
+            for part in msg.parts:
+                if part.type == "text" and part.text:
+                    text_payloads.append({"realtimeInput": {"text": part.text}})
+                elif part.type == "audio" and part.source is not None:
+                    mime = part.source.media_type or ""
+                    if part.source.type == "base64" and part.source.data:
+                        if "wav" in mime or "wave" in mime:
+                            pcm, rate = self._wav_to_pcm(part.source.bytes)
+                            b64 = _base64.b64encode(pcm).decode("ascii")
+                            media_payloads.append({"realtimeInput": {"audio": {"mimeType": f"audio/pcm;rate={rate}", "data": b64}}})
+                        else:
+                            media_payloads.append({"realtimeInput": {"audio": {"mimeType": mime or "audio/pcm", "data": part.source.data}}})
+                        sent_audio = True
+                elif part.type == "video" and part.source is not None and part.source.data:
+                    media_payloads.append({"realtimeInput": {"video": {"mimeType": part.source.media_type or "video/mp4", "data": part.source.data}}})
+
+        # Text first (instruction context), then media.
+        # When audio/video is present, wrap with manual activity signals
+        # to ensure the server processes all data before generating a
+        # response.
+        payloads = text_payloads + media_payloads
+
+        if sent_audio or media_payloads:
+            payloads.insert(0, {"realtimeInput": {"activityStart": {}}})
+            payloads.append({"realtimeInput": {"activityEnd": {}}})
+
+        if not payloads:
+            payloads.append({"realtimeInput": {"text": ""}})
+
+        return payloads
 
     def _decode_live_completion_stream_events(self, raw: str | bytes) -> tuple[list[StreamEvent], bool, Usage]:
         try:
@@ -511,9 +645,28 @@ class GeminiAdapter(BaseProviderAdapter):
             return [StreamEvent(type="error", error=self._stream_error(provider_code, message))], False, Usage()
 
         events: list[StreamEvent] = []
+
+        tool_call = payload.get("toolCall")
+        if isinstance(tool_call, dict):
+            for idx, fc in enumerate(tool_call.get("functionCalls") or []):
+                if not isinstance(fc, dict):
+                    continue
+                events.append(
+                    StreamEvent(
+                        type="delta",
+                        part_index=idx,
+                        delta={
+                            "type": "tool_call",
+                            "id": fc.get("id", f"fc_{idx}"),
+                            "name": fc.get("name", "tool"),
+                            "input": json.dumps(fc.get("args", {})),
+                        },
+                    )
+                )
+
         server = payload.get("serverContent")
         if not isinstance(server, dict):
-            return events, False, Usage()
+            return events, False, self._live_usage(payload, None)
 
         model_turn = server.get("modelTurn", {})
         if isinstance(model_turn, dict):
@@ -540,21 +693,25 @@ class GeminiAdapter(BaseProviderAdapter):
                     if mime.startswith("audio/"):
                         events.append(StreamEvent(type="delta", part_index=idx, delta=PartDelta(type="audio", data=str(inline.get("data") or ""))))
 
+        # outputTranscription carries text when the model is audio-native
+        out_tx = server.get("outputTranscription")
+        if isinstance(out_tx, dict) and out_tx.get("text"):
+            events.append(StreamEvent(type="delta", part_index=0, delta=PartDelta(type="text", text=str(out_tx["text"]))))
+
         turn_complete = bool(server.get("turnComplete"))
-        usage_payload = payload.get("usageMetadata")
-        if not isinstance(usage_payload, dict):
-            usage_payload = server.get("usageMetadata") if isinstance(server.get("usageMetadata"), dict) else {}
-        usage_payload = usage_payload if isinstance(usage_payload, dict) else {}
-        usage = Usage(
-            input_tokens=int(usage_payload.get("promptTokenCount", 0) or 0),
-            output_tokens=int(usage_payload.get("candidatesTokenCount", 0) or 0),
-            total_tokens=int(usage_payload.get("totalTokenCount", 0) or 0),
-        )
+        usage = self._live_usage(payload, server)
         return events, turn_complete, usage
 
     def live(self, config: LiveConfig):
         ws = self._live_connect(self._live_url())
-        ws.send(json.dumps(self._live_setup_payload(config)))
+        payload = self._live_setup_payload(config)
+        # Audio-native models respond with audio by default.  Enable
+        # output transcription so callers receive text server events
+        # alongside audio.
+        if self._is_audio_native_live_model(config.model):
+            payload.setdefault("setup", {})["outputAudioTranscription"] = {}
+        ws.send(json.dumps(payload))
+        self._wait_for_setup_complete(ws)
 
         callable_registry = {
             t.name: t.fn
@@ -572,6 +729,21 @@ class GeminiAdapter(BaseProviderAdapter):
     def _live_connect(self, url: str):
         connect = require_websocket_sync_connect()
         return connect(url)
+
+    def _wait_for_setup_complete(self, ws: Any) -> None:
+        """Block until the server acknowledges the setup message."""
+        while True:
+            raw = ws.recv()
+            try:
+                payload = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+            except Exception:
+                continue
+            if isinstance(payload, dict) and "setupComplete" in payload:
+                return
+            if isinstance(payload, dict) and "error" in payload:
+                err = payload["error"]
+                msg = err.get("message", "") if isinstance(err, dict) else str(err)
+                raise InvalidRequestError(f"Live setup failed: {msg}")
 
     def _live_url(self) -> str:
         parsed = urllib.parse.urlparse(self.base_url)
@@ -607,23 +779,37 @@ class GeminiAdapter(BaseProviderAdapter):
         generation_config: dict[str, Any] = {}
         if config.output_format is not None:
             generation_config["responseModalities"] = ["AUDIO"]
+        elif self._is_audio_native_live_model(config.model):
+            # Audio-native models require an explicit response modality.
+            # Default to AUDIO so the server accepts the setup.
+            generation_config["responseModalities"] = ["AUDIO"]
+        if config.voice:
+            generation_config.setdefault("speechConfig", {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": config.voice}}})
         if generation_config:
             setup["generationConfig"] = generation_config
-
-        if config.voice:
-            setup.setdefault("speechConfig", {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": config.voice}}})
 
         if config.provider:
             setup.update(config.provider)
 
         return {"setup": setup}
 
+    def _live_usage(self, payload: dict[str, Any], server: dict[str, Any] | None) -> Usage:
+        usage_payload = payload.get("usageMetadata")
+        if not isinstance(usage_payload, dict) and isinstance(server, dict):
+            usage_payload = server.get("usageMetadata")
+        usage_payload = usage_payload if isinstance(usage_payload, dict) else {}
+        return Usage(
+            input_tokens=int(usage_payload.get("promptTokenCount", 0) or 0),
+            output_tokens=int(usage_payload.get("responseTokenCount", usage_payload.get("candidatesTokenCount", 0)) or 0),
+            total_tokens=int(usage_payload.get("totalTokenCount", 0) or 0),
+        )
+
     def _encode_live_client_event(self, event: LiveClientEvent) -> list[dict[str, Any]]:
         if event.type == "audio":
-            return [{"realtimeInput": {"mediaChunks": [{"mimeType": "audio/pcm", "data": event.data}]}}]
+            return [{"realtimeInput": {"audio": {"mimeType": "audio/pcm", "data": event.data}}}]
 
         if event.type == "video":
-            return [{"realtimeInput": {"mediaChunks": [{"mimeType": "video/mp4", "data": event.data}]}}]
+            return [{"realtimeInput": {"video": {"mimeType": "video/mp4", "data": event.data}}}]
 
         if event.type == "interrupt":
             return [{"clientContent": {"turnComplete": True}}]
@@ -642,11 +828,34 @@ class GeminiAdapter(BaseProviderAdapter):
             }]
 
         if event.type == "tool_result":
-            part = self._part(Part.tool_result(event.id, list(event.content), name=None))
+            response_parts: list[dict[str, Any]] = []
+            for part in event.content:
+                if part.type in {"image", "audio", "video", "document"} and part.source is not None:
+                    data: dict[str, Any] = {}
+                    if part.source.type == "base64":
+                        data["inlineData"] = {
+                            "mimeType": part.source.media_type or "application/octet-stream",
+                            "data": part.source.data or "",
+                        }
+                    elif part.source.type == "url":
+                        data["fileData"] = {
+                            "mimeType": part.source.media_type or "application/octet-stream",
+                            "fileUri": part.source.url or "",
+                        }
+                    elif part.source.type == "file":
+                        data["fileData"] = {
+                            "mimeType": part.source.media_type or "application/octet-stream",
+                            "fileUri": part.source.file_id or "",
+                        }
+                    response_parts.append(data)
+                else:
+                    response_parts.append({"text": part.text or ""})
             return [{
-                "clientContent": {
-                    "turns": [{"role": "user", "parts": [part]}],
-                    "turnComplete": True,
+                "toolResponse": {
+                    "functionResponses": [{
+                        "id": event.id,
+                        "response": {"output": response_parts},
+                    }]
                 }
             }]
 
@@ -668,6 +877,17 @@ class GeminiAdapter(BaseProviderAdapter):
             return [LiveServerEvent(type="error", error=self._stream_error(provider_code, message))]
 
         events: list[LiveServerEvent] = []
+
+        tool_call = payload.get("toolCall")
+        if isinstance(tool_call, dict):
+            for fc in tool_call.get("functionCalls") or []:
+                if not isinstance(fc, dict):
+                    continue
+                call_id = str(fc.get("id") or "fc_0")
+                name = str(fc.get("name") or "tool")
+                args = fc.get("args") if isinstance(fc.get("args"), dict) else {}
+                events.append(LiveServerEvent(type="tool_call", id=call_id, name=name, input=args))
+
         server = payload.get("serverContent")
         if not isinstance(server, dict):
             return events
@@ -693,16 +913,7 @@ class GeminiAdapter(BaseProviderAdapter):
             events.append(LiveServerEvent(type="interrupted"))
 
         if server.get("turnComplete"):
-            usage_payload = payload.get("usageMetadata")
-            if not isinstance(usage_payload, dict):
-                usage_payload = server.get("usageMetadata")
-            usage_payload = usage_payload if isinstance(usage_payload, dict) else {}
-            usage = Usage(
-                input_tokens=int(usage_payload.get("promptTokenCount", 0) or 0),
-                output_tokens=int(usage_payload.get("candidatesTokenCount", 0) or 0),
-                total_tokens=int(usage_payload.get("totalTokenCount", 0) or 0),
-            )
-            events.append(LiveServerEvent(type="turn_end", usage=usage))
+            events.append(LiveServerEvent(type="turn_end", usage=self._live_usage(payload, server)))
 
         return events
 

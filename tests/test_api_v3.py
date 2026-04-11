@@ -13,7 +13,7 @@ from lm15.conversation import Conversation
 from lm15.features import EndpointSupport, ProviderManifest
 from lm15.protocols import Capabilities
 from lm15.result import Result, response_to_events
-from lm15.types import LMRequest, LMResponse, Message, Part, Tool, Usage
+from lm15.types import FunctionTool, LMRequest, LMResponse, Message, Part, Tool, Usage
 
 
 class _V3Adapter:
@@ -88,7 +88,7 @@ class APIV3Tests(_APIV3Base):
         self.assertEqual(resp.text, "Echo: hello")
 
     def test_on_tool_call_can_override_execution(self):
-        weather = Tool(
+        weather = FunctionTool(
             name="get_weather",
             description="Get weather",
             parameters={"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]},

@@ -12,7 +12,7 @@ from lm15.client import UniversalLM
 from lm15.model import Model
 from lm15.providers.gemini import GeminiAdapter
 from lm15.providers.openai import OpenAIAdapter
-from lm15.types import Config, LMRequest, Message, Usage
+from lm15.types import Config, LMRequest, Message, PartDelta, Usage
 
 
 class _DummyTransport:
@@ -91,12 +91,13 @@ class LiveCompletionTests(unittest.TestCase):
     def test_gemini_live_model_streams_via_websocket_completion(self):
         ws = _FakeWS(
             [
+                {"setupComplete": {}},
                 {
                     "serverContent": {
                         "modelTurn": {"parts": [{"text": "ok"}]},
                         "turnComplete": True,
                     },
-                    "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1, "totalTokenCount": 2},
+                    "usageMetadata": {"promptTokenCount": 1, "responseTokenCount": 1, "totalTokenCount": 2},
                 }
             ]
         )
@@ -147,12 +148,13 @@ class LiveCompletionTests(unittest.TestCase):
     def test_module_call_uses_live_completion_transport(self):
         ws = _FakeWS(
             [
+                {"setupComplete": {}},
                 {
                     "serverContent": {
                         "modelTurn": {"parts": [{"text": "ok"}]},
                         "turnComplete": True,
                     },
-                    "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1, "totalTokenCount": 2},
+                    "usageMetadata": {"promptTokenCount": 1, "responseTokenCount": 1, "totalTokenCount": 2},
                 }
             ]
         )
@@ -166,33 +168,33 @@ class LiveCompletionTests(unittest.TestCase):
     def test_gemini_live_model_supports_tool_loop_in_model_call(self):
         ws_round_1 = _FakeWS(
             [
+                {"setupComplete": {}},
                 {
+                    "toolCall": {
+                        "functionCalls": [
+                            {
+                                "id": "call_1",
+                                "name": "get_weather",
+                                "args": {"city": "Montreal"},
+                            }
+                        ]
+                    },
                     "serverContent": {
-                        "modelTurn": {
-                            "parts": [
-                                {
-                                    "functionCall": {
-                                        "id": "call_1",
-                                        "name": "get_weather",
-                                        "args": {"city": "Montreal"},
-                                    }
-                                }
-                            ]
-                        },
                         "turnComplete": True,
                     },
-                    "usageMetadata": {"promptTokenCount": 2, "candidatesTokenCount": 1, "totalTokenCount": 3},
+                    "usageMetadata": {"promptTokenCount": 2, "responseTokenCount": 1, "totalTokenCount": 3},
                 }
             ]
         )
         ws_round_2 = _FakeWS(
             [
+                {"setupComplete": {}},
                 {
                     "serverContent": {
                         "modelTurn": {"parts": [{"text": "Tool says: 22C in Montreal"}]},
                         "turnComplete": True,
                     },
-                    "usageMetadata": {"promptTokenCount": 2, "candidatesTokenCount": 2, "totalTokenCount": 4},
+                    "usageMetadata": {"promptTokenCount": 2, "responseTokenCount": 2, "totalTokenCount": 4},
                 }
             ]
         )
@@ -205,6 +207,125 @@ class LiveCompletionTests(unittest.TestCase):
         agent = Model(lm=lm, model="gemini-2.0-flash-live", provider="gemini")
         resp = agent.call("weather", tools=[get_weather])
         self.assertIn("22C", resp.text or "")
+
+    def test_gemini_live_completion_waits_for_setup_before_sending_prompt(self):
+        ws = _FakeWS(
+            [
+                {"setupComplete": {}},
+                {
+                    "serverContent": {
+                        "modelTurn": {"parts": [{"text": "ok"}]},
+                        "turnComplete": True,
+                    },
+                    "usageMetadata": {"promptTokenCount": 1, "responseTokenCount": 1, "totalTokenCount": 2},
+                },
+            ]
+        )
+        adapter = _GeminiCompletionAdapter([ws])
+
+        req = LMRequest(model="gemini-2.0-flash-live", messages=(Message.user("hi"),), config=Config())
+        events = list(adapter.stream(req))
+
+        self.assertEqual(events[-1].type, "end")
+        self.assertEqual(set(json.loads(ws.sent[0]).keys()), {"setup"})
+        self.assertIn("realtimeInput", json.loads(ws.sent[1]))
+
+    def test_gemini_audio_native_model_uses_audio_modality_and_realtime_input(self):
+        """Audio-native live models (live-preview) must use AUDIO modality,
+        outputAudioTranscription, and send all input via realtimeInput."""
+        from lm15.types import Part as P
+        import base64
+
+        # Build a tiny valid WAV: 44-byte header + 4 bytes PCM
+        import struct
+        pcm = b"\x00\x01\x02\x03"
+        wav = (
+            b"RIFF"
+            + struct.pack("<I", 36 + len(pcm))
+            + b"WAVEfmt "
+            + struct.pack("<IHHIIHH", 16, 1, 1, 16000, 32000, 2, 16)
+            + b"data"
+            + struct.pack("<I", len(pcm))
+            + pcm
+        )
+
+        ws = _FakeWS(
+            [
+                {"setupComplete": {}},
+                # transcription text from outputTranscription
+                {
+                    "serverContent": {
+                        "modelTurn": {
+                            "parts": [{"inlineData": {"mimeType": "audio/pcm;rate=24000", "data": "AAA="}}]
+                        },
+                        "outputTranscription": {"text": "Hello world"},
+                    },
+                },
+                {
+                    "serverContent": {"turnComplete": True},
+                    "usageMetadata": {"promptTokenCount": 10, "responseTokenCount": 2, "totalTokenCount": 12},
+                },
+            ]
+        )
+        adapter = _GeminiCompletionAdapter([ws])
+
+        audio_part = P.audio(data=wav, media_type="audio/wav")
+        msg = Message(role="user", parts=(audio_part, P.text_part("Transcribe this.")))
+        req = LMRequest(model="gemini-3.1-flash-live-preview", messages=(msg,), config=Config())
+        events = list(adapter.stream(req))
+
+        # Check setup uses AUDIO modality + outputAudioTranscription
+        setup = json.loads(ws.sent[0])["setup"]
+        self.assertEqual(setup["generationConfig"]["responseModalities"], ["AUDIO"])
+        self.assertIn("outputAudioTranscription", setup)
+
+        # Content sent as realtimeInput, not clientContent
+        content_msgs = [json.loads(m) for m in ws.sent[1:]]
+        for m in content_msgs:
+            self.assertNotIn("clientContent", m)
+
+        # Audio is sent as realtimeInput.audio with PCM mime
+        audio_msgs = [m for m in content_msgs if "realtimeInput" in m and "audio" in m.get("realtimeInput", {})]
+        self.assertTrue(len(audio_msgs) >= 1)
+        self.assertIn("audio/pcm;rate=16000", audio_msgs[0]["realtimeInput"]["audio"]["mimeType"])
+
+        # Text is sent as realtimeInput.text
+        text_msgs = [m for m in content_msgs if "realtimeInput" in m and "text" in m.get("realtimeInput", {})]
+        self.assertTrue(len(text_msgs) >= 1)
+
+        # outputTranscription appears as a text delta
+        text_deltas = [e for e in events if e.type == "delta" and isinstance(e.delta, PartDelta) and e.delta.type == "text"]
+        self.assertTrue(len(text_deltas) >= 1)
+        self.assertEqual(text_deltas[0].delta.text, "Hello world")
+
+    def test_gemini_audio_native_output_audio_skips_transcription_config(self):
+        """When output='audio', no outputAudioTranscription should be added."""
+        ws = _FakeWS(
+            [
+                {"setupComplete": {}},
+                {
+                    "serverContent": {
+                        "modelTurn": {
+                            "parts": [{"inlineData": {"mimeType": "audio/pcm;rate=24000", "data": "AAA="}}]
+                        },
+                        "turnComplete": True,
+                    },
+                    "usageMetadata": {"promptTokenCount": 1, "responseTokenCount": 1, "totalTokenCount": 2},
+                },
+            ]
+        )
+        adapter = _GeminiCompletionAdapter([ws])
+
+        req = LMRequest(
+            model="gemini-3.1-flash-live-preview",
+            messages=(Message.user("Say hello"),),
+            config=Config(provider={"output": "audio"}),
+        )
+        events = list(adapter.stream(req))
+
+        setup = json.loads(ws.sent[0])["setup"]
+        self.assertEqual(setup["generationConfig"]["responseModalities"], ["AUDIO"])
+        self.assertNotIn("outputAudioTranscription", setup)
 
 
 if __name__ == "__main__":

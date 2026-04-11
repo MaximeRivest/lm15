@@ -7,13 +7,12 @@ Define function tools, detect tool calls, execute tool, return tool result.
 ## Example
 
 ```python
-from lm15 import Message, LMRequest, Part, Tool, build_default
+from lm15 import FunctionTool, Message, LMRequest, Part, TextPart, build_default
 
 lm = build_default(use_pycurl=True)
 
 tools = (
-    Tool(
-        type="function",
+    FunctionTool(
         name="get_weather",
         description="Get weather by city",
         parameters={
@@ -37,7 +36,7 @@ if tool_calls:
     call = tool_calls[0]
     result = Part.tool_result(
         id=call.id,
-        content=[Part.text_part('{"temp_c": 7, "condition": "cloudy"}')],
+        content=[TextPart(text='{"temp_c": 7, "condition": "cloudy"}')],
     )
     followup = LMRequest(
         model=req.model,

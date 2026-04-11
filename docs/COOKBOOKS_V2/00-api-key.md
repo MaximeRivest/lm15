@@ -20,7 +20,10 @@ Not sure what's available? Ask lm15:
 ```python
 import lm15
 print(lm15.providers())
-# {'openai': ('OPENAI_API_KEY',), 'anthropic': ('ANTHROPIC_API_KEY',), 'gemini': ('GEMINI_API_KEY', 'GOOGLE_API_KEY')}
+```
+
+```output | ✓ 122ms | 1 var
+{'openai': ('OPENAI_API_KEY',), 'anthropic': ('ANTHROPIC_API_KEY',), 'gemini': ('GEMINI_API_KEY', 'GOOGLE_API_KEY')}
 ```
 
 ---

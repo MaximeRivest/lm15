@@ -153,11 +153,11 @@ Convert provider JSON to normalized `LMResponse`:
 
 ### Parts normalization targets
 
-- Text -> `Part(type="text", ...)`
-- Tool call -> `Part(type="tool_call", ...)`
-- Refusal -> `Part(type="refusal", ...)`
-- Thinking -> `Part(type="thinking", ...)`
-- Citation -> `Part(type="citation", ...)`
+- Text -> `TextPart(...)`
+- Tool call -> `ToolCallPart(...)`
+- Refusal -> `RefusalPart(...)`
+- Thinking -> `ThinkingPart(...)`
+- Citation -> `CitationPart(...)`
 
 ---
 

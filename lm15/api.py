@@ -11,7 +11,7 @@ from .factory import build_default, providers as _providers
 from .live import AsyncLiveSession
 from .model import Model, callable_to_tool
 from .result import AsyncResult, Result
-from .types import AudioFormat, LMRequest, LiveConfig, Part, Tool
+from .types import AudioFormat, BuiltinTool, FunctionTool, LMRequest, LiveConfig, Part, Tool
 
 
 _defaults: dict[str, Any] = {}
@@ -64,13 +64,12 @@ def _normalize_runtime_tools(tools: list[Tool | Callable[..., Any] | str]) -> tu
         if isinstance(t, Tool):
             out.append(t)
         elif isinstance(t, str):
-            out.append(Tool(name=t, type="builtin"))
+            out.append(BuiltinTool(name=t))
         elif callable(t):
             inferred = callable_to_tool(t)
             out.append(
-                Tool(
+                FunctionTool(
                     name=inferred.name,
-                    type=inferred.type,
                     description=inferred.description,
                     parameters=inferred.parameters,
                     fn=t,

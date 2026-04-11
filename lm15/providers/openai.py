@@ -14,6 +14,7 @@ from ..transports.base import HttpRequest, HttpResponse, Transport
 from ..types import (
     AudioGenerationRequest,
     AudioGenerationResponse,
+    AudioPart,
     BatchRequest,
     BatchResponse,
     DataSource,
@@ -23,6 +24,7 @@ from ..types import (
     FileUploadResponse,
     ImageGenerationRequest,
     ImageGenerationResponse,
+    ImagePart,
     LMRequest,
     LMResponse,
     LiveClientEvent,
@@ -239,11 +241,11 @@ class OpenAIAdapter(BaseProviderAdapter):
                     elif ctype == "output_image":
                         b64 = c.get("b64_json") or c.get("image_base64") or ""
                         if b64:
-                            parts.append(Part(type="image", source=DataSource(type="base64", media_type="image/png", data=b64)))
+                            parts.append(ImagePart(source=DataSource(type="base64", media_type="image/png", data=b64)))
                     elif ctype == "output_audio":
                         b64 = c.get("audio", {}).get("data") or c.get("b64_json") or ""
                         if b64:
-                            parts.append(Part(type="audio", source=DataSource(type="base64", media_type="audio/wav", data=b64)))
+                            parts.append(AudioPart(source=DataSource(type="base64", media_type="audio/wav", data=b64)))
             elif item.get("type") == "function_call":
                 args = item.get("arguments")
                 parsed_args = json.loads(args) if isinstance(args, str) and args else {}

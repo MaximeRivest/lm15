@@ -6,9 +6,9 @@ Use `Tool` objects when you need full control over execution: async backends, ap
 
 ```python
 import lm15
-from lm15 import Tool
+from lm15 import FunctionTool
 
-weather = Tool(
+weather = FunctionTool(
     name="get_weather",
     description="Get weather by city",
     parameters={
@@ -37,9 +37,9 @@ print(resp.text)
 
 ```python
 import lm15
-from lm15 import Conversation, Tool
+from lm15 import Conversation, FunctionTool
 
-weather = Tool(
+weather = FunctionTool(
     name="get_weather",
     description="Get weather by city",
     parameters={
@@ -77,9 +77,9 @@ for c in resp.citations:
 
 ```python
 import lm15
-from lm15 import Tool
+from lm15 import FunctionTool
 
-search = Tool(
+search = FunctionTool(
     name="search",
     description="Search the web",
     parameters={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},

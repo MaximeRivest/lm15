@@ -12,7 +12,7 @@ from lm15.client import UniversalLM
 from lm15.live import AsyncLiveSession
 from lm15.providers.gemini import GeminiAdapter
 from lm15.providers.openai import OpenAIAdapter
-from lm15.types import LiveConfig, Tool
+from lm15.types import FunctionTool, LiveConfig, Tool
 
 
 class _DummyTransport:
@@ -114,7 +114,7 @@ class LiveRuntimeTests(unittest.TestCase):
         def get_weather(city: str) -> str:
             return f"22C in {city}"
 
-        tool = Tool(
+        tool = FunctionTool(
             name="get_weather",
             parameters={"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]},
             fn=get_weather,
@@ -133,6 +133,7 @@ class LiveRuntimeTests(unittest.TestCase):
     def test_gemini_live_send_and_receive(self):
         ws = _FakeWS(
             [
+                {"setupComplete": {}},
                 {
                     "serverContent": {
                         "modelTurn": {"parts": [{"text": "ok"}]},
@@ -140,7 +141,7 @@ class LiveRuntimeTests(unittest.TestCase):
                     },
                     "usageMetadata": {
                         "promptTokenCount": 1,
-                        "candidatesTokenCount": 1,
+                        "responseTokenCount": 1,
                         "totalTokenCount": 2,
                     },
                 }
@@ -164,6 +165,57 @@ class LiveRuntimeTests(unittest.TestCase):
         e2 = session.recv()
         self.assertEqual(e2.type, "turn_end")
         self.assertEqual(e2.usage.total_tokens, 2)
+
+    def test_gemini_live_uses_setup_ack_audio_field_and_tool_response(self):
+        ws = _FakeWS(
+            [
+                {"setupComplete": {}},
+                {
+                    "toolCall": {
+                        "functionCalls": [
+                            {
+                                "id": "call_1",
+                                "name": "get_weather",
+                                "args": {"city": "Montreal"},
+                            }
+                        ]
+                    }
+                },
+            ]
+        )
+        adapter = _GeminiTestAdapter(ws=ws)
+
+        def get_weather(city: str) -> str:
+            return f"22C in {city}"
+
+        tool = FunctionTool(
+            name="get_weather",
+            parameters={"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]},
+            fn=get_weather,
+        )
+
+        session = adapter.live(LiveConfig(model="gemini-2.0-flash-live", tools=(tool,)))
+        session.send(audio="AAAA")
+        event = session.recv()
+        self.assertEqual(event.type, "tool_call")
+        self.assertEqual(event.id, "call_1")
+
+        sent = [json.loads(x) for x in ws.sent]
+        self.assertEqual(set(sent[0].keys()), {"setup"})
+        self.assertEqual(sent[1], {"realtimeInput": {"audio": {"mimeType": "audio/pcm", "data": "AAAA"}}})
+        self.assertEqual(
+            sent[2],
+            {
+                "toolResponse": {
+                    "functionResponses": [
+                        {
+                            "id": "call_1",
+                            "response": {"output": [{"text": "22C in Montreal"}]},
+                        }
+                    ]
+                }
+            },
+        )
 
 
 class LiveAPITests(unittest.TestCase):

@@ -20,6 +20,7 @@ from ..types import (
     Part,
     PartDelta,
     StreamEvent,
+    ThinkingPart,
     Usage,
 )
 from ..errors import (
@@ -216,9 +217,9 @@ class AnthropicAdapter(BaseProviderAdapter):
             elif bt == "tool_use":
                 parts.append(Part.tool_call(id=block.get("id", ""), name=block.get("name", ""), input=block.get("input", {})))
             elif bt == "thinking":
-                parts.append(Part(type="thinking", text=block.get("thinking", ""), redacted=False))
+                parts.append(ThinkingPart(text=block.get("thinking", ""), redacted=False))
             elif bt == "redacted_thinking":
-                parts.append(Part(type="thinking", text="[redacted]", redacted=True))
+                parts.append(ThinkingPart(text="[redacted]", redacted=True))
 
         finish = "tool_call" if any(p.type == "tool_call" for p in parts) else "stop"
         usage = Usage(

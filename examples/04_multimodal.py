@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from lm15 import DataSource, LMRequest, Message, Part, build_default
+from lm15 import DataSource, ImagePart, LMRequest, Message, Part, TextPart, build_default
 
 
 def main() -> None:
@@ -19,10 +19,10 @@ def main() -> None:
         return
 
     lm = build_default(use_pycurl=True)
-    image = Part(type="image", source=DataSource(type="url", url="https://example.com/cat.jpg", media_type="image/jpeg", detail="low"))
+    image = ImagePart(source=DataSource(type="url", url="https://example.com/cat.jpg", media_type="image/jpeg", detail="low"))
     req = LMRequest(
         model="gemini-2.0-flash-lite",
-        messages=(Message(role="user", parts=(image, Part.text_part("Describe this image in one sentence."))),),
+        messages=(Message(role="user", parts=(image, TextPart(text="Describe this image in one sentence."))),),
     )
     resp = lm.complete(req, provider="gemini")
     print(resp.text or "")

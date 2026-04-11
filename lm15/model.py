@@ -10,7 +10,7 @@ from .client import UniversalLM
 from .errors import RateLimitError, ServerError, TimeoutError, TransportError
 from .live import AsyncLiveSession
 from .result import AsyncResult, Result, response_to_events
-from .types import AudioFormat, Config, FileUploadRequest, LMRequest, LMResponse, LiveConfig, Message, Part, Tool
+from .types import AudioFormat, BuiltinTool, Config, FileUploadRequest, FunctionTool, LMRequest, LMResponse, LiveConfig, Message, Part, Tool
 
 
 class _Unset:
@@ -54,9 +54,8 @@ def callable_to_tool(fn: Callable[..., Any]) -> Tool:
     if required:
         schema["required"] = required
 
-    return Tool(
+    return FunctionTool(
         name=fn.__name__,
-        type="function",
         description=(inspect.getdoc(fn) or "").strip() or None,
         parameters=schema,
     )
@@ -496,7 +495,7 @@ class Model:
                 if t.fn is not None and callable(t.fn):
                     registry[t.name] = t.fn
             elif isinstance(t, str):
-                out.append(Tool(name=t, type="builtin"))
+                out.append(BuiltinTool(name=t))
             elif callable(t):
                 tool = callable_to_tool(t)
                 out.append(tool)
