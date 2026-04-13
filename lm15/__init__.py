@@ -8,6 +8,7 @@ except Exception:
 from .api import acall, alive, call, configure, live, model, models, prepare, providers, providers_info, send, stream, upload
 from .capabilities import hydrate_with_specs
 from .cost import CostBreakdown, estimate_cost, enable_cost_tracking, disable_cost_tracking
+from . import curl
 from .client import UniversalLM
 from .conversation import Conversation
 from .live import AsyncLiveSession
