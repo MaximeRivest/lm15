@@ -380,6 +380,125 @@ _PART_TYPE_MAP: dict[PartType, type[Part]] = {
 }
 
 
+def part_to_dict(part: Part) -> dict[str, Any]:
+    """Serialize a Part to the canonical lm15 JSON format."""
+    d: dict[str, Any] = {"type": part.type}
+    if part.type == "text":
+        d["text"] = part.text or ""
+    elif part.type == "thinking":
+        d["text"] = part.text or ""
+        if part.redacted is not None:
+            d["redacted"] = part.redacted
+        if part.summary is not None:
+            d["summary"] = part.summary
+    elif part.type == "refusal":
+        d["text"] = part.text or ""
+    elif part.type == "citation":
+        if part.text is not None:
+            d["text"] = part.text
+        if part.url is not None:
+            d["url"] = part.url
+        if part.title is not None:
+            d["title"] = part.title
+    elif part.type in ("image", "audio", "video", "document"):
+        if part.source is not None:
+            src: dict[str, Any] = {"type": part.source.type}
+            if part.source.url is not None:
+                src["url"] = part.source.url
+            if part.source.data is not None:
+                src["data"] = part.source.data
+            if part.source.media_type is not None:
+                src["media_type"] = part.source.media_type
+            if part.source.file_id is not None:
+                src["file_id"] = part.source.file_id
+            if part.source.detail is not None:
+                src["detail"] = part.source.detail
+            d["source"] = src
+    elif part.type == "tool_call":
+        d["id"] = part.id
+        d["name"] = part.name
+        d["arguments"] = part.input or {}
+    elif part.type == "tool_result":
+        d["id"] = part.id
+        if part.name is not None:
+            d["name"] = part.name
+        if part.content:
+            d["content"] = [part_to_dict(p) for p in part.content]
+        else:
+            d["content"] = ""
+        if part.is_error is not None:
+            d["is_error"] = part.is_error
+    if getattr(part, "metadata", None) is not None:
+        d["metadata"] = part.metadata
+    return d
+
+
+def part_from_dict(d: dict[str, Any]) -> Part:
+    """Deserialize a Part from the canonical lm15 JSON format."""
+    t = d["type"]
+    if t == "text":
+        return TextPart(text=d.get("text", ""), metadata=d.get("metadata"))
+    if t == "thinking":
+        return ThinkingPart(text=d.get("text", ""), redacted=d.get("redacted"),
+                            summary=d.get("summary"), metadata=d.get("metadata"))
+    if t == "refusal":
+        return RefusalPart(text=d.get("text", ""))
+    if t == "citation":
+        return CitationPart(text=d.get("text"), url=d.get("url"), title=d.get("title"))
+    if t in ("image", "audio", "video", "document"):
+        src = d.get("source", {})
+        source = DataSource(
+            type=src.get("type", "url"),
+            url=src.get("url"),
+            data=src.get("data"),
+            media_type=src.get("media_type"),
+            file_id=src.get("file_id"),
+            detail=src.get("detail"),
+        )
+        part_cls = _PART_TYPE_MAP[t]
+        return part_cls(source=source, metadata=d.get("metadata"))
+    if t == "tool_call":
+        return ToolCallPart(id=d["id"], name=d["name"], input=d.get("arguments", {}))
+    if t == "tool_result":
+        raw_content = d.get("content", "")
+        if isinstance(raw_content, str):
+            content = (TextPart(text=raw_content),) if raw_content else ()
+        elif isinstance(raw_content, list):
+            content = tuple(part_from_dict(c) if isinstance(c, dict) else TextPart(text=str(c)) for c in raw_content)
+        else:
+            content = ()
+        return ToolResultPart(id=d["id"], name=d.get("name"), content=content, is_error=d.get("is_error"))
+    raise ValueError(f"unsupported part type: {t}")
+
+
+def message_to_dict(msg: "Message") -> dict[str, Any]:
+    """Serialize a Message to the canonical lm15 JSON format."""
+    d: dict[str, Any] = {"role": msg.role, "parts": [part_to_dict(p) for p in msg.parts]}
+    if msg.name is not None:
+        d["name"] = msg.name
+    return d
+
+
+def message_from_dict(d: dict[str, Any]) -> "Message":
+    """Deserialize a Message from the canonical lm15 JSON format."""
+    role = d["role"]
+    parts_raw = d.get("parts", [])
+    parts = tuple(part_from_dict(p) if isinstance(p, dict) else Part.text_part(str(p)) for p in parts_raw)
+    if not parts:
+        raise ValueError(f"message for role '{role}' has no parts")
+    return Message(role=role, parts=parts, name=d.get("name"))
+
+
+def messages_to_json(messages: list["Message"] | tuple["Message", ...]) -> list[dict[str, Any]]:
+    """Serialize a list of Messages to the canonical lm15 JSON format."""
+    return [message_to_dict(m) for m in messages]
+
+
+def messages_from_json(data: list[dict[str, Any]]) -> list["Message"]:
+    """Deserialize a list of Messages from the canonical lm15 JSON format."""
+    return [message_from_dict(d) for d in data]
+
+
 class Tool:
     type: ClassVar[ToolType]
     _missing_defaults: ClassVar[dict[str, Any]] = {

@@ -179,10 +179,49 @@ class OpenAIAdapter(BaseProviderAdapter):
             "Content-Type": content_type,
         }
 
+    def _build_input(self, messages: tuple) -> list[dict]:
+        """Convert lm15 Messages to OpenAI Responses API input items.
+
+        Handles tool_call parts → function_call items and
+        tool_result parts → function_call_output items at the top level.
+        """
+        items: list[dict] = []
+        for msg in messages:
+            if msg.role == "tool":
+                for part in msg.parts:
+                    if part.type == "tool_result" and part.id:
+                        output = "\n".join(
+                            p.text or "" for p in part.content
+                            if p.type in {"text", "thinking", "refusal"} and p.text
+                        )
+                        if not output:
+                            output = json.dumps([{"type": p.type} for p in part.content]) if part.content else ""
+                        items.append({
+                            "type": "function_call_output",
+                            "call_id": part.id,
+                            "output": output,
+                        })
+                continue
+
+            content_parts = [part_to_openai_input(p) for p in msg.parts
+                             if p.type not in {"tool_call", "tool_result"}]
+            if content_parts:
+                items.append({"role": msg.role, "content": content_parts})
+
+            for part in msg.parts:
+                if part.type == "tool_call" and part.id and part.name:
+                    items.append({
+                        "type": "function_call",
+                        "call_id": part.id,
+                        "name": part.name,
+                        "arguments": json.dumps(part.input or {}, separators=(',', ':')),
+                    })
+        return items
+
     def _payload(self, request: LMRequest, stream: bool) -> dict:
         payload = {
             "model": request.model,
-            "input": [message_to_openai_input(m) for m in request.messages],
+            "input": self._build_input(request.messages),
             "stream": stream,
         }
         if request.system:

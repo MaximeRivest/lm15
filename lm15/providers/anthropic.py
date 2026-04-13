@@ -143,13 +143,23 @@ class AnthropicAdapter(BaseProviderAdapter):
             out = {"type": "image", "source": ds_to_anthropic_source(p.source)}
         elif p.type == "document" and p.source:
             out = {"type": "document", "source": ds_to_anthropic_source(p.source)}
-        elif p.type == "tool_result":
+        elif p.type == "tool_call":
             out = {
+                "type": "tool_use",
+                "id": p.id,
+                "name": p.name,
+                "input": p.input or {},
+            }
+        elif p.type == "tool_result":
+            content_text = parts_to_text(p.content) if p.content else ""
+            out: dict[str, Any] = {
                 "type": "tool_result",
                 "tool_use_id": p.id,
-                "is_error": bool(p.is_error),
-                "content": [{"type": "text", "text": parts_to_text(p.content)}],
             }
+            if content_text:
+                out["content"] = content_text
+            if p.is_error:
+                out["is_error"] = True
         else:
             out = {"type": "text", "text": p.text or ""}
 
@@ -164,7 +174,7 @@ class AnthropicAdapter(BaseProviderAdapter):
         provider_cfg = request.config.provider or {}
         prompt_caching = bool(provider_cfg.get("prompt_caching"))
 
-        messages = [{"role": m.role, "content": [self._part(p) for p in m.parts]} for m in request.messages]
+        messages = [{"role": "user" if m.role == "tool" else m.role, "content": [self._part(p) for p in m.parts]} for m in request.messages]
         if prompt_caching and len(messages) >= 2 and messages[-2].get("content"):
             prev_last = messages[-2]["content"][-1]
             prev_last.setdefault("cache_control", {"type": "ephemeral"})

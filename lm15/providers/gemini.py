@@ -192,13 +192,25 @@ class GeminiAdapter(BaseProviderAdapter):
                 return {"inlineData": {"mimeType": mime, "data": p.source.data}}
             if p.source.type == "file":
                 return {"fileData": {"mimeType": mime, "fileUri": p.source.file_id}}
-        if p.type == "tool_result":
-            return {
-                "functionResponse": {
-                    "name": p.name or "tool",
-                    "response": {"result": {"text": "".join(x.text or "" for x in p.content if x.type == "text")}},
+        if p.type == "tool_call":
+            out: dict[str, Any] = {
+                "functionCall": {
+                    "name": p.name or "",
+                    "args": p.input or {},
                 }
             }
+            if p.id:
+                out["functionCall"]["id"] = p.id
+            return out
+        if p.type == "tool_result":
+            result_text = "".join(x.text or "" for x in p.content if x.type == "text")
+            fr: dict[str, Any] = {
+                "name": p.name or "tool",
+                "response": {"result": result_text},
+            }
+            if p.id:
+                fr["id"] = p.id
+            return {"functionResponse": fr}
         return {"text": p.text or ""}
 
     def _payload(self, request: LMRequest) -> dict[str, Any]:
