@@ -55,6 +55,21 @@ from ..errors import (
 )
 from .base import BaseProviderAdapter
 
+# Canonical builtin tool name → Gemini tool format key
+_GEMINI_BUILTIN_MAP: dict[str, str] = {
+    "web_search": "googleSearch",
+    "code_execution": "codeExecution",
+}
+
+
+def _builtin_to_gemini(tool: Any) -> dict[str, Any]:
+    """Convert a BuiltinTool to Gemini wire format."""
+    wire_key = _GEMINI_BUILTIN_MAP.get(tool.name)
+    if wire_key:
+        return {wire_key: tool.builtin_config or {}}
+    # Unknown builtin — pass name as key
+    return {tool.name: tool.builtin_config or {}}
+
 
 @dataclass(slots=True)
 class GeminiAdapter(BaseProviderAdapter):
@@ -243,19 +258,22 @@ class GeminiAdapter(BaseProviderAdapter):
             payload["generationConfig"] = cfg
 
         if request.tools:
-            payload["tools"] = [
+            func_decls = [
                 {
-                    "functionDeclarations": [
-                        {
-                            "name": t.name,
-                            "description": t.description,
-                            "parameters": t.parameters or {"type": "OBJECT", "properties": {}},
-                        }
-                        for t in request.tools
-                        if t.type == "function"
-                    ]
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.parameters or {"type": "OBJECT", "properties": {}},
                 }
+                for t in request.tools
+                if t.type == "function"
             ]
+            tools_wire: list[dict] = []
+            if func_decls:
+                tools_wire.append({"functionDeclarations": func_decls})
+            for t in request.tools:
+                if t.type == "builtin":
+                    tools_wire.append(_builtin_to_gemini(t))
+            payload["tools"] = tools_wire
 
         if prompt_caching:
             self._apply_prompt_cache(request, payload)

@@ -51,6 +51,23 @@ from ..errors import (
 from .base import BaseProviderAdapter
 from .common import message_to_openai_input, part_to_openai_input
 
+# Canonical builtin tool name → OpenAI tool type
+_OPENAI_BUILTIN_MAP: dict[str, str] = {
+    "web_search": "web_search_preview",
+    "code_execution": "code_interpreter",
+    "file_search": "file_search",
+    "computer_use": "computer_use_preview",
+}
+
+
+def _builtin_to_openai(tool: Any) -> dict[str, Any]:
+    """Convert a BuiltinTool to OpenAI wire format."""
+    wire_type = _OPENAI_BUILTIN_MAP.get(tool.name, tool.name)
+    out: dict[str, Any] = {"type": wire_type}
+    if tool.builtin_config:
+        out.update(tool.builtin_config)
+    return out
+
 
 def _parse_json_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
@@ -231,16 +248,18 @@ class OpenAIAdapter(BaseProviderAdapter):
         if request.config.temperature is not None:
             payload["temperature"] = request.config.temperature
         if request.tools:
-            payload["tools"] = [
-                {
-                    "type": "function",
-                    "name": t.name,
-                    "description": t.description,
-                    "parameters": t.parameters or {"type": "object", "properties": {}},
-                }
-                for t in request.tools
-                if t.type == "function"
-            ]
+            tools_wire: list[dict] = []
+            for t in request.tools:
+                if t.type == "function":
+                    tools_wire.append({
+                        "type": "function",
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.parameters or {"type": "object", "properties": {}},
+                    })
+                elif t.type == "builtin":
+                    tools_wire.append(_builtin_to_openai(t))
+            payload["tools"] = tools_wire
         if request.config.response_format:
             payload.update(request.config.response_format)
         if request.config.provider:

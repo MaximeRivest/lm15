@@ -38,6 +38,26 @@ from ..errors import (
 from .base import BaseProviderAdapter
 from .common import ds_to_anthropic_source, parts_to_text
 
+# Canonical builtin tool name → Anthropic tool format
+_ANTHROPIC_BUILTIN_MAP: dict[str, str] = {
+    "code_execution": "code_execution_20250522",
+}
+
+
+def _builtin_to_anthropic(tool: Any) -> dict[str, Any]:
+    """Convert a BuiltinTool to Anthropic wire format."""
+    wire_type = _ANTHROPIC_BUILTIN_MAP.get(tool.name)
+    if wire_type:
+        out: dict[str, Any] = {"type": wire_type, "name": tool.name}
+        if tool.builtin_config:
+            out.update(tool.builtin_config)
+        return out
+    # Unknown builtin — pass name as type
+    out = {"type": tool.name, "name": tool.name}
+    if tool.builtin_config:
+        out.update(tool.builtin_config)
+    return out
+
 
 @dataclass(slots=True)
 class AnthropicAdapter(BaseProviderAdapter):
@@ -196,11 +216,13 @@ class AnthropicAdapter(BaseProviderAdapter):
         if request.config.temperature is not None:
             payload["temperature"] = request.config.temperature
         if request.tools:
-            payload["tools"] = [
-                {"name": t.name, "description": t.description, "input_schema": t.parameters or {"type": "object", "properties": {}}}
-                for t in request.tools
-                if t.type == "function"
-            ]
+            tools_wire: list[dict] = []
+            for t in request.tools:
+                if t.type == "function":
+                    tools_wire.append({"name": t.name, "description": t.description, "input_schema": t.parameters or {"type": "object", "properties": {}}})
+                elif t.type == "builtin":
+                    tools_wire.append(_builtin_to_anthropic(t))
+            payload["tools"] = tools_wire
         if request.config.reasoning and request.config.reasoning.get("enabled"):
             payload["thinking"] = {"type": "enabled", "budget_tokens": request.config.reasoning.get("budget", 1024)}
         if provider_cfg:
