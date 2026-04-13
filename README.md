@@ -1,4 +1,6 @@
-# lm15
+<p align="center">
+  <img src="https://raw.githubusercontent.com/lm15-dev/.github/main/assets/banners/banner-1200x300.png" alt="lm15" width="600">
+</p>
 
 [![PyPI version](https://img.shields.io/pypi/v/lm15.svg)](https://pypi.org/project/lm15/)
 [![Python 3.10+](https://img.shields.io/pypi/pyversions/lm15.svg)](https://pypi.org/project/lm15/)
