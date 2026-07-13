@@ -20,20 +20,39 @@ language-neutrally so each port can implement it idiomatically.
 ### Required behavior
 
 1. **Model-string grammar.** Split the input on the FIRST `:`. If the
-   head is a known provider string (a key of *that implementation's*
-   adapter table — a port lacking an adapter treats its prefix as part
-   of a bare id) AND the remainder is non-empty, the remainder is the
-   wire model id. Otherwise the entire string (colons included) is a
+   head is a routable provider string (a key of *that implementation's*
+   adapter table or preset-route table — a port lacking an adapter
+   treats its prefix as part of a bare id) AND the remainder is
+   non-empty, the remainder is the wire model id. Otherwise the entire string (colons included) is a
    bare model id; in particular `"openai:"` (empty remainder) is the
    bare id `"openai:"` and falls through to the catalog and rule rungs.
    An empty or non-string input is an unknown-model error. Consequence
    to preserve: a fine-tune id like `ft:gpt-4.1:org` requires the
    explicit `openai:ft:gpt-4.1:org`.
 2. **Provider strings** are the existing canonical ones: `openai`,
-   `openai_chat`, `anthropic`, `gemini`, `claude-code`, `openai-codex`.
-   The adapter table is hardcoded, exported, and inspectable data.
-3. **Resolution algorithm** — exactly three rungs, fixed order, first
+   `openai_chat`, `anthropic`, `gemini`, `claude-code`, `openai-codex` —
+   plus the Chat Completions **preset routes**: `groq`, `openrouter`,
+   `ollama`, `vllm`, `sglang`. A preset route is pure data (provider
+   string doubling as the compat preset name, that server's `env_keys`
+   convention, an optional `default_key` placeholder for keyless local
+   servers) and routes to the implementation's Chat Completions adapter
+   with that preset (which also supplies the server's pinned default
+   base URL). Both tables are hardcoded, exported, and inspectable
+   data; preset entries land with live receipts first, like every
+   provider behavior.
+3. **Resolution algorithm** — exactly four rungs, fixed order, first
    match wins, order not configurable:
+      0. *object* — a `provider` attribute carried by the model value
+         itself, when the value is the language's string type extended
+         with metadata (Python: a `str` subclass attribute; TS: a
+         property on a String-compatible object; Rust/Go: an optional
+         `ProviderCarrier`-style interface/trait on a model-id type;
+         Julia: a field on an `AbstractString` subtype). Duck-typed —
+         the router names no catalog package. A non-empty string
+         attribute naming a routable provider settles resolution (the
+         wire id is the value normalized to a plain string); anything
+         else falls through, and the unknown-model error mentions the
+         unroutable attribute when nothing later matches.
       1. *prefix* — explicit `provider:` form.
       2. *catalog* — only when the caller supplied a model registry.
          Match against `ModelInfo.id` and `aliases`; an exact-id match
@@ -44,8 +63,9 @@ language-neutrally so each port can implement it idiomatically.
          exact-id precedence is applied, multiple matching entries from
          the same provider are also an ambiguity **error** — never
          resolved by registry iteration order, which is unspecified.
-         A catalog match naming a provider with no adapter → unknown-model
-         error pointing at direct LM construction.
+         A catalog match naming a provider with no adapter and no
+         preset route → unknown-model error pointing at direct LM
+         construction.
       3. *rule* — a flat, ordered prefix→provider table; ships with
          built-in defaults (`claude-`→anthropic; `gpt-`, `o1`, `o3`,
          `o4`→openai; `gemini-`→gemini), caller-replaceable as plain data.
@@ -61,8 +81,10 @@ language-neutrally so each port can implement it idiomatically.
 4. **Resolution is self-explaining.** `resolve()` performs no network
    I/O and reads no secret *values*. It returns a `Resolution` record:
    `requested`, `model` (wire id), `provider`, `adapter`, `source`
-   (`"prefix" | "catalog" | "rule"`), the matched rule, `env_key`
-   (which variable *would* be read — name only), catalog `model_info`.
+   (`"object" | "prefix" | "catalog" | "rule"`), the matched rule,
+   `env_key` (which variable *would* be read — name only), catalog
+   `model_info`, and `compat` (the preset name when routed through a
+   preset route, else absent).
    `adapter` is an implementation-defined display string (the LM class
    name in Python, e.g. `"AnthropicLM"`); it is excluded from
    conformance fixtures — ports key behavior on `provider`. A
@@ -78,10 +100,18 @@ language-neutrally so each port can implement it idiomatically.
    secret values; env handling is unfixtured.
 5. **Credential resolution** (in `lm()` only): explicit per-provider
    key map (display-suppressed) beats environment; environment lookup
-   uses the provider's existing `ProviderManifest.env_keys` in order,
-   first set wins. No new env vars. OAuth providers (`claude-code`,
-   `openai-codex`) take no key and use their self-resolving
-   constructors. The env mapping must be injectable for hermetic tests.
+   uses the provider's existing `ProviderManifest.env_keys` — or the
+   preset route's own `env_keys` — in order, first set wins; keyless
+   local presets then fall back to their `default_key` placeholder. No
+   new env vars. Key-map values may be static strings or zero-argument
+   **credential providers** (per-language idiom: callable in Python/TS,
+   trait object in Rust, function value or interface in Go), passed
+   through to the adapter and resolved once per request at
+   request-build time — acquisition stays the caller's job and is out
+   of contract; only placement is specified. OAuth providers
+   (`claude-code`, `openai-codex`) take no key and use their
+   self-resolving constructors. The env mapping must be injectable for
+   hermetic tests.
 6. **LM construction and caching**: at most one LM per provider, built
    lazily, reused. `lm()` returns the *ordinary* provider LM type — the
    escape hatch to direct configuration is the return value itself.

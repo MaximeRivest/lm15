@@ -3,7 +3,7 @@
 `LMRouter` turns a model string into the right provider LM. It is the
 recommended front door because it removes the one piece of boilerplate
 every program repeats — "which class, which env var" — without adding a
-framework: three fixed resolution rungs, a printable rule table, and a
+framework: four fixed resolution rungs, a printable rule table, and a
 `Resolution` value that tells you exactly what happened. The direct LM
 classes remain first-class; both paths produce the identical `Request`
 and wire bytes.
@@ -24,10 +24,10 @@ iterator from `stream`; `resolve()` stays sync because it is pure).
 
 ## The model-string grammar
 
-A model string is split on the **first** `:`. If the head is a known
-provider string (a key of `lm15.ADAPTERS`), the remainder is the model id
-sent on the wire. Otherwise the whole string — colons and all — is a bare
-model id.
+A model string is split on the **first** `:`. If the head is a routable
+provider string (a key of `lm15.ADAPTERS` or of `lm15.CHAT_PRESET_ROUTES`),
+the remainder is the model id sent on the wire. Otherwise the whole
+string — colons and all — is a bare model id.
 
 ```text
 "anthropic:claude-sonnet-4-5"   provider prefix + wire id
@@ -37,13 +37,23 @@ model id.
 ```
 
 Known providers: `openai` (Responses API), `openai_chat` (Chat
-Completions), `anthropic`, `gemini`, `claude-code`, `openai-codex`.
+Completions), `anthropic`, `gemini`, `claude-code`, `openai-codex` — plus
+the Chat Completions preset providers `groq`, `openrouter`, `ollama`,
+`vllm`, and `sglang`, which route to `OpenAIChatLM(compat=<preset>)` with
+that server's default `base_url`.
 
 ## How resolution works, step by step
 
-`resolve()` walks exactly three rungs, in a fixed order you cannot
+`resolve()` walks exactly four rungs, in a fixed order you cannot
 reconfigure. First match wins; no fallback chains, no plugins.
 
+0. **Object attribute.** If the model *value* carries a non-empty string
+   `provider` attribute naming a routable provider, that settles it.
+   Catalog packages (aimo, …) ship model ids as `str` subclasses that
+   know their provider; the check is duck-typed, so lm15 names no
+   package, and a plain string never triggers it. An attribute naming
+   nothing routable falls through (and is mentioned if nothing else
+   matches either). Source: `"object"`.
 1. **Explicit prefix.** `"openai:gpt-4.1-mini"` → provider `openai`, wire
    model `gpt-4.1-mini`. Source: `"prefix"`. Always available, always
    unambiguous.
@@ -77,7 +87,8 @@ print(res)            # 'claude-sonnet-4-5' -> provider 'anthropic' (AnthropicLM
 
 Every field is typed: `requested`, `model` (wire id), `provider`,
 `adapter`, `source`, `rule`, `env_key`, `model_info` (catalog metadata
-when source is `"catalog"`).
+when source is `"catalog"`), `compat` (the preset name when routed
+through `CHAT_PRESET_ROUTES`).
 
 ## Credentials
 
@@ -85,9 +96,17 @@ when source is `"catalog"`).
 
 1. `RouterConfig(api_keys={"anthropic": "..."})` — explicit, repr-suppressed,
    beats the environment. Pass `env={}` too for fully hermetic tests.
-2. The provider's `ProviderManifest.env_keys`, first set variable wins —
-   the same declaration `lm15.auth` and the adapters already use. The
-   router adds no new env vars.
+   A value may also be a zero-argument **credential provider** callable
+   (an Azure Entra `get_bearer_token_provider(...)`, your own rotation
+   logic); the adapter resolves it per request, so long-lived clients
+   never hold a stale token.
+2. The provider's `ProviderManifest.env_keys` — or, for preset
+   providers, the server's own convention (`GROQ_API_KEY`,
+   `OPENROUTER_API_KEY`) — first set variable wins. The router adds no
+   new env vars.
+3. For keyless local servers (`ollama`, `vllm`, `sglang`), the preset's
+   placeholder key. These servers accept any value; override via
+   `api_keys` if yours is locked down.
 
 No key found → `MissingCredentialError`, which subclasses the existing
 `NotConfiguredError` so current handlers keep working. OAuth providers
@@ -120,9 +139,13 @@ package implements it. The guardrail there applies here too: catalog data
 is advisory metadata. It selects a provider and canonicalizes an alias —
 it never changes what `build_request` produces.
 
-If the catalog resolves to a provider lm15 has no adapter for (say, a
-hosted OpenAI-compatible service), the error says so and points you at
-constructing `OpenAIChatLM` with a `base_url` directly.
+Catalog model objects that carry a `provider` attribute (aimo's do)
+resolve on rung 0 before the catalog is even consulted — pass the object
+itself as `Request.model` and ambiguity over bare ids disappears.
+
+If the catalog resolves to a provider lm15 has neither an adapter nor a
+compat preset for, the error says so and points you at constructing
+`OpenAIChatLM` with a `base_url` directly.
 
 ## Without a catalog
 
@@ -137,10 +160,11 @@ you had supplied one.
 Both paths are first-class. Skip the router and construct the LM
 yourself when:
 
-- you need a **custom `base_url`, transport, or compat preset** — ollama,
-  vLLM, Azure, OpenRouter. The router deliberately has no syntax for
-  this; `OpenAIChatLM(api_key=..., compat="ollama")` is the documented
-  path and is one line.
+- you need a **custom `base_url`, transport, or compat policy** — Azure,
+  a self-hosted gateway, a nonstandard port. The router deliberately has
+  no syntax for this; `OpenAIChatLM(api_key=..., compat="ollama",
+  base_url=...)` is the documented path and is one line. (The stock
+  groq/openrouter/ollama/vllm/sglang endpoints route by name already.)
 - you are a **library** wrapping lm15: take an LM object from your
   caller; don't impose string parsing on your API.
 - you want **zero resolution logic** in the call path, or several
@@ -165,6 +189,7 @@ router = LMRouter(config=RouterConfig(rules=rules))
 ```
 
 First match wins, so prepend to override. Note that a rule can only name
-a provider in `ADAPTERS` — pointing `glm-` at `openai_chat` routes the
-request, but a non-default `base_url` still requires constructing the LM
-directly (see the escape hatch above).
+a routable provider (`ADAPTERS` or `CHAT_PRESET_ROUTES`) — pointing
+`glm-` at `openai_chat` routes the request, but a non-default `base_url`
+still requires constructing the LM directly (see the escape hatch
+above).

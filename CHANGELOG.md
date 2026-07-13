@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+**One front door: credential providers + universal routing.**
+
+- **Credential providers.** `api_key` on every adapter (sync and async)
+  now accepts a zero-argument callable as well as a string, resolved at
+  request-build time, once per request — Azure Entra
+  `get_bearer_token_provider(...)` output plugs in verbatim; rotating
+  keys never go stale in long-lived clients. Acquisition stays the
+  caller's job: lm15 gains no auth dependencies. `RouterConfig.api_keys`
+  values may be credential providers too.
+- **Subscription freshness.** `ClaudeCodeLM`/`OpenAICodexLM` (and async
+  mirrors) validate the local CLI credential at construction, then
+  re-resolve it per request — tokens refreshed on disk are picked up
+  without rebuilding the client.
+- **Credential hygiene.** `api_key` is repr-suppressed on all adapters
+  (previously the plain adapters' dataclass repr included it).
+- **Router rung 0 (object attribute).** A model value carrying a
+  non-empty string `provider` attribute (catalog packages ship these —
+  aimo's model objects) resolves directly when the provider is
+  routable; duck-typed, no package named. Bare-id ambiguity disappears
+  when the model object knows its provider.
+- **Router preset routes.** `groq`, `openrouter`, `ollama`, `vllm`, and
+  `sglang` are now routable provider strings — prefix, catalog, object
+  attribute, or rules — landing on `OpenAIChatLM(compat=<preset>)` with
+  the preset's pinned base_url, the server's own env-key convention
+  (`GROQ_API_KEY`, `OPENROUTER_API_KEY`), and keyless placeholders for
+  local servers. `Resolution` gains a `compat` field; `describe()`
+  narrates the new rungs.
+- New exports: `Credential`, `resolve_credential`, `PresetRoute`,
+  `CHAT_PRESET_ROUTES`.
+
 ## 1.0.0a1 — 2026-06-11
 
 **The stability promise.** The chat core — canonical types, serde, errors,

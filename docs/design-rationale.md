@@ -118,6 +118,46 @@ Rust/Go/TS/Julia can port it idiomatically (a struct table, an exported
 slice, a sync `resolve()` everywhere). The porting spec is in
 [router-portability](router-portability.md) — a proposal until ratified.
 
+## Why `api_key` accepts a callable (and lm15 still has no auth dependencies)
+
+A credential is not always a static string. Azure Entra tokens expire
+hourly; OAuth tokens refresh; enterprises rotate keys. Every serious
+client library ends up needing a *token provider* — and the ecosystem
+already standardized its shape: `azure.identity.get_bearer_token_provider`
+returns exactly a zero-argument callable producing a string.
+
+So `api_key: str | Callable[[], str]`, resolved at request-build time,
+once per request. A static string is the degenerate constant provider —
+nothing changes for existing callers. The split follows the same line as
+the concurrency ruling in the contract: credential **placement** (which
+header, what format) is spec'd, testable data; credential **acquisition**
+(fetching, refreshing, caching tokens) is behavior, per-language idiom,
+and the *caller's* job. lm15 never depends on `azure-identity`, `boto3`,
+or `google-auth`; it only places what your callable returns.
+
+The subscription adapters (`ClaudeCodeLM`, `OpenAICodexLM`) use the same
+seam internally: they validate the local CLI credential at construction
+(typed, re-login-guided errors), then re-resolve per request — a
+long-lived client picks up refreshed tokens without being rebuilt.
+Credential material never appears in reprs, whichever form it takes.
+
+## Why the router grew an object rung and preset routes
+
+Two seams kept forcing users back into boilerplate the router exists to
+remove. First: catalog packages (aimo) ship model ids as `str`
+subclasses that *know their provider* — but passing one as a string
+threw that knowledge away, turning resolvable models into
+`AmbiguousModelError`s. Rung 0 reads a duck-typed `provider` attribute:
+no package is named, plain strings never trigger it, and the most
+intentional signal available wins. Second: the catalog would resolve
+`groq`, `OpenAIChatLM` shipped a live-validated groq preset with the
+right base_url — and the router still refused, because the bridge
+between "provider string" and "compat preset" wasn't wired. Preset
+routes are that bridge, as data: provider string → preset name +
+env-key convention + keyless placeholder. Only presets with pinned,
+live-validated base URLs qualify; everything else keeps the explicit
+`OpenAIChatLM(base_url=...)` escape hatch.
+
 ## Why `tool(fn)` and not a `@tool` decorator?
 
 A decorator replaces or wraps the function — magic, and an invitation to
