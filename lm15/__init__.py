@@ -171,6 +171,8 @@ from .providers import (
     ProviderLM,
     HttpResponse,
     SyncTransport,
+    Credential,
+    resolve_credential,
 )
 from .providers.async_base import (
     AsyncOpenAILM,
@@ -205,11 +207,13 @@ from .sse import SSEEvent, parse_sse
 from .router import (
     ADAPTERS,
     ASYNC_ADAPTERS,
+    CHAT_PRESET_ROUTES,
     DEFAULT_RULES,
     AmbiguousModelError,
     AsyncLMRouter,
     LMRouter,
     MissingCredentialError,
+    PresetRoute,
     Resolution,
     RouteRule,
     RouterConfig,
@@ -271,6 +275,7 @@ __all__ = [
     # providers
     "OpenAILM", "OpenAIChatLM", "AnthropicLM", "GeminiLM", "ClaudeCodeLM", "OpenAICodexLM",
     "BaseProviderLM", "ProviderLM", "HttpResponse", "SyncTransport",
+    "Credential", "resolve_credential",
     # async mirror providers
     "AsyncOpenAILM", "AsyncOpenAIChatLM", "AsyncAnthropicLM", "AsyncGeminiLM",
     "AsyncClaudeCodeLM", "AsyncOpenAICodexLM",
@@ -287,6 +292,7 @@ __all__ = [
     # router (lm15.router)
     "LMRouter", "AsyncLMRouter", "RouterConfig", "RouteRule", "Resolution",
     "DEFAULT_RULES", "ADAPTERS", "ASYNC_ADAPTERS",
+    "PresetRoute", "CHAT_PRESET_ROUTES",
     "RouterError", "UnknownModelError",
     "AmbiguousModelError", "MissingCredentialError",
     # tool derivation (lm15.tools)

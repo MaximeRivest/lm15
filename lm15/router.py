@@ -1,10 +1,16 @@
 """
 lm15.router — Minimalist model-string router.
 
-The router is a lookup table you can read, not a framework.  Three
+The router is a lookup table you can read, not a framework.  Four
 resolution rungs, in fixed order, with no configuration of the order
 itself:
 
+  0. object attribute  a ``provider`` attribute carried by the model
+                       value itself                   -> source="object"
+                       (catalog packages ship model ids as str
+                       subclasses that know their provider; duck-typed —
+                       lm15 names no package.  An attribute that names
+                       nothing routable falls through.)
   1. explicit prefix   ``"openai:gpt-4.1-mini"``       -> source="prefix"
   2. catalog           match against ``registry.list()`` -> source="catalog"
                        entries by id or alias; exact-id matches beat
@@ -16,30 +22,39 @@ itself:
 
 Nothing else.  No plugins, no callbacks, no fallback chains.
 
+A provider is routable when it has a first-class adapter (a key of
+:data:`ADAPTERS`) or an OpenAI Chat Completions compat preset (a key of
+:data:`CHAT_PRESET_ROUTES`: groq, openrouter, ollama, vllm, sglang).
+Preset providers route to ``OpenAIChatLM(compat=<preset>)``, which also
+supplies that server's default base_url.
+
 Model-string grammar
 --------------------
-A model string is split on the FIRST ``:``.  If the head is a known
-provider string (a key of :data:`ADAPTERS`), the remainder is the model
-id sent on the wire.  Otherwise the whole string (colons and all) is
-treated as a bare model id and falls through to the catalog and rule
-rungs.  Consequence: a fine-tune id like ``ft:gpt-4.1:org`` needs the
-explicit form ``openai:ft:gpt-4.1:org``.
+A model string is split on the FIRST ``:``.  If the head is a routable
+provider string, the remainder is the model id sent on the wire.
+Otherwise the whole string (colons and all) is treated as a bare model
+id and falls through to the catalog and rule rungs.  Consequence: a
+fine-tune id like ``ft:gpt-4.1:org`` needs the explicit form
+``openai:ft:gpt-4.1:org``.
 
 Credentials
 -----------
 ``resolve()`` is pure: it touches no network and reads no secret values
 (it records WHICH env var would be used, never the value).  ``lm()``
 reads the key — first from ``RouterConfig.api_keys`` (explicit,
-repr-suppressed), then from the env mapping via the provider's existing
-``ProviderManifest.env_keys`` (first hit wins).  OAuth providers
-(``claude-code``, ``openai-codex``) declare no env keys and pass through
-to their self-resolving constructors.
+repr-suppressed; values may be static strings or zero-argument
+credential-provider callables, resolved per request by the adapter),
+then from the env mapping via the provider's ``ProviderManifest.env_keys``
+or the preset's own convention (first hit wins), then a keyless local
+server's placeholder key.  OAuth providers (``claude-code``,
+``openai-codex``) declare no env keys and pass through to their
+self-resolving constructors.
 
 The direct LM classes remain first-class; the router is just the
 recommended front door.  Needing a custom ``base_url``/transport/compat
-(ollama, vllm, azure, openrouter) is the documented escape hatch:
-``lm()`` returns the ordinary provider LM — keep it and configure it
-yourself next time.
+(azure, a self-hosted gateway) is the documented escape hatch: ``lm()``
+returns the ordinary provider LM — keep it and configure it yourself
+next time.
 """
 
 from __future__ import annotations
@@ -59,6 +74,7 @@ from .providers import (
     AsyncOpenAICodexLM,
     AsyncOpenAILM,
     ClaudeCodeLM,
+    Credential,
     GeminiLM,
     OpenAIChatLM,
     OpenAICodexLM,
@@ -71,6 +87,8 @@ __all__ = [
     "DEFAULT_RULES",
     "ADAPTERS",
     "ASYNC_ADAPTERS",
+    "PresetRoute",
+    "CHAT_PRESET_ROUTES",
     "Resolution",
     "RouterConfig",
     "RouterError",
@@ -135,6 +153,44 @@ ASYNC_ADAPTERS: Mapping[str, type] = {
 # Providers whose constructors self-resolve local OAuth credentials and
 # therefore take no api_key from the router.
 _OAUTH_PROVIDERS: frozenset[str] = frozenset({"claude-code", "openai-codex"})
+
+
+@dataclass(frozen=True, slots=True)
+class PresetRoute:
+    """A provider routable through ``OpenAIChatLM`` with a named compat
+    preset.  Pure data: the provider string doubles as the preset name
+    (which also supplies the server's default base_url); ``env_keys`` is
+    that server's own key convention; ``default_key`` is the placeholder
+    local servers accept when no key is configured."""
+
+    provider: str
+    env_keys: tuple[str, ...] = ()
+    default_key: str | None = None
+    note: str = ""
+
+
+# Chat Completions preset providers, keyed by provider string.  Same
+# spirit as DEFAULT_RULES: the complete built-in knowledge, inspectable
+# and printable.  Only presets whose base_url is pinned in
+# OPENAI_CHAT_PRESET_BASE_URLS belong here; new entries land with live
+# receipts first, like every provider behavior.
+CHAT_PRESET_ROUTES: Mapping[str, PresetRoute] = {
+    "groq": PresetRoute("groq", env_keys=("GROQ_API_KEY",), note="Groq Cloud (Chat Completions dialect)"),
+    "openrouter": PresetRoute("openrouter", env_keys=("OPENROUTER_API_KEY",), note="OpenRouter (Chat Completions dialect)"),
+    "ollama": PresetRoute("ollama", default_key="ollama", note="local ollama server (keyless)"),
+    "vllm": PresetRoute("vllm", default_key="EMPTY", note="local vLLM server (keyless)"),
+    "sglang": PresetRoute("sglang", default_key="EMPTY", note="local SGLang server (keyless)"),
+}
+
+
+def _routable(provider: str, adapters: Mapping[str, type]) -> bool:
+    return provider in adapters or provider in CHAT_PRESET_ROUTES
+
+
+def _adapter_for(provider: str, adapters: Mapping[str, type]) -> type:
+    if provider in adapters:
+        return adapters[provider]
+    return adapters["openai_chat"]  # preset route
 
 
 # --------------------------------------------------------------- errors ----
@@ -212,28 +268,37 @@ class Resolution:
     model: str                      # id sent on the wire (prefix stripped)
     provider: str                   # canonical provider string
     adapter: str                    # LM class name, e.g. "AnthropicLM"
-    source: str                     # "prefix" | "catalog" | "rule"
+    source: str                     # "object" | "prefix" | "catalog" | "rule"
     rule: RouteRule | None = None   # the matching rule when source == "rule"
     env_key: str | None = None      # env var the key would be read from;
                                     # None for OAuth providers or when an
                                     # explicit api_keys entry overrides env
     model_info: ModelInfo | None = None  # catalog metadata when source == "catalog"
+    compat: str | None = None       # OpenAIChatLM preset name when routed
+                                    # through CHAT_PRESET_ROUTES
 
     def describe(self) -> str:
         """One-paragraph human-readable explanation of this resolution."""
         parts = [f"{self.requested!r} -> provider {self.provider!r} ({self.adapter})"]
-        if self.source == "prefix":
+        if self.source == "object":
+            parts.append("via provider attribute on the model value")
+        elif self.source == "prefix":
             parts.append("via explicit provider prefix")
         elif self.source == "catalog":
             parts.append("via catalog match")
         elif self.source == "rule" and self.rule is not None:
             note = f" — {self.rule.note}" if self.rule.note else ""
             parts.append(f"via built-in rule prefix={self.rule.prefix!r}{note}")
+        if self.compat is not None:
+            parts.append(f"Chat Completions compat preset {self.compat!r}")
         parts.append(f"wire model {self.model!r}")
+        route = CHAT_PRESET_ROUTES.get(self.provider)
         if self.env_key is not None:
             parts.append(f"key from ${self.env_key}")
         elif self.provider in _OAUTH_PROVIDERS:
             parts.append("local OAuth credential (no env key)")
+        elif route is not None and route.default_key is not None:
+            parts.append("key from explicit api_keys or the preset's local-server default")
         else:
             parts.append("key from explicit api_keys")
         return "; ".join(parts) + "."
@@ -251,18 +316,45 @@ class RouterConfig:
     behind your back.  Catalog use is opt-in: pass
     ``registry=ModelRegistry.discover()``.
 
-    ``api_keys`` maps provider string -> key and beats env (repr-
-    suppressed; lets hermetic tests pass ``env={}``).  ``env`` defaults
-    to ``os.environ`` at lookup time.
+    ``api_keys`` maps provider string -> credential and beats env (repr-
+    suppressed; lets hermetic tests pass ``env={}``).  A credential is a
+    static key string or a zero-argument provider callable, resolved per
+    request by the adapter.  ``env`` defaults to ``os.environ`` at
+    lookup time.
     """
 
     registry: ModelRegistry | None = None
     rules: tuple[RouteRule, ...] = DEFAULT_RULES
     env: Mapping[str, str] | None = None
-    api_keys: Mapping[str, str] | None = field(default=None, repr=False)
+    api_keys: Mapping[str, Credential] | None = field(default=None, repr=False)
 
 
 # ------------------------------------------------------------- internals ----
+
+
+def _resolution(
+    *,
+    requested: str,
+    wire_model: str,
+    provider: str,
+    source: str,
+    config: RouterConfig,
+    adapters: Mapping[str, type],
+    rule: RouteRule | None = None,
+    model_info: ModelInfo | None = None,
+) -> Resolution:
+    route = CHAT_PRESET_ROUTES.get(provider) if provider not in adapters else None
+    return Resolution(
+        requested=requested,
+        model=wire_model,
+        provider=provider,
+        adapter=_adapter_for(provider, adapters).__name__,
+        source=source,
+        rule=rule,
+        env_key=_env_key_for(provider, config, adapters),
+        model_info=model_info,
+        compat=route.provider if route is not None else None,
+    )
 
 
 def _resolve(model: str, config: RouterConfig, adapters: Mapping[str, type]) -> Resolution:
@@ -274,17 +366,35 @@ def _resolve(model: str, config: RouterConfig, adapters: Mapping[str, type]) -> 
 
     requested = model
 
+    # Rung 0: a provider attribute carried by the model value itself.
+    # Catalog packages ship model ids as str subclasses that know their
+    # provider; duck-typed, so lm15 names no package.  An attribute that
+    # names nothing routable falls through (and is mentioned if nothing
+    # else matches either).
+    object_provider = getattr(model, "provider", None)
+    if not (isinstance(object_provider, str) and object_provider):
+        object_provider = None
+    if object_provider is not None and _routable(object_provider, adapters):
+        return _resolution(
+            requested=requested,
+            wire_model=str(model),
+            provider=object_provider,
+            source="object",
+            config=config,
+            adapters=adapters,
+        )
+
     # Rung 1: explicit provider prefix (split on FIRST colon).
     if ":" in model:
         head, rest = model.split(":", 1)
-        if head in adapters and rest:
-            return Resolution(
+        if _routable(head, adapters) and rest:
+            return _resolution(
                 requested=requested,
-                model=rest,
+                wire_model=rest,
                 provider=head,
-                adapter=adapters[head].__name__,
                 source="prefix",
-                env_key=_env_key_for(head, config, adapters),
+                config=config,
+                adapters=adapters,
             )
 
     # Rung 2: catalog (only if a registry was explicitly supplied).
@@ -321,52 +431,58 @@ def _resolve(model: str, config: RouterConfig, adapters: Mapping[str, type]) -> 
                     providers=providers,
                 )
             info = narrowed[0]
-            if info.provider not in adapters:
+            if not _routable(info.provider, adapters):
                 raise UnknownModelError(
                     f"model {model!r} resolved in the catalog to provider "
-                    f"{info.provider!r}, but lm15 has no adapter for it. "
-                    f"Known providers: {', '.join(sorted(adapters))}. "
+                    f"{info.provider!r}, but lm15 has no adapter or compat "
+                    f"preset for it. Known providers: {_known_providers(adapters)}. "
                     "Construct a provider LM directly (e.g. OpenAIChatLM with "
                     "a custom base_url) for OpenAI-compatible servers.",
                     model=model,
                     rules_tried=config.rules,
                     catalog_searched=True,
                 )
-            return Resolution(
+            return _resolution(
                 requested=requested,
-                model=info.id if model in info.aliases else model,
+                wire_model=info.id if model in info.aliases else str(model),
                 provider=info.provider,
-                adapter=adapters[info.provider].__name__,
                 source="catalog",
-                env_key=_env_key_for(info.provider, config, adapters),
+                config=config,
+                adapters=adapters,
                 model_info=info,
             )
 
     # Rung 3: built-in prefix rules, first match wins.
     for rule in config.rules:
         if model.startswith(rule.prefix):
-            if rule.provider not in adapters:
+            if not _routable(rule.provider, adapters):
                 raise UnknownModelError(
                     f"rule {rule!r} names provider {rule.provider!r}, which has "
-                    f"no adapter. Known providers: {', '.join(sorted(adapters))}.",
+                    f"no adapter. Known providers: {_known_providers(adapters)}.",
                     model=model,
                     rules_tried=config.rules,
                     catalog_searched=config.registry is not None,
                 )
-            return Resolution(
+            return _resolution(
                 requested=requested,
-                model=model,
+                wire_model=str(model),
                 provider=rule.provider,
-                adapter=adapters[rule.provider].__name__,
                 source="rule",
+                config=config,
+                adapters=adapters,
                 rule=rule,
-                env_key=_env_key_for(rule.provider, config, adapters),
             )
 
-    hints = [
+    hints = []
+    if object_provider is not None:
+        hints.append(
+            f"The model value carries provider {object_provider!r}, which has "
+            f"no adapter or compat preset (known providers: {_known_providers(adapters)})."
+        )
+    hints.append(
         f"Use an explicit provider prefix, e.g. \"anthropic:{model}\" "
-        f"(known providers: {', '.join(sorted(adapters))})."
-    ]
+        f"(known providers: {_known_providers(adapters)})."
+    )
     if config.registry is None:
         hints.append(
             "Or pass a model catalog: "
@@ -384,15 +500,27 @@ def _resolve(model: str, config: RouterConfig, adapters: Mapping[str, type]) -> 
     )
 
 
+def _known_providers(adapters: Mapping[str, type]) -> str:
+    return ", ".join(sorted({*adapters, *CHAT_PRESET_ROUTES}))
+
+
+def _declared_env_keys(provider: str, adapters: Mapping[str, type]) -> tuple[str, ...]:
+    route = CHAT_PRESET_ROUTES.get(provider) if provider not in adapters else None
+    if route is not None:
+        return route.env_keys
+    return adapters[provider].manifest.env_keys
+
+
 def _env_key_for(provider: str, config: RouterConfig, adapters: Mapping[str, type]) -> str | None:
     """WHICH env var lm() would read for this provider (never the value).
 
-    None when the provider is OAuth-based (declares no env keys) or when
-    an explicit ``api_keys`` entry overrides env lookup entirely.
+    None when the provider is OAuth-based or a keyless local preset
+    (declares no env keys) or when an explicit ``api_keys`` entry
+    overrides env lookup entirely.
     """
     if config.api_keys is not None and provider in config.api_keys:
         return None
-    env_keys = adapters[provider].manifest.env_keys
+    env_keys = _declared_env_keys(provider, adapters)
     if not env_keys:
         return None
     env = config.env if config.env is not None else os.environ
@@ -403,7 +531,8 @@ def _env_key_for(provider: str, config: RouterConfig, adapters: Mapping[str, typ
 
 
 def _build_lm(resolution: Resolution, config: RouterConfig, adapters: Mapping[str, type]):
-    cls = adapters[resolution.provider]
+    cls = _adapter_for(resolution.provider, adapters)
+    route = CHAT_PRESET_ROUTES.get(resolution.provider) if resolution.provider not in adapters else None
     if resolution.provider in _OAUTH_PROVIDERS:
         return cls()  # self-resolving local OAuth constructor
     api_key = None
@@ -411,13 +540,15 @@ def _build_lm(resolution: Resolution, config: RouterConfig, adapters: Mapping[st
         api_key = config.api_keys.get(resolution.provider)
     if api_key is None:
         env = config.env if config.env is not None else os.environ
-        for key in cls.manifest.env_keys:
+        for key in _declared_env_keys(resolution.provider, adapters):
             value = env.get(key)
             if value:
                 api_key = value
                 break
+    if api_key is None and route is not None and route.default_key is not None:
+        api_key = route.default_key
     if not api_key:
-        env_keys = cls.manifest.env_keys
+        env_keys = _declared_env_keys(resolution.provider, adapters)
         raise MissingCredentialError(
             f"no API key found for provider {resolution.provider!r}. "
             f"Set {' or '.join(env_keys)} in the environment, or pass "
@@ -425,6 +556,8 @@ def _build_lm(resolution: Resolution, config: RouterConfig, adapters: Mapping[st
             provider=resolution.provider,
             env_keys=env_keys,
         )
+    if route is not None:
+        return cls(api_key=api_key, compat=route.provider)
     return cls(api_key=api_key)
 
 

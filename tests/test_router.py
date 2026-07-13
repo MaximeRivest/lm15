@@ -156,10 +156,12 @@ class TestResolveCatalog:
         assert "model-b" in str(exc_info.value)
 
     def test_catalog_provider_without_adapter_is_clear_error(self) -> None:
-        registry = _registry(_info("router-model", "openrouter"))
+        # "bedrock" has neither an adapter nor a chat-compat preset.
+        # (openrouter, the old example here, routes via presets now.)
+        registry = _registry(_info("titan-model", "bedrock"))
         with pytest.raises(UnknownModelError) as exc_info:
-            _router(registry=registry).resolve("router-model")
-        assert "openrouter" in str(exc_info.value)
+            _router(registry=registry).resolve("titan-model")
+        assert "bedrock" in str(exc_info.value)
         assert exc_info.value.catalog_searched is True
 
     def test_no_registry_means_no_catalog_rung(self) -> None:
@@ -536,3 +538,152 @@ def test_router_error_code_is_bare_noun() -> None:
     # Taxonomy convention: codes are bare nouns ('transport', 'provider',
     # ...), never suffixed with '_error'.
     assert RouterError("boom").code == "router"
+
+
+# ─── object-provider rung (rung 0) ───────────────────────────────────
+
+
+class _CatalogId(str):
+    """A model id that knows its provider — the shape catalog packages
+    (aimo, ...) ship.  Duck-typed: the router names no package."""
+
+    provider: str = ""
+
+    def __new__(cls, value: str, provider: str) -> "_CatalogId":
+        obj = super().__new__(cls, value)
+        obj.provider = provider
+        return obj
+
+
+class TestResolveObjectProvider:
+    def test_provider_attribute_wins(self) -> None:
+        res = _router().resolve(_CatalogId("claude-3-5-sonnet-20240620", provider="anthropic"))
+        assert res.provider == "anthropic"
+        assert res.adapter == "AnthropicLM"
+        assert res.source == "object"
+        assert res.model == "claude-3-5-sonnet-20240620"
+        assert type(res.model) is str  # normalized, no subclass on the wire
+        assert res.env_key == "ANTHROPIC_API_KEY"
+
+    def test_attribute_beats_catalog_ambiguity(self) -> None:
+        # The same bare id under two catalog providers is ambiguous for a
+        # plain string — but a model value that knows its provider is not.
+        registry = _registry(
+            _info("shared-model", "anthropic"),
+            _info("shared-model", "openai"),
+        )
+        res = _router(registry=registry).resolve(_CatalogId("shared-model", provider="anthropic"))
+        assert res.provider == "anthropic"
+        assert res.source == "object"
+
+    def test_unroutable_attribute_falls_through(self) -> None:
+        # Unknown provider on the object: fall through to the later rungs
+        # (here the claude- built-in rule) instead of failing.
+        res = _router().resolve(_CatalogId("claude-sonnet-4-5", provider="nano-gpt"))
+        assert res.provider == "anthropic"
+        assert res.source == "rule"
+
+    def test_unroutable_attribute_is_mentioned_in_error(self) -> None:
+        with pytest.raises(UnknownModelError) as exc_info:
+            _router().resolve(_CatalogId("mystery-model", provider="nano-gpt"))
+        assert "nano-gpt" in str(exc_info.value)
+
+    def test_plain_strings_have_no_rung_zero(self) -> None:
+        res = _router().resolve("openai:gpt-4.1-mini")
+        assert res.source == "prefix"
+
+    def test_describe_names_the_object_rung(self) -> None:
+        res = _router().resolve(_CatalogId("claude-sonnet-4-5", provider="anthropic"))
+        assert "provider attribute" in res.describe()
+
+
+# ─── chat-compat preset rung ─────────────────────────────────────────
+
+
+class TestResolvePresets:
+    def test_prefix_routes_preset_provider(self) -> None:
+        res = _router(env={"GROQ_API_KEY": "gk-1"}).resolve("groq:llama-3.3-70b-versatile")
+        assert res.provider == "groq"
+        assert res.adapter == "OpenAIChatLM"
+        assert res.compat == "groq"
+        assert res.source == "prefix"
+        assert res.env_key == "GROQ_API_KEY"
+
+    def test_catalog_routes_preset_provider(self) -> None:
+        registry = _registry(_info("llama3-70b-8192", "groq"))
+        res = _router(env={"GROQ_API_KEY": "gk-1"}, registry=registry).resolve("llama3-70b-8192")
+        assert res.provider == "groq"
+        assert res.adapter == "OpenAIChatLM"
+        assert res.compat == "groq"
+        assert res.source == "catalog"
+
+    def test_object_provider_routes_preset(self) -> None:
+        # The aimo scenario without any registry: the model value knows its
+        # provider, the preset supplies dialect + base_url.
+        res = _router(env={"GROQ_API_KEY": "gk-1"}).resolve(
+            _CatalogId("llama3-70b-8192", provider="groq")
+        )
+        assert res.provider == "groq"
+        assert res.compat == "groq"
+        assert res.source == "object"
+
+    def test_lm_builds_chat_adapter_with_preset(self) -> None:
+        router = _router(env={"GROQ_API_KEY": "gk-1"})
+        lm = router.lm("groq:llama-3.3-70b-versatile")
+        try:
+            assert isinstance(lm, OpenAIChatLM)
+            assert lm.api_key == "gk-1"
+            assert lm.base_url == "https://api.groq.com/openai/v1"
+        finally:
+            lm.close()
+
+    def test_keyless_local_preset_builds_with_default_key(self) -> None:
+        router = _router(env={})
+        lm = router.lm("ollama:qwen3:4b")  # colons in the wire id survive
+        try:
+            assert isinstance(lm, OpenAIChatLM)
+            assert lm.api_key == "ollama"
+            assert lm.base_url == "http://localhost:11434/v1"
+        finally:
+            lm.close()
+        res = router.resolve("ollama:qwen3:4b")
+        assert res.model == "qwen3:4b"
+
+    def test_missing_preset_key_raises(self) -> None:
+        with pytest.raises(MissingCredentialError) as exc_info:
+            _router(env={}).lm("groq:llama-3.3-70b-versatile")
+        err = exc_info.value
+        assert err.provider == "groq"
+        assert "GROQ_API_KEY" in str(err)
+
+    def test_async_router_routes_presets(self) -> None:
+        router = AsyncLMRouter(config=RouterConfig(env={"GROQ_API_KEY": "gk-1"}))
+        res = router.resolve("groq:llama-3.3-70b-versatile")
+        assert res.adapter == "AsyncOpenAIChatLM"
+        lm = router.lm("groq:llama-3.3-70b-versatile")
+        assert isinstance(lm, AsyncOpenAIChatLM)
+        assert lm.base_url == "https://api.groq.com/openai/v1"
+
+    def test_openai_stays_on_responses_adapter(self) -> None:
+        # "openai" has a first-class adapter; the preset table must not
+        # shadow it.  Chat Completions against OpenAI stays "openai_chat:".
+        res = _router().resolve("openai:gpt-4.1-mini")
+        assert res.adapter == "OpenAILM"
+        assert res.compat is None
+
+
+# ─── credential providers through the router ─────────────────────────
+
+
+class TestRouterCredentialProviders:
+    def test_api_keys_accepts_credential_provider(self) -> None:
+        router = _router(env={}, api_keys={"openai": lambda: "sk-fresh"})
+        lm = router.lm("openai:gpt-4.1-mini")
+        try:
+            http = lm.build_request(
+                Request(model="gpt-4.1-mini", messages=(Message.user("hi"),)), stream=False
+            )
+        finally:
+            lm.close()
+        header = dict(http.headers).get("Authorization")
+        assert header == "Bearer sk-fresh"
