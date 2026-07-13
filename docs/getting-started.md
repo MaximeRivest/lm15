@@ -273,14 +273,18 @@ Working in an async app? Everything has an async mirror with the same
 shape — add `Async` to the name and `await` the call:
 
 ```python
+import asyncio
 from lm15 import AsyncLMRouter
 
-router = AsyncLMRouter()
-response = await router.complete(
-    Request(model="groq:llama-3.3-70b-versatile",
-            messages=(Message.user("Say ok."),))
-)
-print(response.text)
+async def main() -> None:
+    router = AsyncLMRouter()
+    response = await router.complete(
+        Request(model="groq:llama-3.3-70b-versatile",
+                messages=(Message.user("Say ok."),))
+    )
+    print(response.text)
+
+asyncio.run(main())
 ```
 
 ```output
