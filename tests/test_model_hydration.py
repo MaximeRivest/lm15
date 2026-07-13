@@ -6,7 +6,8 @@ import warnings
 
 import pytest
 
-from lm15 import ModelRegistry, model_info_from_dict, model_info_to_dict
+from lm15 import ModelRegistry
+from lm15.serde import model_info_from_dict, model_info_to_dict
 from lm15.models import InferencePricing, ModelInfo
 
 

@@ -12,6 +12,7 @@ from typing import Annotated, Any, Literal, Mapping, Optional, Sequence, TypedDi
 import pytest
 
 import lm15
+import lm15.serde
 from lm15 import FunctionTool
 from lm15.errors import LM15Error
 from lm15.tools import (
@@ -63,7 +64,7 @@ def test_reference_example_produces_plain_function_tool() -> None:
 def test_tool_returns_ordinary_function_tool_no_callable_attached() -> None:
     t = tool(get_weather)
     assert type(t) is FunctionTool
-    assert lm15.tool_to_dict(t) == {
+    assert lm15.serde.tool_to_dict(t) == {
         "type": "function",
         "name": "get_weather",
         "description": "Look up current weather.",
@@ -643,11 +644,17 @@ def test_no_parameters_function() -> None:
 
 def test_top_level_exports() -> None:
     for name in (
-        "tool", "derive", "ToolConfig", "ToolDerivation", "DerivedParam",
+        "tool", "derive_tool", "ToolConfig", "ToolDerivation", "DerivedParam",
         "ToolDerivationError",
     ):
         assert hasattr(lm15, name)
         assert name in lm15.__all__
+    # `derive` keeps its short name inside its own module, and the two
+    # spellings are the same function.
+    import lm15.tools as tools_mod
+
+    assert lm15.derive_tool is tools_mod.derive
+    assert not hasattr(lm15, "derive")
 
 
 def test_bare_typing_aliases_map_to_untyped_containers() -> None:

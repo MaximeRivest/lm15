@@ -20,11 +20,16 @@ Quick tour:
     response.text          # canonical accessors
     for event in lm.stream(request): ...   # canonical stream events
 
-Subpackages kept off the top level on purpose: `lm15.transports` (HTTP
-plumbing; its TransportRequest/TransportError are transport-level, not
-canonical),
-`lm15.live` (realtime sessions; optional `websockets` dependency),
-`lm15.vet` (the conformance shim CLI: `python -m lm15.vet`).
+The top level is curated for application developers.  Deeper audiences
+import one module (API review, 2026-07-13):
+`lm15.serde` (the complete to_dict/from_dict pairs), `lm15.providers`
+(BaseProviderLM, ProviderDialect, transports protocols, Credential),
+`lm15.errors` (map_http_error and friends), `lm15.router` (the
+RouteRule/DEFAULT_RULES/PresetRoute/CHAT_PRESET_ROUTES tables),
+`lm15.profiles` / `lm15.compat` (profile and compat-policy machinery),
+`lm15.sse`, `lm15.transports` (HTTP plumbing), `lm15.live` (realtime
+sessions; optional `websockets` dependency), and `lm15.vet` (the
+conformance shim CLI: `python -m lm15.vet`).
 
 The lowercase part-factory helpers (`text`, `image`, `tool_call`, ...) live in
 `lm15.types`, not at the top level — generic lowercase names at package top
@@ -105,38 +110,6 @@ from .types import (
     ERROR_CODES,
 )
 
-# ── Canonical JSON serde ─────────────────────────────────────────────
-from .serde import (
-    part_to_dict,
-    part_from_dict,
-    message_to_dict,
-    message_from_dict,
-    messages_to_json,
-    messages_from_json,
-    tool_to_dict,
-    tool_from_dict,
-    tool_choice_to_dict,
-    tool_choice_from_dict,
-    reasoning_to_dict,
-    reasoning_from_dict,
-    config_to_dict,
-    config_from_dict,
-    usage_to_dict,
-    usage_from_dict,
-    error_detail_to_dict,
-    error_detail_from_dict,
-    delta_to_dict,
-    delta_from_dict,
-    stream_event_to_dict,
-    stream_event_from_dict,
-    request_to_dict,
-    request_from_dict,
-    response_to_dict,
-    response_from_dict,
-    model_info_to_dict,
-    model_info_from_dict,
-)
-
 # ── Errors ───────────────────────────────────────────────────────────
 from .errors import (
     LM15Error,
@@ -154,9 +127,7 @@ from .errors import (
     UnsupportedModelError,
     UnsupportedFeatureError,
     NotConfiguredError,
-    map_http_error,
-    canonical_error_code,
-    error_class_for_code,
+    RETRYABLE_ERRORS,
 )
 
 # ── Providers ────────────────────────────────────────────────────────
@@ -167,11 +138,6 @@ from .providers import (
     GeminiLM,
     ClaudeCodeLM,
     OpenAICodexLM,
-    BaseProviderLM,
-    HttpResponse,
-    SyncTransport,
-    Credential,
-    resolve_credential,
 )
 from .protocols import ProviderLM
 from .providers.async_base import (
@@ -181,8 +147,6 @@ from .providers.async_base import (
     AsyncGeminiLM,
     AsyncClaudeCodeLM,
     AsyncOpenAICodexLM,
-    AsyncBaseProviderLM,
-    AsyncTransport,
 )
 
 # ── Stream assembly ──────────────────────────────────────────────────
@@ -194,27 +158,16 @@ from .result import (
     response_to_events,
 )
 
-# ── Profiles, compat, model metadata ─────────────────────────────────
-from .profiles import EndpointProfile, ProviderProfile
-from .compat import OpenAIChatCompat, OpenAIResponsesCompat
+# ── Model metadata (catalog hydration) ──────────────────────────────
 from .models import ModelInfo, ModelRegistry
-from .protocols import Capabilities, LiveSession
-from .features import EndpointSupport, ProviderManifest
-from .sse import SSEEvent, parse_sse
 
 # ── Router (lm15.router) ─────────────────────────────────────────────
 from .router import (
-    ADAPTERS,
-    ASYNC_ADAPTERS,
-    CHAT_PRESET_ROUTES,
-    DEFAULT_RULES,
     AmbiguousModelError,
     AsyncLMRouter,
     LMRouter,
     MissingCredentialError,
-    PresetRoute,
     Resolution,
-    RouteRule,
     RouterConfig,
     RouterError,
     UnknownModelError,
@@ -226,9 +179,9 @@ from .tools import (
     ToolConfig,
     ToolDerivation,
     ToolDerivationError,
-    derive,
     tool,
 )
+from .tools import derive as derive_tool
 
 __all__ = [
     "__version__",
@@ -254,47 +207,28 @@ __all__ = [
     # vocabularies
     "Role", "PartType", "FinishReason", "ReasoningEffort", "ErrorCode",
     "StreamEventType", "ROLE_VALUES", "FINISH_REASONS", "ERROR_CODES",
-    # serde
-    "part_to_dict", "part_from_dict", "message_to_dict", "message_from_dict",
-    "messages_to_json", "messages_from_json", "tool_to_dict", "tool_from_dict",
-    "tool_choice_to_dict", "tool_choice_from_dict", "reasoning_to_dict",
-    "reasoning_from_dict", "config_to_dict", "config_from_dict",
-    "usage_to_dict", "usage_from_dict", "error_detail_to_dict",
-    "error_detail_from_dict", "delta_to_dict", "delta_from_dict",
-    "stream_event_to_dict", "stream_event_from_dict", "request_to_dict",
-    "request_from_dict", "response_to_dict", "response_from_dict",
-    "model_info_to_dict", "model_info_from_dict",
-    # errors
+    # errors (the catchable taxonomy + the retry predicate)
     "LM15Error", "TransportError", "ConfigurationError", "CapabilityError",
     "ProviderError", "AuthError", "BillingError", "RateLimitError",
     "InvalidRequestError", "ContextLengthError", "TimeoutError",
     "ServerError", "UnsupportedModelError", "UnsupportedFeatureError",
-    "NotConfiguredError", "map_http_error", "canonical_error_code",
-    "error_class_for_code",
+    "NotConfiguredError", "RETRYABLE_ERRORS",
     # providers
     "OpenAILM", "OpenAIChatLM", "AnthropicLM", "GeminiLM", "ClaudeCodeLM", "OpenAICodexLM",
-    "BaseProviderLM", "ProviderLM", "HttpResponse", "SyncTransport",
-    "Credential", "resolve_credential",
+    "ProviderLM",
     # async mirror providers
     "AsyncOpenAILM", "AsyncOpenAIChatLM", "AsyncAnthropicLM", "AsyncGeminiLM",
     "AsyncClaudeCodeLM", "AsyncOpenAICodexLM",
-    "AsyncBaseProviderLM", "AsyncTransport",
     # stream assembly
     "ResponseStream", "AsyncResponseStream",
     "materialize_response", "amaterialize_response", "response_to_events",
-    # profiles/compat/models
-    "EndpointProfile", "ProviderProfile", "OpenAIChatCompat",
-    "OpenAIResponsesCompat", "ModelInfo", "ModelRegistry", "Capabilities",
-    "LiveSession", "EndpointSupport", "ProviderManifest",
-    # sse
-    "SSEEvent", "parse_sse",
-    # router (lm15.router)
-    "LMRouter", "AsyncLMRouter", "RouterConfig", "RouteRule", "Resolution",
-    "DEFAULT_RULES", "ADAPTERS", "ASYNC_ADAPTERS",
-    "PresetRoute", "CHAT_PRESET_ROUTES",
+    # model metadata (catalog hydration)
+    "ModelInfo", "ModelRegistry",
+    # router (lm15.router; the rule/preset tables live there too)
+    "LMRouter", "AsyncLMRouter", "RouterConfig", "Resolution",
     "RouterError", "UnknownModelError",
     "AmbiguousModelError", "MissingCredentialError",
     # tool derivation (lm15.tools)
-    "tool", "derive", "ToolConfig", "ToolDerivation", "DerivedParam",
+    "tool", "derive_tool", "ToolConfig", "ToolDerivation", "DerivedParam",
     "ToolDerivationError",
 ]

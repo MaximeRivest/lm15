@@ -515,23 +515,27 @@ class TestAsyncRouter:
 # ─── exports ─────────────────────────────────────────────────────────
 
 
-def test_router_surface_exported_from_lm15() -> None:
+def test_router_surface_placement() -> None:
+    # Top level carries the user surface; the data tables live in
+    # lm15.router (namespace curation, API review 2026-07-13).
     for name in (
         "LMRouter",
         "AsyncLMRouter",
         "RouterConfig",
-        "RouteRule",
         "Resolution",
-        "DEFAULT_RULES",
         "RouterError",
         "UnknownModelError",
         "AmbiguousModelError",
         "MissingCredentialError",
-        "ADAPTERS",
-        "ASYNC_ADAPTERS",
     ):
         assert hasattr(lm15, name), name
         assert name in lm15.__all__
+    import lm15.router as router_mod
+
+    for name in ("RouteRule", "DEFAULT_RULES", "ADAPTERS", "ASYNC_ADAPTERS",
+                 "PresetRoute", "CHAT_PRESET_ROUTES"):
+        assert not hasattr(lm15, name), name
+        assert hasattr(router_mod, name), name
 
 
 def test_router_error_code_is_bare_noun() -> None:

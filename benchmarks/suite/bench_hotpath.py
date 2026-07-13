@@ -21,12 +21,13 @@ import time
 from pathlib import Path
 
 from lm15 import (
-    AnthropicLM, GeminiLM, HttpResponse, Message, OpenAIChatLM, OpenAILM,
+    AnthropicLM, GeminiLM, Message, OpenAIChatLM, OpenAILM,
     Request, TextPart, ToolCallPart, ToolResultPart, FunctionTool,
 )
+from lm15.providers import HttpResponse
 from lm15.serde import request_from_dict, request_to_dict
 from lm15.sse import parse_sse
-from lm15.stream import coalesce_stream
+from lm15.result import coalesce_stream
 
 BODIES = Path(__file__).resolve().parents[3] / "lm15-contract" / "bodies"
 
