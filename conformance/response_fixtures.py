@@ -14,7 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 from lm15.providers import AnthropicLM, GeminiLM, HttpResponse, OpenAILM
 from lm15.providers.base import BaseProviderLM
 from lm15.sse import parse_sse
-from lm15.stream import coalesce_stream, materialize_response
+from lm15.result import coalesce_stream, materialize_response
 from lm15.types import (
     AudioPart,
     BuiltinTool,

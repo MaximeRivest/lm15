@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 
 import pytest
 
 from lm15.result import (
-    Result,
+    AsyncResponseStream,
+    ResponseStream,
+    StreamAccumulator,
+    amaterialize_response,
+    materialize_response,
     response_to_events,
 )
 from lm15.types import (
@@ -21,10 +26,13 @@ from lm15.types import (
     Response,
     StreamDeltaEvent,
     StreamEndEvent,
+    TextDelta,
     TextPart,
     Usage,
     VideoPart,
 )
+
+_REQ = Request(model="m", messages=(Message.user("hi"),))
 
 
 def _b64(value: bytes) -> str:
@@ -52,8 +60,8 @@ def test_response_to_events_preserves_image_file_ids() -> None:
 
 
 def test_materialize_preserves_continuation_only_part_index() -> None:
-    response = Result(
-        events=iter((
+    response = materialize_response(
+        iter((
             StreamDeltaEvent(
                 delta=ContinuationDelta(
                     provider="anthropic",
@@ -64,8 +72,8 @@ def test_materialize_preserves_continuation_only_part_index() -> None:
             ),
             StreamEndEvent(finish_reason="stop"),
         )),
-        request=Request(model="m", messages=(Message.user("hi"),)),
-    ).response
+        _REQ,
+    )
 
     assert response.message.parts == (
         TextPart(
@@ -104,10 +112,7 @@ def test_response_to_events_and_materialize_preserve_continuation_state() -> Non
         event.type == "delta" and isinstance(event.delta, ContinuationDelta) and event.delta.part_index is None
         for event in events
     )
-    rebuilt = Result(
-        events=iter(events),
-        request=Request(model="m", messages=(Message.user("hi"),)),
-    ).response
+    rebuilt = ResponseStream(iter(events), _REQ).response
     assert rebuilt == response
 
 
@@ -126,40 +131,97 @@ def test_response_to_events_raises_for_parts_without_delta_variants(part) -> Non
         list(response_to_events(_response_with(part)))
 
 
-def test_result_delegates_video_and_document_helpers() -> None:
-    video = VideoPart(data=_b64(b"video"))
-    document = DocumentPart(data=_b64(b"doc"))
-    response = Response(
-        id="r1",
-        model="m",
-        message=Message.assistant([video, document]),
-        finish_reason="stop",
-        usage=Usage(),
+def _text_stream_events() -> tuple:
+    return (
+        StreamDeltaEvent(delta=TextDelta(text="Hel", part_index=0)),
+        StreamDeltaEvent(delta=TextDelta(text="lo", part_index=0)),
+        StreamEndEvent(finish_reason="stop", usage=Usage(input_tokens=1, output_tokens=2)),
     )
-    result = Result(events=iter(()), request=Request(model="m", messages=(Message.user("hi"),)))
-    result._response = response
-    result._done = True
-
-    assert result.video is video
-    assert result.videos == [video]
-    assert result.video_bytes == b"video"
-    assert result.document is document
-    assert result.documents == [document]
-    assert result.document_bytes == b"doc"
 
 
-def test_result_rejects_tool_loop_parameters() -> None:
-    """Result is a pure stream materializer: the automatic tool-execution
-    loop was removed (positioning decision, 2026-06-11)."""
-    req = Request(model="m", messages=(Message.user("hi"),))
-    for kwarg in ("callable_registry", "on_tool_call", "max_tool_rounds", "retries"):
+def test_response_stream_yields_text_then_response() -> None:
+    rs = ResponseStream(iter(_text_stream_events()), _REQ)
+    assert list(rs) == ["Hel", "lo"]
+    assert rs.response.text == "Hello"
+    assert rs.usage.input_tokens == 1
+    assert rs.finish_reason == "stop"
+
+
+def test_response_stream_events_are_canonical() -> None:
+    rs = ResponseStream(iter(_text_stream_events()), _REQ)
+    events = list(rs.events())
+    assert [e.type for e in events] == ["delta", "delta", "end"]
+    assert events[0].delta.type == "text"
+    assert rs.response.text == "Hello"
+
+
+def test_response_stream_positional_construction() -> None:
+    # The taught form: ResponseStream(lm.stream(req), req) — both positional.
+    rs = ResponseStream(iter(_text_stream_events()), _REQ)
+    assert rs.response.model == "m"
+
+
+def test_response_stream_accessors_mirror_response_minimal_set() -> None:
+    rs = ResponseStream(iter(_text_stream_events()), _REQ)
+    rs.response  # consume
+    assert rs.text == "Hello"
+    assert rs.tool_calls == []
+    assert rs.citations == []
+    assert rs.model == "m"
+    # Richer accessors deliberately do not exist; message.first(...) is THE
+    # variant accessor on both the streaming and non-streaming paths.
+    for gone in ("image", "images", "audio", "video", "videos",
+                 "document", "documents", "image_bytes", "audio_bytes",
+                 "video_bytes", "document_bytes", "thinking"):
+        assert not hasattr(rs, gone)
+
+
+def test_stream_accumulator_push_then_response() -> None:
+    acc = StreamAccumulator(_REQ)
+    for event in _text_stream_events():
+        acc.push(event)
+    response = acc.response()
+    assert response.text == "Hello"
+    assert response.usage.output_tokens == 2
+
+
+def test_async_response_stream_mirrors_sync() -> None:
+    async def source():
+        for event in _text_stream_events():
+            yield event
+
+    async def main() -> None:
+        rs = AsyncResponseStream(source(), _REQ)
+        texts = [t async for t in rs]
+        assert texts == ["Hel", "lo"]
+        response = await rs.response()
+        assert response.text == "Hello"
+
+    asyncio.run(main())
+
+
+def test_amaterialize_response() -> None:
+    async def source():
+        for event in _text_stream_events():
+            yield event
+
+    response = asyncio.run(amaterialize_response(source(), _REQ))
+    assert response.text == "Hello"
+
+
+def test_response_stream_rejects_tool_loop_parameters() -> None:
+    """ResponseStream is a pure stream assembler: the automatic
+    tool-execution loop was removed (positioning decision, 2026-06-11),
+    and its constructor hooks went with it (API review, 2026-07-13)."""
+    for kwarg in ("callable_registry", "on_tool_call", "max_tool_rounds",
+                  "retries", "start_stream", "on_finished"):
         with pytest.raises(TypeError):
-            Result(events=iter(()), request=req, **{kwarg: None})
+            ResponseStream(iter(()), _REQ, **{kwarg: None})
 
 
 def test_result_module_has_no_tool_execution_helpers() -> None:
     import lm15.result as result_mod
 
     for name in ("_invoke_tool", "_normalize_tool_output", "_preview_parts",
-                 "_ExecutedTool"):
+                 "_ExecutedTool", "Result", "AsyncResult", "StreamChunk"):
         assert not hasattr(result_mod, name)

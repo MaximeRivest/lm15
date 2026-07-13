@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from lm15.stream import materialize_response
+from lm15.result import materialize_response
 from lm15.types import (
     CitationPart,
     Response,

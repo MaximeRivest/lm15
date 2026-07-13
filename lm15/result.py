@@ -1,31 +1,28 @@
 """
 lm15.result — Stream materialization.
 
-Result is the lazy stream-backed response wrapper.  It unifies
-streaming and non-streaming behind one interface:
+One engine and two skins, all speaking the canonical StreamEvent
+vocabulary:
 
-    # Stream text
-    for text in result:
-        print(text)
+- ``StreamAccumulator`` — the push-based engine.  Feed it events, ask it
+  for the ``Response``.  It is the shape every port shares (Rust/Go/TS
+  have no generators) and the only place accumulation logic lives.
+- ``ResponseStream`` / ``AsyncResponseStream`` — lazy iteration sugar
+  over a live stream: iterate for text as it arrives, ``.events()`` for
+  the canonical typed events, ``.response`` afterwards for the same
+  Response a non-streaming call returns.
+- ``materialize_response`` / ``amaterialize_response`` — the one-shot
+  functional form.
 
-    # Block for full response
-    print(result.text)
-
-    # Stream typed chunks
-    for chunk in result.events():
-        ...
-
-_RoundState accumulates stream deltas into a complete Response.
-Result executes nothing: tool calls are surfaced as data, and any
-execute-tools-until-done loop belongs to the layer above lm15.
+Nothing here executes anything: tool calls are surfaced as data, and
+any execute-tools-until-done loop belongs to the layer above lm15.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 from dataclasses import dataclass, field, replace
-from typing import Any, AsyncIterator, Callable, Iterator
+from typing import Any, AsyncIterator, Iterator
 
 from .errors import LM15Error, error_class_for_code
 from .types import (
@@ -35,7 +32,6 @@ from .types import (
     CitationPart,
     ContinuationDelta,
     ContinuationState,
-    DocumentPart,
     ErrorDetail,
     ImageDelta,
     ImagePart,
@@ -55,27 +51,38 @@ from .types import (
     ToolCallDelta,
     ToolCallPart,
     Usage,
-    VideoPart,
 )
 
-_FINISH_SENTINEL = object()
-
-
-@dataclass(frozen=True, slots=True)
-class StreamChunk:
-    """A user-facing chunk from the stream."""
-    type: str
-    text: str | None = None
-    name: str | None = None
-    input: JsonObject | None = None
-    image: ImagePart | None = None
-    audio: AudioPart | None = None
-    response: Response | None = None
+__all__ = [
+    "StreamAccumulator",
+    "ResponseStream",
+    "AsyncResponseStream",
+    "materialize_response",
+    "amaterialize_response",
+    "response_to_events",
+    "coalesce_stream",
+    "acoalesce_stream",
+]
 
 
 @dataclass(slots=True)
-class _RoundState:
-    """Accumulates stream deltas into a complete Response."""
+class StreamAccumulator:
+    """Accumulates canonical stream events into a complete Response.
+
+    Push-based so that sync iteration, async iteration, and one-shot
+    materialization all share the same accumulation logic:
+
+        acc = StreamAccumulator(request)
+        for event in lm.stream(request):
+            acc.push(event)
+        response = acc.response()
+
+    ``push`` ignores error events — deciding whether to raise is the
+    caller's job (``ResponseStream`` raises; a resumption layer might
+    not).  ``response()`` materializes whatever has been accumulated so
+    far; callers normally push through the end event first.
+    """
+
     request: Request
     started_id: str | None = None
     started_model: str | None = None
@@ -93,43 +100,34 @@ class _RoundState:
     part_continuation: dict[int, list[ContinuationState]] = field(default_factory=dict)
     provider_data: dict[str, Any] | None = None
 
-    def apply(self, event: StreamEvent) -> list[StreamChunk]:
-        """Process a StreamEvent and return user-facing chunks."""
-        chunks: list[StreamChunk] = []
-
+    def push(self, event: StreamEvent) -> None:
+        """Fold one canonical stream event into the accumulated state."""
         if event.type == "start":
             self.started_id = event.id or self.started_id
             self.started_model = event.model or self.started_model
-            return chunks
+            return
 
         if event.type == "end":
             self.finish_reason = event.finish_reason or self.finish_reason
             self.usage = event.usage or self.usage
             if event.provider_data is not None:
                 self.provider_data = event.provider_data
-            return chunks
+            return
 
         if event.type != "delta" or event.delta is None:
-            return chunks
+            return
 
         delta = event.delta
 
         if delta.type == "text":
-            t = delta.text or ""
-            self.text_parts.setdefault(delta.part_index, []).append(t)
-            chunks.append(StreamChunk(type="text", text=t))
+            self.text_parts.setdefault(delta.part_index, []).append(delta.text or "")
 
         elif delta.type == "thinking":
-            t = delta.text or ""
-            self.thinking_parts.setdefault(delta.part_index, []).append(t)
-            chunks.append(StreamChunk(type="thinking", text=t))
+            self.thinking_parts.setdefault(delta.part_index, []).append(delta.text or "")
 
         elif delta.type == "audio":
-            data = delta.data or ""
-            self.audio_chunks.setdefault(delta.part_index, []).append(data)
+            self.audio_chunks.setdefault(delta.part_index, []).append(delta.data or "")
             self.audio_media_types.setdefault(delta.part_index, delta.media_type)
-            from .types import audio as make_audio
-            chunks.append(StreamChunk(type="audio", audio=make_audio(data=data)))
 
         elif delta.type == "tool_call":
             idx = delta.part_index
@@ -151,9 +149,8 @@ class _RoundState:
             elif delta.file_id is not None:
                 part = ImagePart(media_type=mt, file_id=str(delta.file_id))
             else:
-                return chunks
+                return
             self.image_parts[delta.part_index] = part
-            chunks.append(StreamChunk(type="image", image=part))
 
         elif delta.type == "citation":
             self.citation_parts.setdefault(delta.part_index, []).append(CitationPart(
@@ -167,10 +164,8 @@ class _RoundState:
             else:
                 self.part_continuation.setdefault(delta.part_index, []).append(state)
 
-        return chunks
-
-    def materialize(self) -> Response:
-        """Build a complete Response from accumulated state."""
+    def response(self) -> Response:
+        """Build a complete Response from the accumulated state."""
         parts: list[Part] = []
 
         tool_names = [t.name for t in self.request.tools if t.type == "function"]
@@ -246,100 +241,56 @@ class _RoundState:
         )
 
 
-class Result:
-    """Lazy stream-backed response: a pure stream materializer.
+class ResponseStream:
+    """Lazy stream-backed response assembler.
 
-    Consumes stream events and exposes chunks, text and the complete
-    Response.  Tool calls are surfaced as data only; Result never
-    executes tools.
+        rs = ResponseStream(lm.stream(request), request)
+        for text in rs:              # text as it arrives
+            print(text, end="")
+        rs.response                  # the same Response complete() returns
+
+    ``rs.events()`` yields the canonical StreamEvents instead — one
+    vocabulary for raw and assembled streaming.  Accessors mirror
+    Response's own minimal set; everything richer is
+    ``rs.response.message.first(...)`` / ``.parts_of(...)``.
+
+    Tool calls are surfaced as data only; ResponseStream never executes
+    anything.
     """
 
-    def __init__(
-        self,
-        *,
-        events: Iterator[StreamEvent] | None = None,
-        request: Request,
-        start_stream: Callable[[Request], Iterator[StreamEvent]] | None = None,
-        on_finished: Callable[[Request, Response], None] | None = None,
-    ) -> None:
-        if events is None and start_stream is None:
-            raise ValueError("Result requires events or start_stream")
-        self._initial_events = events
-        self._request = request
-        self._start_stream = start_stream
-        self._on_finished = on_finished
+    def __init__(self, events: Iterator[StreamEvent], request: Request) -> None:
+        self._accumulator = StreamAccumulator(request)
+        self._source = events
         self._response: Response | None = None
-        self._final_request: Request = request
-        self._done = False
         self._failure: Exception | None = None
-        self._callback_called = False
-        self._chunk_iter = self._chunks()
+        self._done = False
+        self._event_iter = self._pump()
 
     def __iter__(self) -> Iterator[str]:
-        for chunk in self.events():
-            if chunk.type == "text" and chunk.text is not None:
-                yield chunk.text
+        for event in self.events():
+            if event.type == "delta" and event.delta is not None:
+                if event.delta.type == "text" and event.delta.text is not None:
+                    yield event.delta.text
 
-    def events(self) -> Iterator[StreamChunk]:
+    def events(self) -> Iterator[StreamEvent]:
+        """Canonical stream events, teed through the accumulator."""
         while True:
             try:
-                yield next(self._chunk_iter)
+                yield next(self._event_iter)
             except StopIteration:
                 return
-
-    def _require_part(self, cls: type[Any], label: str) -> Any:
-        part = self.response.message.first(cls)
-        if part is None:
-            raise ValueError(
-                f"Response contains no {label}. "
-                f"Parts: {[p.type for p in self.response.message.parts]}"
-            )
-        return part
 
     @property
     def text(self) -> str | None:
         return self.response.text
 
     @property
-    def thinking(self) -> str | None:
-        texts = [p.text for p in self.response.message.parts_of(ThinkingPart)]
-        return "\n".join(texts) if texts else None
-
-    @property
     def tool_calls(self) -> list[ToolCallPart]:
         return self.response.tool_calls
 
     @property
-    def image(self) -> ImagePart | None:
-        return self.response.message.first(ImagePart)
-
-    @property
-    def images(self) -> list[ImagePart]:
-        return self.response.message.parts_of(ImagePart)
-
-    @property
-    def audio(self) -> AudioPart | None:
-        return self.response.message.first(AudioPart)
-
-    @property
-    def video(self) -> VideoPart | None:
-        return self.response.message.first(VideoPart)
-
-    @property
-    def videos(self) -> list[VideoPart]:
-        return self.response.message.parts_of(VideoPart)
-
-    @property
-    def document(self) -> DocumentPart | None:
-        return self.response.message.first(DocumentPart)
-
-    @property
-    def documents(self) -> list[DocumentPart]:
-        return self.response.message.parts_of(DocumentPart)
-
-    @property
     def citations(self) -> list[CitationPart]:
-        return self.response.message.parts_of(CitationPart)
+        return self.response.citations
 
     @property
     def usage(self) -> Usage:
@@ -358,155 +309,122 @@ class Result:
         return self.response.json
 
     @property
-    def image_bytes(self) -> bytes:
-        return self._require_part(ImagePart, "image").bytes
-
-    @property
-    def audio_bytes(self) -> bytes:
-        return self._require_part(AudioPart, "audio").bytes
-
-    @property
-    def video_bytes(self) -> bytes:
-        return self._require_part(VideoPart, "video").bytes
-
-    @property
-    def document_bytes(self) -> bytes:
-        return self._require_part(DocumentPart, "document").bytes
-
-    @property
     def response(self) -> Response:
-        return self._consume()
-
-    def _consume(self) -> Response:
-        if self._done and self._failure is not None:
+        if self._failure is not None:
             raise self._failure
-        if self._response is not None and self._done:
-            return self._response
-        for _ in self.events():
-            pass
+        if not self._done:
+            for _ in self.events():
+                pass
+            if self._failure is not None:  # pragma: no cover - pump raises first
+                raise self._failure
         assert self._response is not None
         return self._response
 
-    def _chunks(self) -> Iterator[StreamChunk]:
-        request = self._request
-        state = _RoundState(request=request)
-
+    def _pump(self) -> Iterator[StreamEvent]:
         try:
-            try:
-                events = self._open_stream(request)
-                for event in events:
-                    if event.type == "error":
-                        raise _exception_from_error(event)
-                    for chunk in state.apply(event):
-                        yield chunk
-                    if event.type == "end":
-                        break
-                response = state.materialize()
-            except Exception as exc:
-                self._capture_partial(request, state)
-                self._failure = exc
-                raise
-
-            self._final_request = request
-            self._response = response
-
-            for tc in response.tool_calls:
-                yield StreamChunk(type="tool_call", name=tc.name, input=tc.input)
-
-            self._finalize(request, response)
-            yield StreamChunk(type="finished", response=response)
+            for event in self._source:
+                if event.type == "error":
+                    self._failure = _exception_from_error(event)
+                    raise self._failure
+                self._accumulator.push(event)
+                yield event
+                if event.type == "end":
+                    break
+            self._response = self._accumulator.response()
+        except Exception as exc:
+            self._failure = exc
+            raise
         finally:
             self._done = True
 
-    def _open_stream(self, request: Request) -> Iterator[StreamEvent]:
-        if self._initial_events is not None:
-            events = self._initial_events
-            self._initial_events = None
-            return events
-        assert self._start_stream is not None  # enforced in __init__
-        return self._start_stream(request)
 
-    def _capture_partial(self, request: Request, state: _RoundState | None) -> None:
-        self._final_request = request
-        if state is not None:
-            try:
-                self._response = state.materialize()
-            except Exception:
-                pass
+class AsyncResponseStream:
+    """Async mirror of :class:`ResponseStream`, same accumulator engine.
 
-    def _finalize(self, request: Request, response: Response) -> None:
-        self._final_request = request
-        self._response = response
-        self._failure = None
-        if not self._callback_called and self._on_finished is not None:
-            self._callback_called = True
-            self._on_finished(request, response)
+        rs = AsyncResponseStream(lm.stream(request), request)
+        async for text in rs:
+            print(text, end="")
+        response = await rs.response()
 
+    ``response()`` is a method (it may need to consume the stream, which
+    is an awaitable operation in async code).
+    """
 
-class AsyncResult:
-    """Async wrapper over a thread-backed Result."""
-
-    def __init__(self, sync_fn: Callable[..., Result], *args: Any, **kwargs: Any) -> None:
-        self._sync_fn = sync_fn
-        self._args = args
-        self._kwargs = kwargs
-        self._result: Result | None = None
-        self._await_started = False
-        self._stream_started = False
-
-    def __await__(self):
-        self._await_started = True
-
-        async def _consume() -> Result:
-            def _run() -> Result:
-                if self._result is None:
-                    self._result = self._sync_fn(*self._args, **self._kwargs)
-                self._result._consume()
-                return self._result
-            return await asyncio.to_thread(_run)
-
-        return _consume().__await__()
+    def __init__(self, events: AsyncIterator[StreamEvent], request: Request) -> None:
+        self._accumulator = StreamAccumulator(request)
+        self._source = events
+        self._response: Response | None = None
+        self._failure: Exception | None = None
+        self._done = False
+        self._event_gen = self._pump()
 
     def __aiter__(self) -> AsyncIterator[str]:
-        return self._aiter(lambda result: iter(result))
+        return self._text_iter()
 
-    def events(self) -> AsyncIterator[StreamChunk]:
-        return self._aiter(lambda result: result.events())
+    async def _text_iter(self) -> AsyncIterator[str]:
+        async for event in self.events():
+            if event.type == "delta" and event.delta is not None:
+                if event.delta.type == "text" and event.delta.text is not None:
+                    yield event.delta.text
 
-    def _aiter(self, iterator_factory: Callable[[Result], Iterator[Any]]) -> AsyncIterator[Any]:
-        if self._await_started and self._result is None:
-            raise RuntimeError("AsyncResult is already being awaited")
-        self._stream_started = True
+    async def events(self) -> AsyncIterator[StreamEvent]:
+        """Canonical stream events, teed through the accumulator."""
+        async for event in self._event_gen:
+            yield event
 
-        async def _gen() -> AsyncIterator[Any]:
-            loop = asyncio.get_running_loop()
-            queue: asyncio.Queue[Any] = asyncio.Queue()
+    async def response(self) -> Response:
+        if self._failure is not None:
+            raise self._failure
+        if not self._done:
+            async for _ in self.events():
+                pass
+            if self._failure is not None:  # pragma: no cover - pump raises first
+                raise self._failure
+        assert self._response is not None
+        return self._response
 
-            def _push(item: Any) -> None:
-                loop.call_soon_threadsafe(queue.put_nowait, item)
-
-            def _produce() -> None:
-                try:
-                    if self._result is None:
-                        self._result = self._sync_fn(*self._args, **self._kwargs)
-                    for item in iterator_factory(self._result):
-                        _push(item)
-                    _push(_FINISH_SENTINEL)
-                except Exception as exc:
-                    _push(exc)
-                    _push(_FINISH_SENTINEL)
-
-            loop.run_in_executor(None, _produce)
-
-            while True:
-                item = await queue.get()
-                if item is _FINISH_SENTINEL:
+    async def _pump(self) -> AsyncIterator[StreamEvent]:
+        try:
+            async for event in self._source:
+                if event.type == "error":
+                    self._failure = _exception_from_error(event)
+                    raise self._failure
+                self._accumulator.push(event)
+                yield event
+                if event.type == "end":
                     break
-                if isinstance(item, Exception):
-                    raise item
-                yield item
+            self._response = self._accumulator.response()
+        except Exception as exc:
+            self._failure = exc
+            raise
+        finally:
+            self._done = True
 
-        return _gen()
+
+# ─── One-shot materialization ────────────────────────────────────────
+
+def materialize_response(events: Iterator[StreamEvent], request: Request) -> Response:
+    """Consume stream events and build a complete Response."""
+    accumulator = StreamAccumulator(request)
+    for event in events:
+        if event.type == "error":
+            raise _exception_from_error(event)
+        accumulator.push(event)
+        if event.type == "end":
+            break
+    return accumulator.response()
+
+
+async def amaterialize_response(events: AsyncIterator[StreamEvent], request: Request) -> Response:
+    """Async mirror of :func:`materialize_response`."""
+    accumulator = StreamAccumulator(request)
+    async for event in events:
+        if event.type == "error":
+            raise _exception_from_error(event)
+        accumulator.push(event)
+        if event.type == "end":
+            break
+    return accumulator.response()
 
 
 # ─── Conversion utilities ────────────────────────────────────────────
@@ -660,17 +578,12 @@ async def acoalesce_stream(events: "AsyncIterator[StreamEvent]") -> "AsyncIterat
         )
 
 
-def materialize_response(events: Iterator[StreamEvent], request: Request) -> Response:
-    """Consume stream events and build a complete Response."""
-    return Result(events=events, request=request).response
-
+# ─── Internal helpers ────────────────────────────────────────────────
 
 def _raise_non_streamable_part(part: Part, *, reason: str | None = None) -> None:
     detail = reason or f"no {part.type!r} Delta variant exists"
     raise TypeError(f"Cannot convert {type(part).__name__} to StreamEvent: {detail}")
 
-
-# ─── Internal helpers ────────────────────────────────────────────────
 
 def _exception_from_error(event: StreamEvent) -> Exception:
     err = event.error or ErrorDetail(code="provider", message="stream error")

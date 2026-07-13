@@ -447,10 +447,9 @@ class AsyncOpenAICodexLM(AsyncBaseProviderLM):
     async def complete(self, request: Request) -> Response:
         # Mirror of OpenAICodexLM.complete: the Codex subscription backend is
         # streaming-first; materialize the (coalesced) stream.
-        from ..result import materialize_response
+        from ..result import amaterialize_response
 
-        events = [event async for event in self.stream(request)]
-        return materialize_response(iter(events), request)
+        return await amaterialize_response(self.stream(request), request)
 
     def live(self, config: LiveConfig):
         return self._inner.live(config)  # raises UnsupportedFeatureError

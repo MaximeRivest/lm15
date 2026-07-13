@@ -13,7 +13,7 @@ from typing import Iterator
 
 from lm15.providers.anthropic import AnthropicLM
 from lm15.providers.openai_chat import OpenAIChatLM
-from lm15.result import Result
+from lm15.result import ResponseStream
 from lm15.types import Message, Request
 
 
@@ -131,7 +131,7 @@ def test_openai_chat_stream_materialized_usage_nonzero() -> None:
     lm = OpenAIChatLM(api_key="sk-test", transport=_FakeTransport(
         [_FakeStreamResponse(status=200, body=_VLLM_SSE)]
     ))
-    response = Result(events=lm.stream(_REQ), request=_REQ).response
+    response = ResponseStream(lm.stream(_REQ), _REQ).response
     assert response.text == "Hello!"
     assert response.finish_reason == "stop"
     assert response.usage.input_tokens == 14

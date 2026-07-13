@@ -163,10 +163,15 @@ def test_async_stream_coalesces_post_finish_usage():
     assert ends[0].usage.output_tokens == 22
 
 
-def test_acoalesce_stream_exported_top_level():
+def test_async_surface_placement():
+    """MAP-3 plumbing lives in lm15.result (both twins, symmetric); the
+    async adapters stay top-level (API review, 2026-07-13)."""
     import lm15
+    import lm15.result
 
-    assert lm15.acoalesce_stream is acoalesce_stream
+    assert not hasattr(lm15, "acoalesce_stream")
+    assert lm15.result.acoalesce_stream is acoalesce_stream
+    assert lm15.result.coalesce_stream is not None
     for name in ("AsyncOpenAILM", "AsyncAnthropicLM", "AsyncGeminiLM", "AsyncOpenAIChatLM"):
         assert name in lm15.__all__
         assert getattr(lm15, name) is not None

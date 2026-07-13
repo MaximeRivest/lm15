@@ -187,10 +187,9 @@ from .providers.async_base import (
 
 # ── Stream assembly ──────────────────────────────────────────────────
 from .result import (
-    Result,
-    AsyncResult,
-    StreamChunk,
-    acoalesce_stream,
+    ResponseStream,
+    AsyncResponseStream,
+    amaterialize_response,
     materialize_response,
     response_to_events,
 )
@@ -281,8 +280,8 @@ __all__ = [
     "AsyncClaudeCodeLM", "AsyncOpenAICodexLM",
     "AsyncBaseProviderLM", "AsyncTransport",
     # stream assembly
-    "Result", "AsyncResult", "StreamChunk", "acoalesce_stream",
-    "materialize_response", "response_to_events",
+    "ResponseStream", "AsyncResponseStream",
+    "materialize_response", "amaterialize_response", "response_to_events",
     # profiles/compat/models
     "EndpointProfile", "ProviderProfile", "OpenAIChatCompat",
     "OpenAIResponsesCompat", "ModelInfo", "ModelRegistry", "Capabilities",
