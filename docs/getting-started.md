@@ -42,24 +42,66 @@ conversation.
 
 ## Any provider: change one string
 
-```python
-for model in ("claude-haiku-4-5", "gemini-3-flash-preview",
-              "groq:llama-3.3-70b-versatile"):
-    r = router.complete(Request(model=model,
-                                messages=(Message.user("The capital of Canada, two words max."),)))
-    print(f"{model:30} {r.text.strip()}")
-```
+The call never changes — only the model string does. Pick a tab:
 
-```output
-claude-haiku-4-5               Ottawa.
-gemini-3-flash-preview         Ottawa
-groq:llama-3.3-70b-versatile   Ottawa
-```
+=== "Anthropic"
 
-The same code covers OpenAI (`gpt-4.1-mini`), a local server
-(`ollama:qwen3:4b`, `vllm:...`, `sglang:...` — no key needed), and
-anything else the router knows. And nothing about it is magic — ask it
-to explain itself:
+    ```python
+    response = router.complete(
+        Request(model="claude-haiku-4-5",
+                messages=(Message.user("The capital of Canada, two words max."),))
+    )
+    print(response.text)
+    ```
+
+    ```output
+    Ottawa.
+    ```
+
+=== "Gemini"
+
+    ```python
+    response = router.complete(
+        Request(model="gemini-3-flash-preview",
+                messages=(Message.user("The capital of Canada, two words max."),))
+    )
+    print(response.text)
+    ```
+
+    ```output
+    Ottawa
+    ```
+
+=== "Groq"
+
+    ```python
+    response = router.complete(
+        Request(model="groq:llama-3.3-70b-versatile",
+                messages=(Message.user("The capital of Canada, two words max."),))
+    )
+    print(response.text)
+    ```
+
+    ```output
+    Ottawa
+    ```
+
+=== "Local (ollama)"
+
+    ```python
+    response = router.complete(
+        Request(model="ollama:qwen3:4b",   # any model you've pulled
+                messages=(Message.user("The capital of Canada, two words max."),))
+    )
+    print(response.text)
+    ```
+
+    No key, no config: local servers (`ollama:`, `vllm:`, `sglang:`)
+    route by name and use a placeholder credential.
+
+The same code covers OpenAI (`gpt-4.1-mini`) and anything else the
+router knows. And nothing about it is magic — ask it to explain
+itself:
 
 ```python
 print(router.resolve("claude-haiku-4-5"))
