@@ -61,6 +61,47 @@ def resolve_credential(credential: Credential) -> str:
     return credential() if callable(credential) else credential
 
 
+def _retry_after_seconds(value: str | None) -> float | None:
+    """Parse an HTTP Retry-After header: delta-seconds or an HTTP-date."""
+    if not value:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        pass
+    else:
+        return seconds if seconds >= 0 else None
+    from datetime import datetime, timezone
+    from email.utils import parsedate_to_datetime
+
+    try:
+        when = parsedate_to_datetime(value)
+    except Exception:
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+
+
+def _attach_retry_after(error: ProviderError, headers: "list[tuple[str, str]] | None") -> None:
+    """Populate error.retry_after from a Retry-After header.
+
+    A provider-body-derived value (set by the adapter's normalize_error)
+    always wins; the header only fills the gap."""
+    if getattr(error, "retry_after", None) is not None:
+        return
+    value = None
+    for key, val in headers or []:
+        if key.lower() == "retry-after":
+            value = val
+            break
+    seconds = _retry_after_seconds(value)
+    if seconds is not None:
+        error.retry_after = seconds
+
+
 @dataclass(frozen=True, slots=True)
 class HttpResponse:
     """Buffered provider-level HTTP response.
@@ -124,7 +165,9 @@ class BaseProviderLM:
         req = self.build_request(request, stream=False)
         resp = self._send(req)
         if resp.status >= 400:
-            raise self.normalize_error(resp.status, resp.text())
+            error = self.normalize_error(resp.status, resp.text())
+            _attach_retry_after(error, resp.headers)
+            raise error
         return self.parse_response(request, resp)
 
     def stream(self, request: Request) -> Iterator[StreamEvent]:
@@ -142,9 +185,11 @@ class BaseProviderLM:
             with self.transport.stream(req) as resp:
                 if resp.status >= 400:
                     body = resp.read()
-                    raise self.normalize_error(
+                    error = self.normalize_error(
                         resp.status, body.decode("utf-8", errors="replace")
                     )
+                    _attach_retry_after(error, resp.headers)
+                    raise error
                 lines = resp.iter_lines() if hasattr(resp, "iter_lines") else _iter_lines(resp)
                 for raw in parse_sse(lines):
                     for event in self.parse_stream_events(request, raw):

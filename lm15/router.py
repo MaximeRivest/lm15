@@ -333,6 +333,9 @@ class RouterConfig:
     rules: tuple[RouteRule, ...] = DEFAULT_RULES
     env: Mapping[str, str] | None = None
     api_keys: Mapping[str, Credential] | None = field(default=None, repr=False)
+    transport: object | None = None  # SyncTransport for LMRouter, AsyncTransport
+                                     # for AsyncLMRouter; passed to every LM the
+                                     # router constructs (tests, custom pooling)
 
 
 # ------------------------------------------------------------- internals ----
@@ -561,8 +564,11 @@ def _env_key_for(provider: str, config: RouterConfig, adapters: Mapping[str, typ
 def _build_lm(resolution: Resolution, config: RouterConfig, adapters: Mapping[str, type]):
     cls = _adapter_for(resolution.provider, adapters)
     route = CHAT_PRESET_ROUTES.get(resolution.provider) if resolution.provider not in adapters else None
+    extra: dict = {}
+    if config.transport is not None:
+        extra["transport"] = config.transport
     if resolution.provider in _OAUTH_PROVIDERS:
-        return cls()  # self-resolving local OAuth constructor
+        return cls(**extra)  # self-resolving local OAuth constructor
     api_key, _ = _api_keys_entry(config, resolution.provider)
     if api_key is None:
         env = config.env if config.env is not None else os.environ
@@ -583,8 +589,8 @@ def _build_lm(resolution: Resolution, config: RouterConfig, adapters: Mapping[st
             env_keys=env_keys,
         )
     if route is not None:
-        return cls(api_key=api_key, compat=route.provider)
-    return cls(api_key=api_key)
+        return cls(api_key=api_key, compat=route.provider, **extra)
+    return cls(api_key=api_key, **extra)
 
 
 def _routed_request(request: Request, resolution: Resolution) -> Request:
