@@ -1,58 +1,100 @@
 # Providers & models
 
-The first three questions with any LLM library: which providers work,
-how do I name a model, and what does the library know about it. This
-page answers all three; every table row comes from lm15's own
-manifests, and every provider behavior is contract-tested (see
-[How lm15 is specified](how-lm15-is-specified.md)).
+You usually arrive knowing which model you want — Claude, GPT, Gemini,
+a Llama on Groq, something running on your own machine. This page gets
+you from that to a working call: what a "provider" means in lm15,
+which ones are supported, how to write the model string, and what the
+library can tell you about a model before you spend a token.
 
-## The provider matrix
+## The mental model
 
-| provider string | adapter | endpoints | auth | credential |
-|---|---|---|---|---|
-| `openai` | `OpenAILM` (Responses API) | chat, stream, live, embeddings, files, batch, images, audio | bearer | `OPENAI_API_KEY` |
-| `openai_chat` | `OpenAIChatLM` (Chat Completions) | chat, stream | bearer | `OPENAI_API_KEY` |
-| `anthropic` | `AnthropicLM` | chat, stream, files, batch | x-api-key | `ANTHROPIC_API_KEY` |
-| `gemini` | `GeminiLM` | chat, stream, live, embeddings, files, batch, images, audio | x-goog-api-key | `GEMINI_API_KEY` / `GOOGLE_API_KEY` |
-| `claude-code` | `ClaudeCodeLM` | chat, stream | local OAuth | Claude CLI login |
-| `openai-codex` | `OpenAICodexLM` | chat, stream | local OAuth | Codex CLI login |
-| `groq` | `OpenAIChatLM(compat="groq")` | chat, stream | bearer | `GROQ_API_KEY` |
-| `openrouter` | `OpenAIChatLM(compat="openrouter")` | chat, stream | bearer | `OPENROUTER_API_KEY` |
-| `ollama` | `OpenAIChatLM(compat="ollama")` | chat, stream | keyless | — |
-| `vllm` | `OpenAIChatLM(compat="vllm")` | chat, stream | keyless | — |
-| `sglang` | `OpenAIChatLM(compat="sglang")` | chat, stream | keyless | — |
+Every provider speaks its own HTTP dialect: different URLs, different
+JSON shapes, different auth headers, different streaming formats. lm15
+hides exactly that — you write one `Request`, and a per-provider
+**adapter** translates it into that provider's dialect, byte-for-byte
+correctly.
 
-The chat core (types, serde, request building, response parsing,
-streaming, errors) is **frozen** and additive-only; the non-chat
-endpoints work and are live-tested but remain **provisional** until 1.0
-stable — see the [roadmap](roadmap.md). Credentials in every form
-(env, explicit, rotating, subscription) are on
-[Authentication](authentication.md).
-
-Beyond the table, **any OpenAI-compatible server** is one constructor
-away — a compat policy plus your URL:
+So in lm15, a *provider* is just a short string naming a dialect:
+`anthropic`, `openai`, `gemini`, `groq`. And the simplest way to pick
+one is to put it in front of the model name:
 
 ```python
-lm = OpenAIChatLM(api_key="...", compat="openai", base_url="https://your-gateway/v1")
+router.complete(Request(model="anthropic:claude-haiku-4-5", ...))
+router.complete(Request(model="groq:llama-3.3-70b-versatile", ...))
 ```
 
-Presets bundle known servers' wire quirks; see
-[Model profiles & compat](using-model-profiles.md). Azure OpenAI,
-Bedrock, and Vertex are on the roadmap (fixtures with live receipts
-first, code second — that is how every provider lands).
+That is genuinely the whole trick. Everything below is the supporting
+detail: the list of providers, the shortcuts, and the metadata.
 
-## Naming a model
+## Which providers are supported?
 
-Three forms, resolved on a fixed, explainable ladder
-([the router](using-the-router.md) has the details):
+| provider | string | key you need | beyond chat |
+|---|---|---|---|
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | files, batch |
+| OpenAI | `openai` | `OPENAI_API_KEY` | live voice, embeddings, files, batch, images, audio |
+| Google Gemini | `gemini` | `GEMINI_API_KEY` | live voice, embeddings, files, batch, images, audio |
+| Groq | `groq` | `GROQ_API_KEY` | — |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | — |
+| ollama (local) | `ollama` | none | — |
+| vLLM (local) | `vllm` | none | — |
+| SGLang (local) | `sglang` | none | — |
+| Claude subscription | `claude-code` | your `claude` CLI login | — |
+| ChatGPT subscription | `openai-codex` | your `codex` CLI login | — |
+
+Every provider does chat with streaming and tools — that column would
+be all checkmarks, so the table only lists what each offers *beyond*
+it. Setting the key is one `export`; every other way to authenticate
+is on [Authentication](authentication.md).
+
+!!! note "You may also see `openai_chat`"
+    OpenAI has two wire dialects: its current **Responses API** (what
+    the `openai` string uses) and the older **Chat Completions**
+    dialect that half the industry adopted as a de-facto standard.
+    lm15 ships both. The `openai_chat` adapter speaks Chat
+    Completions — and it is the same adapter that powers the Groq,
+    OpenRouter, ollama, vLLM, and SGLang rows above, each via a preset
+    that knows that server's URL and quirks. You rarely type
+    `openai_chat` yourself; the presets do.
+
+Chat — the part all of this rests on — is **stable**: it is frozen by
+a cross-language contract and only changes additively. The
+beyond-chat endpoints work and are live-tested, but their shapes may
+still move before 1.0 stable ([roadmap](roadmap.md)).
+
+## What if my provider isn't listed?
+
+Most hosted services and gateways speak the Chat Completions dialect.
+If yours does, it already works — point the adapter at it:
 
 ```python
-"anthropic:claude-haiku-4-5"      # provider prefix — always works, never ambiguous
-"claude-haiku-4-5"                # bare id — built-in rules or a catalog resolve it
-aimo.anthropic.claude_3_5_sonnet_20240620   # a model object that knows its provider
+lm = OpenAIChatLM(api_key="...", base_url="https://your-gateway/v1")
 ```
 
-Nothing is magic; ask the router what it did:
+[Model profiles & compat](using-model-profiles.md) covers tuning the
+dialect quirks if the server has any. Azure OpenAI, Bedrock, and
+Vertex are on the [roadmap](roadmap.md); new providers land in lm15
+fixtures-first, with live receipts, so support is never a guess.
+
+## How do I write the model string?
+
+Start with the prefix form — `"provider:model-id"`. It always works
+and can never be ambiguous:
+
+```python
+"anthropic:claude-haiku-4-5"
+"groq:llama-3.3-70b-versatile"
+"ollama:qwen3:4b"                 # only the FIRST colon splits
+```
+
+For well-known families you can drop the prefix; a small built-in rule
+table recognizes `claude-*`, `gpt-*`, `gemini-*`, `o1/o3/o4*`:
+
+```python
+"claude-haiku-4-5"                # resolves to anthropic on its own
+```
+
+And if you ever wonder what happened, ask — resolution is a lookup you
+can read, not magic:
 
 ```python
 print(LMRouter().resolve("claude-haiku-4-5"))
@@ -62,16 +104,16 @@ print(LMRouter().resolve("claude-haiku-4-5"))
 'claude-haiku-4-5' -> provider 'anthropic' (AnthropicLM); via built-in rule prefix='claude-' — Anthropic Claude family; wire model 'claude-haiku-4-5'; key from $ANTHROPIC_API_KEY.
 ```
 
-One grammar note: strings split on the *first* `:`, so a fine-tune id
-like `ft:gpt-4.1:org` needs the explicit `openai:ft:gpt-4.1:org`.
+One honest gotcha: the string splits on the *first* `:`, so a
+fine-tune id like `ft:gpt-4.1:org` needs the explicit
+`openai:ft:gpt-4.1:org`. The full resolution ladder — including model
+*objects* that carry their own provider, from catalog packages like
+aimo — is in [the router guide](using-the-router.md).
 
-## What lm15 knows about a model
+## Will it work before I try it?
 
-Two layers, one built in and one opt-in.
-
-**Built in: what each adapter can do.** Every adapter declares its
-`capabilities` (input/output modalities, features) and endpoint support
-as inspectable data — that is where the matrix above comes from:
+Adapters describe themselves. Instead of hunting through docs for
+"does Anthropic support batch?", ask the object:
 
 ```python
 lm = AnthropicLM(api_key="...")
@@ -84,12 +126,19 @@ print(lm.supports.batches)
 True
 ```
 
-**Opt-in: per-model metadata from a catalog.** lm15's core
-deliberately ships no model list, no context windows, and no price
-table — they change weekly and would rot in a frozen library. Instead,
-catalog packages hydrate a `ModelRegistry` through a
-[specified protocol](model-hydration.md). Install one
-(`pip install aimo-registry`) and you get the numbers:
+Asking for something a provider can't do raises a typed
+`UnsupportedFeatureError` immediately — you never find out via a
+confusing HTTP 400.
+
+## What does it cost? What's the context window?
+
+Here lm15 is deliberately humble: the core library ships **no** model
+list, no context windows, no price table. Those numbers change weekly,
+and a frozen library that pretended to know them would quietly rot.
+
+Instead, *catalog packages* supply the numbers through a
+[specified protocol](model-hydration.md), and lm15 gives them one
+home. Install one — `pip install aimo-registry` — and ask:
 
 ```python
 from lm15 import ModelRegistry
@@ -110,19 +159,30 @@ print(info.inference.pricing.estimate(input_tokens=1200, output_tokens=350))
 0.00885
 ```
 
-(That registry run knew 6,993 models across 209 providers.) Catalog
-data is **advisory by rule**: it informs routing, cost estimates, and
-your own logic, but it never changes the bytes `build_request`
-produces. Wire that registry into the router
-(`RouterConfig(registry=...)`) and bare ids, aliases, and
-provider-carrying model objects all resolve — with typed
-`AmbiguousModelError`s instead of silent guesses when two providers
-offer the same id.
+That run knew 6,993 models across 209 providers. Hand the registry to
+the router (`RouterConfig(registry=...)`) and bare model ids and
+aliases resolve through it too — with a typed `AmbiguousModelError`
+naming the fix when two providers offer the same id, never a silent
+guess.
 
-## What lm15 deliberately does not do
+One rule keeps this trustworthy: catalog data is **advisory**. It
+informs routing, cost estimates, and your own logic — it never changes
+the bytes lm15 puts on the wire.
 
-No retries, no automatic tool loop, no cost ledger, no policy routing —
-lm15 is the foundation layer; those belong to your application or the
-opinionated libraries built on top. Each omission has a one-page
-recipe in the [cookbooks](cookbooks/index.md) and a written reason in
-the [design rationale](design-rationale.md).
+## What lm15 won't do for you (on purpose)
+
+If you are coming from LiteLLM or LangChain, you may expect built-in
+retries, an automatic tool-execution loop, a cost ledger, or fallback
+routing. lm15 has none of these — deliberately. It is the foundation
+layer; policy belongs to your application or to the opinionated
+libraries built on top of it. Every omission has a one-page answer in
+the [cookbooks](cookbooks/index.md) (retries, budgets, fallbacks are a
+few lines each) and a written reason in the
+[design rationale](design-rationale.md).
+
+## Where next
+
+- Set up credentials properly: [Authentication](authentication.md)
+- The resolution ladder in full: [Using the router](using-the-router.md)
+- Actually calling models: back to [Getting started](getting-started.md),
+  or the [cookbooks](cookbooks/index.md)
