@@ -20,8 +20,8 @@ release is a pre-release; it goes away at 1.0 stable.)
 
 ## Set an API key
 
-Grab a key from any **one** provider and export its standard variable —
-that is the only setup:
+Grab a key from any **one** provider and set its standard environment
+variable — that is the only setup. On macOS or Linux:
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."   # console.anthropic.com
@@ -29,6 +29,57 @@ export GEMINI_API_KEY="AIza..."         # aistudio.google.com/apikey
 export GROQ_API_KEY="gsk_..."           # console.groq.com/keys
 export OPENAI_API_KEY="sk-..."          # platform.openai.com/api-keys
 ```
+
+??? question "First time setting an environment variable? Open this."
+
+    An environment variable is a named value your terminal hands to
+    the programs it starts. Putting the key there means it never has
+    to appear in your code. You only need **one** of the variables
+    above — pick the provider you got a key from.
+
+    === "macOS / Linux"
+
+        Paste the `export` line into your terminal, then run your
+        Python from that same terminal. It lasts until the terminal
+        closes. Check it took:
+
+        ```bash
+        echo $ANTHROPIC_API_KEY
+        ```
+
+        To make it permanent, add the same `export` line to the end
+        of `~/.zshrc` (macOS) or `~/.bashrc` (most Linux) and open a
+        new terminal.
+
+    === "Windows (PowerShell)"
+
+        ```powershell
+        $env:ANTHROPIC_API_KEY = "sk-ant-..."
+        ```
+
+        Lasts until the window closes; check with
+        `echo $env:ANTHROPIC_API_KEY`. To make it permanent:
+
+        ```powershell
+        setx ANTHROPIC_API_KEY "sk-ant-..."
+        ```
+
+        `setx` writes it for *future* windows — open a new terminal
+        before running Python.
+
+    === "Windows (cmd)"
+
+        ```bat
+        set ANTHROPIC_API_KEY=sk-ant-...
+        ```
+
+        Lasts until the window closes (note: no quotes, no spaces
+        around `=`). Make it permanent with the same `setx` command
+        as PowerShell.
+
+    Rather not touch the environment at all? Pass the key in code
+    instead — `LMRouter(RouterConfig(api_keys={"anthropic": "sk-ant-..."}))`
+    — just keep it out of version control.
 
 The examples below use Anthropic; on a different provider, keep the
 code and swap the model string (the tabs below show exactly how).
