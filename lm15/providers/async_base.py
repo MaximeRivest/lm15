@@ -46,7 +46,7 @@ from ..types import (
     StreamEvent,
 )
 from .anthropic import AnthropicLM
-from .base import BaseProviderLM, HttpResponse, SyncTransport
+from .base import BaseProviderLM, Credential, HttpResponse, SyncTransport
 from .claude_code import DEFAULT_CLAUDE_CODE_VERSION, ClaudeCodeLM
 from .common import make_json_request
 from .gemini import GeminiLM
@@ -219,7 +219,7 @@ async def _aiter_lines(resp: AsyncTransportResponse) -> AsyncIterator[bytes]:
 
 @dataclass(slots=True)
 class AsyncOpenAILM(AsyncBaseProviderLM):
-    api_key: str
+    api_key: Credential = field(repr=False)
     transport: AsyncTransport = field(default_factory=default_async_transport)
     base_url: str = "https://api.openai.com/v1"
     profile: Any | None = None
@@ -242,7 +242,7 @@ class AsyncOpenAILM(AsyncBaseProviderLM):
 
 @dataclass(slots=True)
 class AsyncAnthropicLM(AsyncBaseProviderLM):
-    api_key: str
+    api_key: Credential = field(repr=False)
     transport: AsyncTransport = field(default_factory=default_async_transport)
     base_url: str = "https://api.anthropic.com/v1"
     api_version: str = "2023-06-01"
@@ -265,7 +265,7 @@ class AsyncAnthropicLM(AsyncBaseProviderLM):
 
 @dataclass(slots=True)
 class AsyncGeminiLM(AsyncBaseProviderLM):
-    api_key: str
+    api_key: Credential = field(repr=False)
     transport: AsyncTransport = field(default_factory=default_async_transport)
     base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     upload_base_url: str = "https://generativelanguage.googleapis.com/upload/v1beta"
@@ -342,7 +342,7 @@ class AsyncGeminiLM(AsyncBaseProviderLM):
 
 @dataclass(slots=True)
 class AsyncOpenAIChatLM(AsyncBaseProviderLM):
-    api_key: str
+    api_key: Credential = field(repr=False)
     transport: AsyncTransport = field(default_factory=default_async_transport)
     base_url: str = _mirror_default(OpenAIChatLM, "base_url")
     compat: Any | None = None
@@ -369,15 +369,17 @@ class AsyncOpenAIChatLM(AsyncBaseProviderLM):
 
 # ─── Subscription mirrors (Claude Code / Codex CLI OAuth) ────────────
 #
-# Same composition pattern: the inner sync adapter resolves the local OAuth
-# credential at construction time (file read; a token refresh, if needed, is
-# one blocking call) and owns all pure mapping; the resolved token fields are
-# repr-suppressed so secrets never leak.
+# Same composition pattern: the inner sync adapter validates the local OAuth
+# credential at construction time (typed, re-login-guided errors), then
+# re-resolves it per request so long-lived clients stay fresh.  Per-request
+# resolution is a local file read; a refresh, when the token has expired, is
+# one blocking token-endpoint call inside the sync mapping layer.  Credential
+# fields are repr-suppressed so secrets never leak.
 
 
 @dataclass(slots=True)
 class AsyncClaudeCodeLM(AsyncBaseProviderLM):
-    api_key: str | None = field(default=None, repr=False)
+    api_key: Credential | None = field(default=None, repr=False)
     credentials_path: "str | os.PathLike[str] | None" = None
     transport: AsyncTransport = field(default_factory=default_async_transport)
     base_url: str = "https://api.anthropic.com/v1"
@@ -401,7 +403,7 @@ class AsyncClaudeCodeLM(AsyncBaseProviderLM):
             api_version=self.api_version,
             claude_code_version=self.claude_code_version,
         )
-        self.api_key = self._inner.api_key  # resolved OAuth token (repr-suppressed)
+        self.api_key = self._inner.api_key  # static key or per-request credential provider (repr-suppressed)
 
     def file_upload(self, request: FileUploadRequest):
         return self._inner.file_upload(request)  # raises UnsupportedFeatureError
@@ -415,7 +417,7 @@ class AsyncClaudeCodeLM(AsyncBaseProviderLM):
 
 @dataclass(slots=True)
 class AsyncOpenAICodexLM(AsyncBaseProviderLM):
-    api_key: str | None = field(default=None, repr=False)
+    api_key: Credential | None = field(default=None, repr=False)
     account_id: str | None = None
     auth_path: "str | os.PathLike[str] | None" = None
     transport: AsyncTransport = field(default_factory=default_async_transport)
@@ -439,7 +441,7 @@ class AsyncOpenAICodexLM(AsyncBaseProviderLM):
             base_url=self.base_url,
             originator=self.originator,
         )
-        self.api_key = self._inner.api_key  # resolved OAuth token (repr-suppressed)
+        self.api_key = self._inner.api_key  # static key or per-request credential provider (repr-suppressed)
         self.account_id = self._inner.account_id
 
     async def complete(self, request: Request) -> Response:

@@ -4,16 +4,15 @@ import os
 from typing import ClassVar
 
 from ..auth import (
-    CLAUDE_CODE_CREDENTIALS_PATH,
     CLAUDE_CODE_LOGIN_HINT,
     get_claude_code_access_token,
 )
-from ..errors import NotConfiguredError, ProviderError, UnsupportedFeatureError, with_credential_hint
+from ..errors import ProviderError, UnsupportedFeatureError, with_credential_hint
 from ..features import EndpointSupport, ProviderManifest
 from ..protocols import Capabilities, LiveSession
 from ..types import BatchRequest, BatchResponse, BuiltinTool, FileUploadRequest, FileUploadResponse, LiveConfig, Request
 from .anthropic import AnthropicLM
-from .base import SyncTransport, default_transport
+from .base import Credential, SyncTransport, default_transport, resolve_credential
 
 DEFAULT_CLAUDE_CODE_VERSION = "2.1.170"
 DEFAULT_CLAUDE_CODE_SYSTEM_PROMPT = "You are Claude Code, Anthropic's official CLI for Claude."
@@ -37,7 +36,7 @@ class ClaudeCodeLM(AnthropicLM):
 
     def __init__(
         self,
-        api_key: str | None = None,
+        api_key: Credential | None = None,
         *,
         credentials_path: str | os.PathLike[str] | None = None,
         transport: SyncTransport | None = None,
@@ -45,19 +44,21 @@ class ClaudeCodeLM(AnthropicLM):
         api_version: str = "2023-06-01",
         claude_code_version: str = DEFAULT_CLAUDE_CODE_VERSION,
     ) -> None:
-        # get_claude_code_access_token raises typed, re-login-guided errors
-        # (NotConfiguredError / AuthError) — let them propagate.
-        token = api_key or get_claude_code_access_token(credentials_path)
-        if not token:  # defensive: loaders never return an empty token
-            path = os.fspath(credentials_path or CLAUDE_CODE_CREDENTIALS_PATH)
-            raise NotConfiguredError(
-                f"No Claude Code OAuth token found at {path}.",
-                provider="claude-code",
-                credential_hint=CLAUDE_CODE_LOGIN_HINT,
-            )
+        if api_key:
+            credential: Credential = api_key
+        else:
+            # Validate now — get_claude_code_access_token raises typed,
+            # re-login-guided errors (NotConfiguredError / AuthError) — then
+            # re-resolve per request so a long-lived client always sends a
+            # fresh token (rotations on disk are picked up, expiry refreshes).
+            get_claude_code_access_token(credentials_path)
+
+            def credential() -> str:
+                return get_claude_code_access_token(credentials_path)
+
         self.claude_code_version = claude_code_version
         super().__init__(
-            api_key=token,
+            api_key=credential,
             transport=transport or default_transport(),
             base_url=base_url,
             api_version=api_version,
@@ -99,7 +100,7 @@ class ClaudeCodeLM(AnthropicLM):
         ):
             betas.append("code-execution-2025-05-22")
         return {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {resolve_credential(self.api_key)}",
             "anthropic-version": self.api_version,
             "content-type": "application/json",
             "anthropic-dangerous-direct-browser-access": "true",

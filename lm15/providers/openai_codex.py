@@ -4,7 +4,6 @@ import os
 from typing import ClassVar, Iterator
 
 from ..auth import (
-    CODEX_CLI_AUTH_PATH,
     OPENAI_CODEX_LOGIN_HINT,
     extract_chatgpt_account_id,
     get_codex_cli_access_token,
@@ -29,7 +28,7 @@ from ..types import (
     Response,
     StreamEvent,
 )
-from .base import BaseProviderLM, SyncTransport, default_transport
+from .base import BaseProviderLM, Credential, SyncTransport, default_transport, resolve_credential
 from .openai import OpenAILM
 
 DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
@@ -55,7 +54,7 @@ class OpenAICodexLM(OpenAILM):
 
     def __init__(
         self,
-        api_key: str | None = None,
+        api_key: Credential | None = None,
         *,
         account_id: str | None = None,
         auth_path: str | os.PathLike[str] | None = None,
@@ -63,19 +62,21 @@ class OpenAICodexLM(OpenAILM):
         base_url: str = DEFAULT_CODEX_BASE_URL,
         originator: str = DEFAULT_CODEX_ORIGINATOR,
     ) -> None:
-        # get_codex_cli_access_token raises typed, re-login-guided errors
-        # (NotConfiguredError / AuthError) — let them propagate.
-        credential = None if api_key else get_codex_cli_access_token(auth_path)
-        token = api_key or (credential.access_token if credential is not None else None)
-        if not token:  # defensive: loaders never return an empty token
-            path = os.fspath(auth_path or CODEX_CLI_AUTH_PATH)
-            raise NotConfiguredError(
-                f"No Codex CLI OAuth token found at {path}.",
-                provider="openai-codex",
-                credential_hint=OPENAI_CODEX_LOGIN_HINT,
-            )
-        resolved_account_id = account_id or (credential.account_id if credential is not None else None)
-        resolved_account_id = resolved_account_id or extract_chatgpt_account_id(token)
+        if api_key:
+            credential: Credential = api_key
+            resolved_account_id = account_id or extract_chatgpt_account_id(resolve_credential(api_key))
+        else:
+            # Validate now — get_codex_cli_access_token raises typed,
+            # re-login-guided errors (NotConfiguredError / AuthError) — then
+            # re-resolve per request so a long-lived client always sends a
+            # fresh token (rotations on disk are picked up, expiry refreshes).
+            # The account id is stable across refreshes; resolve it once.
+            initial = get_codex_cli_access_token(auth_path)
+            resolved_account_id = account_id or initial.account_id or extract_chatgpt_account_id(initial.access_token)
+
+            def credential() -> str:
+                return get_codex_cli_access_token(auth_path).access_token
+
         if not resolved_account_id:
             raise NotConfiguredError(
                 "No ChatGPT account id found in the Codex OAuth token.",
@@ -85,7 +86,7 @@ class OpenAICodexLM(OpenAILM):
         self.account_id = resolved_account_id
         self.originator = originator
         super().__init__(
-            api_key=token,
+            api_key=credential,
             transport=transport or default_transport(),
             base_url=base_url,
             profile=None,
@@ -117,7 +118,7 @@ class OpenAICodexLM(OpenAILM):
 
     def _headers(self, content_type: str = "application/json") -> dict[str, str]:
         return {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {resolve_credential(self.api_key)}",
             "Content-Type": content_type,
             "chatgpt-account-id": self.account_id,
             "OpenAI-Beta": "responses=experimental",

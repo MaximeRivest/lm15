@@ -81,7 +81,7 @@ from ..types import (
     ToolResultPart,
     Usage,
 )
-from .base import BaseProviderLM, HttpResponse, SyncTransport, default_transport
+from .base import BaseProviderLM, Credential, HttpResponse, SyncTransport, default_transport, resolve_credential
 from .common import (
     make_json_request,
     parse_json_object,
@@ -240,7 +240,7 @@ def _citation_delta_from_openai_annotation(
 
 @dataclass(slots=True)
 class OpenAILM(BaseProviderLM):
-    api_key: str
+    api_key: Credential = field(repr=False)
     transport: SyncTransport = field(default_factory=default_transport)
     base_url: str = "https://api.openai.com/v1"
     profile: ProviderProfile | None = None
@@ -311,7 +311,7 @@ class OpenAILM(BaseProviderLM):
     def from_profile(
         cls,
         *,
-        api_key: str,
+        api_key: Credential,
         profile: ProviderProfile,
         transport: SyncTransport | None = None,
     ) -> "OpenAILM":
@@ -326,7 +326,7 @@ class OpenAILM(BaseProviderLM):
 
     def _headers(self, content_type: str = "application/json") -> dict[str, str]:
         return {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {resolve_credential(self.api_key)}",
             "Content-Type": content_type,
         }
 
@@ -993,7 +993,7 @@ class OpenAILM(BaseProviderLM):
         return urllib.parse.urlunparse((scheme, parsed.netloc, path, "", query, ""))
 
     def _live_headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self.api_key}", "OpenAI-Beta": "realtime=v1"}
+        return {"Authorization": f"Bearer {resolve_credential(self.api_key)}", "OpenAI-Beta": "realtime=v1"}
 
     def _live_session_update_payload(self, config: LiveConfig) -> dict[str, Any]:
         session: dict[str, Any] = {}

@@ -87,7 +87,7 @@ from ..types import (
     Usage,
     VideoPart,
 )
-from .base import BaseProviderLM, HttpResponse, SyncTransport, default_transport
+from .base import BaseProviderLM, Credential, HttpResponse, SyncTransport, default_transport, resolve_credential
 from .common import build_url, make_json_request, parse_json_object, parts_to_text
 
 # Canonical builtin tool name → Gemini tool key
@@ -286,7 +286,7 @@ def _gemini_citations(candidate: dict[str, Any], full_text: str) -> list[Citatio
 
 @dataclass(slots=True)
 class GeminiLM(BaseProviderLM):
-    api_key: str
+    api_key: Credential = field(repr=False)
     transport: SyncTransport = field(default_factory=default_transport)
     base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     upload_base_url: str = "https://generativelanguage.googleapis.com/upload/v1beta"
@@ -456,7 +456,7 @@ class GeminiLM(BaseProviderLM):
         return model if model.startswith("models/") else f"models/{model}"
 
     def _auth_headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
-        headers = {"x-goog-api-key": self.api_key}
+        headers = {"x-goog-api-key": resolve_credential(self.api_key)}
         if extra:
             headers.update(extra)
         return headers
@@ -1141,7 +1141,7 @@ class GeminiLM(BaseProviderLM):
         parsed = urllib.parse.urlparse(self.base_url)
         scheme = "wss" if parsed.scheme == "https" else "ws"
         path = "/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
-        query = urllib.parse.urlencode({"key": self.api_key})
+        query = urllib.parse.urlencode({"key": resolve_credential(self.api_key)})
         return urllib.parse.urlunparse((scheme, parsed.netloc, path, "", query, ""))
 
     def _live_setup_payload(self, config: LiveConfig) -> dict[str, Any]:

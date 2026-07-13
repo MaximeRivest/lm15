@@ -44,7 +44,7 @@ from ..types import (
     ToolResultPart,
     Usage,
 )
-from .base import BaseProviderLM, HttpResponse, SyncTransport, default_transport
+from .base import BaseProviderLM, Credential, HttpResponse, SyncTransport, default_transport, resolve_credential
 from .common import (
     make_json_request,
     media_data_uri,
@@ -137,7 +137,7 @@ class OpenAIChatLM(BaseProviderLM):
     ``base_url`` argument always wins.
     """
 
-    api_key: str
+    api_key: Credential = field(repr=False)
     transport: SyncTransport = field(default_factory=default_transport)
     base_url: str = _DEFAULT_BASE_URL
     compat: OpenAIChatCompat | str | None = None
@@ -187,7 +187,7 @@ class OpenAIChatLM(BaseProviderLM):
 
     def _headers(self) -> dict[str, str]:
         return {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {resolve_credential(self.api_key)}",
             "Content-Type": "application/json",
         }
 

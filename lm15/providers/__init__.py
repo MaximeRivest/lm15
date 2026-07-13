@@ -9,7 +9,7 @@ from .async_base import (
     AsyncOpenAILM,
     AsyncTransport,
 )
-from .base import BaseProviderLM, HttpResponse, ProviderLM, SyncTransport
+from .base import BaseProviderLM, Credential, HttpResponse, ProviderLM, SyncTransport, resolve_credential
 from .claude_code import ClaudeCodeLM
 from .gemini import GeminiLM
 from .openai import OpenAILM
@@ -35,4 +35,6 @@ __all__ = [
     "HttpResponse",
     "SyncTransport",
     "AsyncTransport",
+    "Credential",
+    "resolve_credential",
 ]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import ClassVar, Iterator, Protocol
+from typing import Callable, ClassVar, Iterator, Protocol, Union
 
 from ..errors import (
     AuthError,
@@ -45,6 +45,20 @@ class SyncTransport(Protocol):
 def default_transport() -> SyncTransport:
     """Create the default sync transport for standalone provider LMs."""
     return StdlibTransport()
+
+
+# A credential is a static key string or a zero-argument provider callable
+# returning one.  Providers are invoked at request-build time, once per
+# request, so rotating credentials (OAuth refresh, cloud token providers
+# such as azure.identity's get_bearer_token_provider) stay fresh in
+# long-lived clients.  Fetching and refreshing tokens is the caller's job;
+# lm15 only places the returned value on the wire.
+Credential = Union[str, Callable[[], str]]
+
+
+def resolve_credential(credential: Credential) -> str:
+    """Return the credential value, invoking a provider callable."""
+    return credential() if callable(credential) else credential
 
 
 @dataclass(frozen=True, slots=True)

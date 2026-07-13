@@ -54,7 +54,7 @@ from ..types import (
     ToolResultPart,
     Usage,
 )
-from .base import BaseProviderLM, HttpResponse, SyncTransport, default_transport
+from .base import BaseProviderLM, Credential, HttpResponse, SyncTransport, default_transport, resolve_credential
 from .common import anthropic_source, make_json_request, parts_to_text
 
 # Canonical builtin tool name → Anthropic tool format
@@ -175,7 +175,7 @@ def _citation_from_anthropic(citation: dict[str, Any]) -> CitationPart | None:
 
 @dataclass(slots=True)
 class AnthropicLM(BaseProviderLM):
-    api_key: str
+    api_key: Credential = field(repr=False)
     transport: SyncTransport = field(default_factory=default_transport)
     base_url: str = "https://api.anthropic.com/v1"
     api_version: str = "2023-06-01"
@@ -299,7 +299,7 @@ class AnthropicLM(BaseProviderLM):
 
     def _headers(self, request: Request | None = None) -> dict[str, str]:
         headers = {
-            "x-api-key": self.api_key,
+            "x-api-key": resolve_credential(self.api_key),
             "anthropic-version": self.api_version,
             "content-type": "application/json",
         }
@@ -668,7 +668,7 @@ class AnthropicLM(BaseProviderLM):
             method="POST",
             url=f"{self.base_url.rstrip('/')}/files",
             headers=[
-                ("x-api-key", self.api_key),
+                ("x-api-key", resolve_credential(self.api_key)),
                 ("anthropic-version", self.api_version),
                 ("content-type", request.media_type),
                 ("x-filename", request.filename),
