@@ -15,9 +15,31 @@ python3 -m pip install --pre lm15
 Zero dependencies, stdlib only. (`--pre` is needed while the current
 release is a pre-release; it goes away at 1.0 stable.)
 
-## One call
+## Set an API key
 
-Set your provider's usual env var (`ANTHROPIC_API_KEY` here) and go:
+Grab a key from any **one** provider and export its standard variable —
+that is the only setup:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."   # console.anthropic.com
+export GEMINI_API_KEY="AIza..."         # aistudio.google.com/apikey
+export GROQ_API_KEY="gsk_..."           # console.groq.com/keys
+export OPENAI_API_KEY="sk-..."          # platform.openai.com/api-keys
+```
+
+The examples below use Anthropic; on a different provider, keep the
+code and swap the model string (the tabs below show exactly how).
+Running a local ollama? No key needed at all.
+
+If you forget, the error says precisely what to do:
+
+```output
+MissingCredentialError: no API key found for provider 'anthropic'.
+Set ANTHROPIC_API_KEY in the environment, or pass
+RouterConfig(api_keys={'anthropic': "..."}).
+```
+
+## One call
 
 ```python
 from lm15 import LMRouter, Message, Request
@@ -48,7 +70,7 @@ The call never changes — only the model string does. Pick a tab:
 
     ```python
     response = router.complete(
-        Request(model="claude-haiku-4-5",
+        Request(model="claude-haiku-4-5",   # needs ANTHROPIC_API_KEY
                 messages=(Message.user("The capital of Canada, two words max."),))
     )
     print(response.text)
@@ -62,7 +84,7 @@ The call never changes — only the model string does. Pick a tab:
 
     ```python
     response = router.complete(
-        Request(model="gemini-3-flash-preview",
+        Request(model="gemini-3-flash-preview",   # needs GEMINI_API_KEY
                 messages=(Message.user("The capital of Canada, two words max."),))
     )
     print(response.text)
@@ -76,7 +98,7 @@ The call never changes — only the model string does. Pick a tab:
 
     ```python
     response = router.complete(
-        Request(model="groq:llama-3.3-70b-versatile",
+        Request(model="groq:llama-3.3-70b-versatile",   # needs GROQ_API_KEY
                 messages=(Message.user("The capital of Canada, two words max."),))
     )
     print(response.text)
@@ -90,7 +112,7 @@ The call never changes — only the model string does. Pick a tab:
 
     ```python
     response = router.complete(
-        Request(model="ollama:qwen3:4b",   # any model you've pulled
+        Request(model="ollama:qwen3:4b",   # no key; any model you've pulled
                 messages=(Message.user("The capital of Canada, two words max."),))
     )
     print(response.text)
