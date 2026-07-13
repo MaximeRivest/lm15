@@ -118,6 +118,36 @@ Rust/Go/TS/Julia can port it idiomatically (a struct table, an exported
 slice, a sync `resolve()` everywhere). The porting spec is in
 [router-portability](router-portability.md) — a proposal until ratified.
 
+## Why `ResponseStream` and not `Result` (the 2026-07-13 API review)
+
+A four-lens fresh-eyes panel (cold learner, write-from-memory test,
+API-design critic, downstream library author) reviewed the whole public
+surface at 1.0.0a1 — the one moment renames were still legal. The
+streaming surface took the biggest change: `Result` was renamed
+`ResponseStream` (constructor now positional:
+`ResponseStream(events, request)`), `.events()` now yields the same
+canonical `StreamEvent`s the raw stream carries instead of a second
+chunk vocabulary, and one push-based engine — `StreamAccumulator` —
+now backs the sync skin, the async mirror (`AsyncResponseStream`), and
+`materialize_response`/`amaterialize_response` alike.
+
+The reasons, briefly: `result` is the most common variable name in
+user code, so the class shadowed itself in every lesson; the library
+itself already re-exported it under a second name (`Stream`); the
+constructor still carried hooks from the tool-execution loop deleted a
+month earlier; the second vocabulary (`StreamChunk`) was stringly
+typed and not actually streaming for tool calls; and a pull-generator
+class cannot be mirrored in Rust or Go, while a push accumulator can —
+`Result` also collides with Rust's `std::result::Result` outright.
+
+The same review curated the top level (161 → 107 exports; serde
+pairs, adapter machinery, and the router's data tables each live one
+module deep), split the two protocols that shared the `ProviderLM`
+name (the callable surface keeps it; the wire-mapping seam is
+`ProviderDialect`), and made hyphens canonical in provider strings
+(`openai-chat`, underscore spelling aliased forever). Full findings:
+`architecture-review/api-review-2026-07-13.md` in the workspace repo.
+
 ## Why `api_key` accepts a callable (and lm15 still has no auth dependencies)
 
 A credential is not always a static string. Azure Entra tokens expire

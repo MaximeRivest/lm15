@@ -83,14 +83,14 @@ also require every property to be required.
 
 ## Inspecting a derivation
 
-`derive(fn)` is `tool(fn)` plus a full typed account — the `explain()`
+`derive_tool(fn)` (aka `lm15.tools.derive`) is `tool(fn)` plus a full typed account — the `explain()`
 analogue. It returns a `ToolDerivation` with one `DerivedParam` per
 parameter (`annotation`, `schema`, `required`, `description`, `source`).
 
 ```python
-from lm15 import derive
+from lm15 import derive_tool
 
-d = derive(get_weather)
+d = derive_tool(get_weather)
 for p in d.params:
     print(p.name, p.annotation, p.source, p.required)
 # city str hint+docstring True

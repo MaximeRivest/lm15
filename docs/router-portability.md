@@ -30,7 +30,9 @@ language-neutrally so each port can implement it idiomatically.
    to preserve: a fine-tune id like `ft:gpt-4.1:org` requires the
    explicit `openai:ft:gpt-4.1:org`.
 2. **Provider strings** are the existing canonical ones: `openai`,
-   `openai_chat`, `anthropic`, `gemini`, `claude-code`, `openai-codex` —
+   `openai-chat`, `anthropic`, `gemini`, `claude-code`, `openai-codex`
+   (hyphenated is canonical; the underscore spelling is a permanent
+   alias accepted at every rung and in the per-provider key map) —
    plus the Chat Completions **preset routes**: `groq`, `openrouter`,
    `ollama`, `vllm`, `sglang`. A preset route is pure data (provider
    string doubling as the compat preset name, that server's `env_keys`

@@ -18,7 +18,7 @@ same discipline as the code — see
   contract-governed): the [model-string router](using-the-router.md)
   (`LMRouter`/`AsyncLMRouter`) and
   [tool derivation from functions](tools-from-functions.md)
-  (`lm15.tool`/`derive`). A cross-language porting spec is
+  (`lm15.tool`/`derive_tool`). A cross-language porting spec is
   [proposed](router-portability.md), pending ratification.
 - Rust, Go, and TypeScript implementations pass the identical conformance
   corpus. Julia is planned.

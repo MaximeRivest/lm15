@@ -25,7 +25,8 @@ iterator from `stream`; `resolve()` stays sync because it is pure).
 ## The model-string grammar
 
 A model string is split on the **first** `:`. If the head is a routable
-provider string (a key of `lm15.ADAPTERS` or of `lm15.CHAT_PRESET_ROUTES`),
+provider string (a key of `lm15.router.ADAPTERS` or of
+`lm15.router.CHAT_PRESET_ROUTES`),
 the remainder is the model id sent on the wire. Otherwise the whole
 string — colons and all — is a bare model id.
 
@@ -36,7 +37,7 @@ string — colons and all — is a bare model id.
 "openai:ft:gpt-4.1:org"         fine-tune ids need the explicit form
 ```
 
-Known providers: `openai` (Responses API), `openai_chat` (Chat
+Known providers: `openai` (Responses API), `openai-chat` (Chat
 Completions), `anthropic`, `gemini`, `claude-code`, `openai-codex` — plus
 the Chat Completions preset providers `groq`, `openrouter`, `ollama`,
 `vllm`, and `sglang`, which route to `OpenAIChatLM(compat=<preset>)` with
@@ -65,7 +66,7 @@ reconfigure. First match wins; no fallback chains, no plugins.
    with `AmbiguousModelError` rather than pick one for you — the error
    names every candidate and the explicit form that fixes it.
    Source: `"catalog"`.
-3. **Built-in rules.** A small prefix table, `lm15.DEFAULT_RULES`
+3. **Built-in rules.** A small prefix table, `lm15.router.DEFAULT_RULES`
    (`claude-` → anthropic, `gpt-`/`o1`/`o3`/`o4` → openai, `gemini-` →
    gemini). First match wins. The table is a convenience, not a registry
    of truth: a brand-new model family needs a release, a catalog, or the
@@ -184,14 +185,15 @@ lm = LMRouter().lm("gpt-4.1-mini")   # plain OpenAILM
 Rules are data, not callbacks:
 
 ```python
-from lm15 import DEFAULT_RULES, LMRouter, RouteRule, RouterConfig
+from lm15 import LMRouter, RouterConfig
+from lm15.router import DEFAULT_RULES, RouteRule
 
-rules = (RouteRule("glm-", "openai_chat", note="in-house vLLM"), *DEFAULT_RULES)
+rules = (RouteRule("glm-", "openai-chat", note="in-house vLLM"), *DEFAULT_RULES)
 router = LMRouter(config=RouterConfig(rules=rules))
 ```
 
 First match wins, so prepend to override. Note that a rule can only name
-a routable provider (`ADAPTERS` or `CHAT_PRESET_ROUTES`) — pointing
-`glm-` at `openai_chat` routes the request, but a non-default `base_url`
+a routable provider (`lm15.router.ADAPTERS` or `CHAT_PRESET_ROUTES`) —
+pointing `glm-` at `openai-chat` routes the request, but a non-default `base_url`
 still requires constructing the LM directly (see the escape hatch
 above).

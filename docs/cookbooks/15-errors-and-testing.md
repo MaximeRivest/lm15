@@ -17,7 +17,6 @@ the message:
 ```python
 import json
 import time
-from dataclasses import dataclass
 
 from lm15 import LMRouter, Message, Request
 from lm15.router import RouterConfig
@@ -29,9 +28,11 @@ bad.complete(Request(model="gpt-4.1-mini", messages=(Message.user("Hi"),)))
 ```output
 Traceback (most recent call last):
   …
-  File ".../lm15/providers/base.py", line 113, in complete
-    raise self.normalize_error(resp.status, resp.text())
-lm15.errors.AuthError: Incorrect API key provided: sk-proj-*rong. …
+  File ".../lm15/providers/base.py", line 131, in complete
+    raise error
+lm15.errors.AuthError: Incorrect API key provided: sk-proj-*rong. You can
+find your API key at https://platform.openai.com/account/api-keys.
+(openai, HTTP 401)
 
   To fix:
     - Check that your API key is correct and not expired
@@ -68,7 +69,7 @@ except ContextLengthError as err:
 ```
 ```output
 context_length 400
-prompt is too long: 200027 tokens > 200000 maximum
+prompt is too long: 260024 tokens > 200000 maximum (anthropic, HTTP 400, request req_011Cczaa6Z4CF5Hr9kLymtjS)
 ```
 
 ### Retries are yours
@@ -106,40 +107,18 @@ def complete_with_retry(router, request, attempts=5, base=0.5):
 You cannot summon a 429 on demand, so the demonstration uses a fake
 transport — which is also exactly how you test this loop offline.
 
-### Testing offline: the FakeTransport pattern
+### Testing offline: lm15.testing
 
-Every provider LM takes a `transport` and lm15's own test suite runs
-with no network at all (see `tests/test_providers.py`,
-`tests/test_router.py`). A transport is anything with a
-`stream(request)` method returning a response-shaped object:
+Every provider LM takes a `transport`, and lm15 ships the doubles —
+`lm15.testing` has `FakeTransport`/`FakeResponse` (wire-level: the
+REAL adapter serde runs against your scripted bytes) and `FakeLM`
+(canonical-level: script `Response` objects or plain strings, no wire
+JSON at all — the right seam for tool loops and retry logic).
 
-```python
-@dataclass
-class FakeResponse:
-    status: int
-    body: bytes
-    headers = (("content-type", "application/json"),)
-    reason = "OK"
-    http_version = "HTTP/1.1"
-
-    def __enter__(self): return self
-    def __exit__(self, *exc): return None
-    def read(self): return self.body
-    def header(self, name): return dict(self.headers).get(name.lower())
-
-class FakeTransport:
-    def __init__(self, responses):
-        self.responses = list(responses)
-        self.requests = []
-
-    def stream(self, request):
-        self.requests.append(request)
-        return self.responses.pop(0)
-```
-
-Script it: two 429s, then a success in the provider's wire format
-(here OpenAI Chat Completions). Inject it into the router's cached LM
-and run the retry loop:
+Script the wire double: two 429s — the second with a `Retry-After`
+header — then a success in the provider's wire format (here OpenAI
+Chat Completions). Hand it to the router via
+`RouterConfig(transport=...)` and run the retry loop:
 
 ```python
 ok = json.dumps({
@@ -150,26 +129,36 @@ ok = json.dumps({
 }).encode()
 limited = json.dumps({"error": {"message": "Rate limit reached"}}).encode()
 
-offline = LMRouter(config=RouterConfig(api_keys={"openai_chat": "sk-fake"}, env={}))
-offline.lm("openai_chat:fake-model").transport = FakeTransport(
-    [FakeResponse(429, limited), FakeResponse(429, limited), FakeResponse(200, ok)]
-)
+from lm15.testing import FakeResponse, FakeTransport
 
-req = Request(model="openai_chat:fake-model", messages=(Message.user("Hi"),))
+fake = FakeTransport([
+    FakeResponse(429, limited),
+    FakeResponse(429, limited, headers=[("content-type", "application/json"),
+                                        ("Retry-After", "0.05")]),
+    FakeResponse(200, ok),
+])
+offline = LMRouter(config=RouterConfig(api_keys={"openai-chat": "sk-fake"},
+                                       env={}, transport=fake))
+
+req = Request(model="openai-chat:fake-model", messages=(Message.user("Hi"),))
 print(complete_with_retry(offline, req, base=0.01).text)
 ```
 ```output
 attempt 1: rate_limit (retry_after=None); sleeping 0.01s
-attempt 2: rate_limit (retry_after=None); sleeping 0.02s
+attempt 2: rate_limit (retry_after=0.05); sleeping 0.05s
 Hello from the fake.
 ```
+
+(The second attempt slept the provider's requested 0.05s, not the
+exponential 0.02s: adapters parse the `Retry-After` header — both the
+delta-seconds and HTTP-date forms — into `err.retry_after` on live
+traffic too.)
 
 The fake also records every request it saw, so the same fixture
 asserts what went on the wire — no provider, no key, no flake:
 
 ```python
-transport = offline.lm("openai_chat:fake-model").transport
-print(len(transport.requests), json.loads(transport.requests[0].body)["model"])
+print(len(fake.requests), json.loads(fake.requests[0].body)["model"])
 ```
 ```output
 3 fake-model
@@ -196,14 +185,18 @@ constructor argument. A fake returning a canned body exercises the
 entire serialization path — the same `Response` parsing real traffic
 gets. That is why the test suite is hermetic and why yours can be.
 
-One honest limit: `retry_after` is part of the taxonomy and the
-constructors accept it, but the bundled adapters do not yet parse
-`Retry-After` headers, so expect `None` from live traffic today. Write
-`err.retry_after or backoff` and your loop improves the day it is
-populated.
+`retry_after` comes from two places, provider body first: an adapter's
+own error mapping wins, and the HTTP `Retry-After` header (delta-seconds
+or HTTP-date) fills the gap on both the `complete()` and `stream()`
+paths. Still write `err.retry_after or backoff` — not every 429 carries
+either.
 
 ## Variations
 
+- **Canonical-level fakes.** `lm15.testing.FakeLM` scripts `Response`
+  objects (or strings, or exceptions) and replays them through
+  `complete()`/`stream()` — no wire JSON to hand-craft when what you
+  are testing is your loop, not a dialect.
 - **Async mirror.** `AsyncLMRouter` raises the same error classes from
   `await router.complete(...)`; the retry loop becomes `async def` with
   `await asyncio.sleep(wait)`. An async fake needs `async def stream`

@@ -98,7 +98,7 @@ protocol — here Chat Completions instead of Gemini's `generateContent`:
 
 ```python
 response = router.complete(Request(
-    model="openai_chat:gpt-4.1-mini",
+    model="openai-chat:gpt-4.1-mini",
     messages=counting.messages,
     config=counting.config,
 ))
@@ -162,7 +162,7 @@ other providers.
 
 - **What each provider ignores.** The OpenAI Responses adapter sends no
   `top_k` and no `stop` — the Responses API has neither parameter. Need
-  stop sequences with OpenAI? Use `openai_chat:` as above. `top_k`
+  stop sequences with OpenAI? Use `openai-chat:` as above. `top_k`
   reaches only Anthropic and Gemini.
 - **Anthropic always gets `max_tokens`.** The API rejects requests
   without it; lm15 sends 1024 unless you choose. Set it explicitly for

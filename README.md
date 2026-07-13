@@ -237,13 +237,13 @@ get_weather {'city': 'Montreal'}
 ```
 
 Now run your function and hand the result back. The model's tool-call turn is
-`response.message`; your answer is `Message.tool({call_id: result})`:
+`response.message`; your answer is `Message.tool(call_id, result)`:
 
 ```python
 call = response.tool_calls[0]
 result = get_weather(**call.input)
 
-messages = (*messages, response.message, Message.tool({call.id: result}))
+messages = (*messages, response.message, Message.tool(call.id, result))
 final = lm.complete(Request(model="gpt-4.1-mini", messages=messages, tools=(weather_tool,)))
 print(final.text)
 ```

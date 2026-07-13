@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+**The API review (breaking — the alpha's one-time window).** A
+four-lens fresh-eyes panel reviewed the public surface; findings in
+`architecture-review/api-review-2026-07-13.md`. The breaking set,
+batched here so the alpha churns exactly once:
+
+- **`Result` → `ResponseStream`**, constructor positional:
+  `ResponseStream(router.stream(req), req)` — no more keyword-only
+  double threading. `.events()` yields canonical `StreamEvent`s (the
+  `StreamChunk` second vocabulary is gone); accessors mirror
+  Response's minimal set. New: `StreamAccumulator` (the shared
+  push-based engine), `AsyncResponseStream` (a true async mirror —
+  the old `AsyncResult`, which could not consume async streams, is
+  deleted), `amaterialize_response`. `lm15/stream.py` (which aliased
+  `Result` as `Stream`) is gone; both MAP-3 coalescer twins live in
+  `lm15.result`.
+- **Namespace curation, 161 → 107 top-level exports.** Serde pairs →
+  `lm15.serde`; adapter machinery (BaseProviderLM, transports
+  protocols, Credential, HttpResponse) → `lm15.providers`; error
+  machinery → `lm15.errors`; router data tables (DEFAULT_RULES,
+  ADAPTERS, CHAT_PRESET_ROUTES, RouteRule, PresetRoute) →
+  `lm15.router`; profile/compat/SSE machinery → their modules.
+  Promoted: `RETRYABLE_ERRORS` and `tool_result` to the top level.
+  `derive` is exported as `derive_tool` (collision doctrine).
+- **`ProviderLM` now names the callable surface** (complete/stream/…);
+  the wire-mapping protocol formerly exported under that name is
+  `lm15.providers.ProviderDialect`.
+- **Provider strings are hyphenated**: `openai-chat` is canonical,
+  `openai_chat` remains a permanent alias everywhere;
+  `Resolution.provider` reports the canonical spelling.
+
+Additive, same review:
+
+- `Message.tool(call_id, output, is_error=False)` positional spelling;
+  every wrong shape now raises a TypeError listing the accepted forms.
+- `Request.tools` accepts a bare tool (1-tuple coercion).
+- Errors state their cure: the messages TypeError names
+  `Message.user`; `ProviderError.__str__` appends
+  `(provider, HTTP status, request id)`; `UnknownModelError` uses a
+  neutral prefix example and hints near-miss provider heads
+  ("did you mean…").
+- **`lm15.testing`**: `FakeLM` (canonical-level double),
+  `FakeTransport`/`FakeResponse` (wire-level, promoted from the test
+  suite). `RouterConfig(transport=...)` injects a transport into every
+  LM the router builds.
+- **`Retry-After` is parsed** (delta-seconds and HTTP-date) into
+  `error.retry_after` on both `complete()` and `stream()` paths;
+  provider-body values win.
+
 **One front door: credential providers + universal routing.**
 
 - **Credential providers.** `api_key` on every adapter (sync and async)

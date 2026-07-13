@@ -46,15 +46,15 @@ be all checkmarks, so the table only lists what each offers *beyond*
 it. Setting the key is one `export`; every other way to authenticate
 is on [Authentication](authentication.md).
 
-!!! note "You may also see `openai_chat`"
+!!! note "You may also see `openai-chat`"
     OpenAI has two wire dialects: its current **Responses API** (what
     the `openai` string uses) and the older **Chat Completions**
     dialect that half the industry adopted as a de-facto standard.
-    lm15 ships both. The `openai_chat` adapter speaks Chat
+    lm15 ships both. The `openai-chat` adapter speaks Chat
     Completions — and it is the same adapter that powers the Groq,
     OpenRouter, ollama, vLLM, and SGLang rows above, each via a preset
     that knows that server's URL and quirks. You rarely type
-    `openai_chat` yourself; the presets do.
+    `openai-chat` yourself; the presets do.
 
 Chat — the part all of this rests on — is **stable**: it is frozen by
 a cross-language contract and only changes additively. The

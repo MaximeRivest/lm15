@@ -208,15 +208,15 @@ Prefer no router at all? The adapter classes are equally first-class:
 ## Streaming
 
 Two pieces share the work: `router.stream()` yields **typed events**
-as the provider sends them, and `Result` assembles those events —
+as the provider sends them, and `ResponseStream` assembles them —
 iterate it and you get the text as it arrives:
 
 ```python
-from lm15 import Result
+from lm15 import ResponseStream
 
 req = Request(model="claude-haiku-4-5",
               messages=(Message.user("One short sentence about rivers."),))
-result = Result(events=router.stream(req), request=req)
+result = ResponseStream(router.stream(req), req)
 for text in result:
     print(text, end="", flush=True)
 ```
@@ -254,7 +254,7 @@ messages = (Message.user("What's the weather in Montreal right now?"),)
 r = router.complete(Request(model="claude-haiku-4-5", messages=messages, tools=(weather,)))
 
 call = r.tool_calls[0]        # ToolCallPart(name='get_weather', input={'city': 'Montreal'})
-messages = (*messages, r.message, Message.tool({call.id: get_weather(**call.input)}))
+messages = (*messages, r.message, Message.tool(call.id, get_weather(**call.input)))
 
 final = router.complete(Request(model="claude-haiku-4-5", messages=messages, tools=(weather,)))
 print(final.text)

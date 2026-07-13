@@ -57,14 +57,17 @@ The constructors keep protocol-only parts out of the wrong roles:
 - `Message.tool(...)` may contain only tool results.
 
 ```python
-from lm15.types import Message, tool_result
+from lm15 import tool_result
+from lm15.types import Message
 
-tool_msg = Message.tool({
+tool_msg = Message.tool("call_123", "The current temperature is 19 C.")
+
+several = Message.tool({          # answer several calls in one message
     "call_123": "The current temperature is 19 C.",
 })
 
-same_tool_msg = Message.tool(
-    tool_result("call_123", "The current temperature is 19 C.", name="weather")
+with_error = Message.tool(        # tool failures go back to the model
+    tool_result("call_123", "KeyError: 'city'", name="weather", is_error=True)
 )
 ```
 

@@ -225,7 +225,7 @@ text to *be* the JSON document (logging, piping onward).
 
 ## See also
 
-- [06 — Function tools](06-function-tools.md) — `tool()`, `derive()`, and dispatch.
+- [06 — Function tools](06-function-tools.md) — `tool()`, `derive_tool()`, and dispatch.
 - [05 — Streaming](05-streaming.md) — buffering deltas before `json.loads`.
 - [02 — Conversations](02-conversations.md) — feeding tool results back.
 - [../tools-from-functions.md](../tools-from-functions.md) — schema derivation rules.

@@ -28,7 +28,7 @@ only in the router, explicitly and inspectably.
 
 | provider string | env var | get a key at |
 |---|---|---|
-| `openai`, `openai_chat` | `OPENAI_API_KEY` | platform.openai.com/api-keys |
+| `openai`, `openai-chat` | `OPENAI_API_KEY` | platform.openai.com/api-keys |
 | `anthropic` | `ANTHROPIC_API_KEY` | console.anthropic.com |
 | `gemini` | `GEMINI_API_KEY`, then `GOOGLE_API_KEY` | aistudio.google.com/apikey |
 | `groq` | `GROQ_API_KEY` | console.groq.com/keys |

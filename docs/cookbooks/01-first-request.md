@@ -82,7 +82,7 @@ print(res)
 print(res.provider, res.adapter, res.source, res.env_key)
 ```
 ```output
-'gpt-4.1-mini' -> provider 'openai' (OpenAILM); via built-in rule prefix='gpt-' — OpenAI GPT family (Responses API; use openai_chat: for Chat Completions); wire model 'gpt-4.1-mini'; key from $OPENAI_API_KEY.
+'gpt-4.1-mini' -> provider 'openai' (OpenAILM); via built-in rule prefix='gpt-' — OpenAI GPT family (Responses API; use openai-chat: for Chat Completions); wire model 'gpt-4.1-mini'; key from $OPENAI_API_KEY.
 openai OpenAILM rule OPENAI_API_KEY
 ```
 
@@ -104,7 +104,7 @@ router.resolve("qwen3.5:0.8b")
 ```output
 Traceback (most recent call last):
   …
-lm15.router.UnknownModelError: could not route model 'qwen3.5:0.8b': no provider prefix, no catalog supplied, and none of the 6 built-in rules matched. Use an explicit provider prefix, e.g. "anthropic:qwen3.5:0.8b" (known providers: anthropic, claude-code, gemini, openai, openai-codex, openai_chat). Or pass a model catalog: …
+lm15.router.UnknownModelError: could not route model 'qwen3.5:0.8b': no provider prefix, no catalog supplied, and none of the 6 built-in rules matched. Use an explicit provider prefix — "provider:qwen3.5:0.8b" with provider one of: anthropic, claude-code, gemini, groq, ollama, openai, openai-chat, openai-codex, openrouter, sglang, vllm. Or pass a model catalog: …
 ```
 
 The router is sugar, not a layer. The direct LM classes are first-class
@@ -179,7 +179,7 @@ one call in, one typed `Response` out.
 - **Async direct LMs exist too**: `AsyncOpenAILM`, `AsyncAnthropicLM`,
   `AsyncGeminiLM`, same constructors, awaitable `complete`.
 - **OpenAI has two providers.** Bare `gpt-` routes to the Responses
-  API (`OpenAILM`); `"openai_chat:gpt-4.1-mini"` selects Chat
+  API (`OpenAILM`); `"openai-chat:gpt-4.1-mini"` selects Chat
   Completions (`OpenAIChatLM`). The resolve output above says so.
 
 ## See also

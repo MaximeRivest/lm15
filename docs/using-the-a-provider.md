@@ -160,7 +160,7 @@ follow_up = Request(
     model=request.model,
     messages=request.messages + (
         response.message,
-        Message.tool({response.tool_calls[0].id: "19 C and cloudy"}),
+        Message.tool(response.tool_calls[0].id, "19 C and cloudy"),
     ),
     tools=request.tools,
     config=request.config,

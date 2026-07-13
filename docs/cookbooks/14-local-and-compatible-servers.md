@@ -93,15 +93,16 @@ Traceback (most recent call last):
 lm15.router.UnknownModelError: could not route model 'llama-3.3-70b-versatile': no provider prefix, no catalog supplied, and none of the 6 built-in rules matched. Use an explicit provider prefix, …
 ```
 
-The `openai_chat:` prefix exists, but it routes to OpenAI's own Chat
+The `openai-chat:` prefix exists (the `openai_chat` spelling is a
+permanent alias), but it routes to OpenAI's own Chat
 Completions endpoint — there is deliberately no router syntax for a
 non-default `base_url`:
 
 ```python
-print(LMRouter().resolve("openai_chat:gpt-4.1-mini"))
+print(LMRouter().resolve("openai-chat:gpt-4.1-mini"))
 ```
 ```output
-'openai_chat:gpt-4.1-mini' -> provider 'openai_chat' (OpenAIChatLM); via explicit provider prefix; wire model 'gpt-4.1-mini'; key from $OPENAI_API_KEY.
+'openai-chat:gpt-4.1-mini' -> provider 'openai-chat' (OpenAIChatLM); via explicit provider prefix; wire model 'gpt-4.1-mini'; key from $OPENAI_API_KEY.
 ```
 
 Everything else from the router recipes carries over to the direct LM —
@@ -112,7 +113,7 @@ req = Request(
     model="llama-3.1-8b-instant",
     messages=(Message.user("Name three rivers in Quebec, one per line, names only."),),
 )
-result = Result(events=groq.stream(req), request=req)
+result = ResponseStream(groq.stream(req), req)
 for text in result:
     print(text, end="", flush=True)
 print()
@@ -177,7 +178,7 @@ objects instead".
 - **More presets than shown here**: `lmstudio`, `deepseek`, `qwen`,
   `zai` — see `OpenAIChatCompat.preset` in `lm15/compat.py`. Unknown
   names raise `ValueError` at construction, not at request time.
-- **Routing your own prefix.** `RouteRule("glm-", "openai_chat", ...)`
+- **Routing your own prefix.** `RouteRule("glm-", "openai-chat", ...)`
   prepended to `DEFAULT_RULES` makes the router accept your model
   names — but it still builds the LM against api.openai.com. Custom
   `base_url` means direct construction, full stop.

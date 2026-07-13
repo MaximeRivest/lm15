@@ -20,7 +20,7 @@ from pprint import pprint
 from typing import Literal
 
 from lm15 import (
-    Config, FunctionTool, LMRouter, Message, Request, ToolChoice, derive, tool,
+    Config, FunctionTool, LMRouter, Message, Request, ToolChoice, derive_tool, tool,
 )
 
 def get_weather(city: str, unit: Literal["c", "f"] = "c") -> str:
@@ -50,12 +50,12 @@ Get the current weather for a city.
  'type': 'object'}
 ```
 
-When the schema looks wrong, ask `derive()` why. It is `tool()` plus a
+When the schema looks wrong, ask `derive_tool()` why. It is `tool()` plus a
 full typed account: one `DerivedParam` per parameter, with the hint, the
 emitted fragment, and where each piece came from.
 
 ```python
-d = derive(get_weather)
+d = derive_tool(get_weather)
 print(d.docstring_style_detected)
 for p in d.params:
     print(f"{p.name}: {p.annotation} required={p.required} source={p.source}")
@@ -176,7 +176,8 @@ execute, validate `call.input` against the schema, retry, or loop —
 that is policy, and policy lives in your layer (see the
 [design rationale](../design-rationale.md#why-no-call-no-model-object-no-automatic-tool-loop)).
 You answer by appending `response.message` verbatim (the provider needs
-to see its own calls) followed by `Message.tool({call_id: output})`,
+to see its own calls) followed by `Message.tool(call_id, output)` — or
+`Message.tool({call_id: output, ...})` to answer several calls at once,
 which builds one `ToolResultPart` per entry.
 
 ## Variations
