@@ -498,8 +498,8 @@ def _resolve(model: str, config: RouterConfig, adapters: Mapping[str, type]) -> 
             f"no adapter or compat preset (known providers: {_known_providers(adapters)})."
         )
     hints.append(
-        f"Use an explicit provider prefix, e.g. \"anthropic:{model}\" "
-        f"(known providers: {_known_providers(adapters)})."
+        f'Use an explicit provider prefix — "provider:{model}" with provider '
+        f"one of: {_known_providers(adapters)}."
     )
     if config.registry is None:
         hints.append(

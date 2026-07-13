@@ -1097,13 +1097,43 @@ class Message:
 
     @staticmethod
     def tool(
-        results: ToolResultPart | Sequence[ToolResultPart] | dict[str, ToolResultContent],
+        results: "str | ToolResultPart | Sequence[ToolResultPart] | dict[str, ToolResultContent]",
+        output: "ToolResultContent | None" = None,
+        *,
+        is_error: bool = False,
     ) -> "Message":
-        """Create a tool message.
+        """Create a tool message.  Three spellings:
 
-        Accepts a single ToolResultPart, a list of ToolResultParts, or a dict
-        mapping call_id → output (str, Part, or list[Part]).
+        - ``Message.tool(call_id, output, is_error=False)`` — one result.
+        - ``Message.tool({call_id: output, ...})`` — answer several calls
+          at once (cannot express is_error; use the other forms).
+        - ``Message.tool(part_or_parts)`` — explicit ToolResultPart(s),
+          e.g. from :func:`lm15.tool_result`.
         """
+        if isinstance(results, str):
+            if output is None:
+                raise TypeError(
+                    "Message.tool(call_id) is missing the output. Accepted "
+                    "spellings: Message.tool(call_id, output, is_error=...), "
+                    "Message.tool({call_id: output, ...}), or "
+                    "Message.tool(ToolResultPart(...))."
+                )
+            return Message(
+                role="tool",
+                parts=(tool_result(results, output, is_error=is_error),),
+            )
+        if output is not None:
+            raise TypeError(
+                "Message.tool() takes an output only with a call-id string: "
+                "Message.tool(call_id, output, is_error=...)."
+            )
+        if is_error:
+            raise TypeError(
+                "Message.tool({...}, is_error=True) is ambiguous — the dict "
+                "form cannot say which result errored. Use "
+                "Message.tool(call_id, output, is_error=True) or "
+                "lm15.tool_result(call_id, output, is_error=True)."
+            )
         if isinstance(results, dict):
             parts: list[Part] = []
             for call_id, value in results.items():
@@ -1111,7 +1141,12 @@ class Message:
             return Message(role="tool", parts=tuple(parts))
         parts = (results,) if isinstance(results, ToolResultPart) else tuple(results)
         if not all(isinstance(p, ToolResultPart) for p in parts):
-            raise TypeError("Message.tool() requires ToolResultPart objects")
+            raise TypeError(
+                "Message.tool() requires ToolResultPart objects. Accepted "
+                "spellings: Message.tool(call_id, output, is_error=...), "
+                "Message.tool({call_id: output, ...}), or "
+                "Message.tool(ToolResultPart(...))."
+            )
         return Message(role="tool", parts=parts)
 
     def parts_of(self, cls: type[_P]) -> list[_P]:
@@ -1752,12 +1787,16 @@ class Request(_ModelRequest):
         _ModelRequest.__post_init__(self)
         messages = (self.messages,) if isinstance(self.messages, Message) else tuple(self.messages)
         object.__setattr__(self, "messages", messages)
-        object.__setattr__(self, "tools", tuple(self.tools))
+        tools = (self.tools,) if isinstance(self.tools, (FunctionTool, BuiltinTool)) else tuple(self.tools)
+        object.__setattr__(self, "tools", tools)
         object.__setattr__(self, "system", _normalize_system(self.system))
         if not self.messages:
             raise ValueError("at least one message is required")
         if not all(isinstance(m, Message) for m in self.messages):
-            raise TypeError("Request.messages must contain Message objects")
+            raise TypeError(
+                'Request.messages must contain Message objects — wrap plain '
+                'text with Message.user("...").'
+            )
         if not all(isinstance(t, (FunctionTool, BuiltinTool)) for t in self.tools):
             raise TypeError("Request.tools must contain Tool objects")
         tool_names = [t.name for t in self.tools]

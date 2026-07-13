@@ -209,7 +209,7 @@ class TestResolveRules:
         assert err.rules_tried == DEFAULT_RULES
         assert err.catalog_searched is False
         # Suggests the explicit prefix and the catalog package.
-        assert "anthropic:mystery-model" in str(err)
+        assert "provider:mystery-model" in str(err)  # neutral example (API review A3)
         assert "aimo" in str(err)
 
     def test_unknown_model_with_registry_omits_catalog_hint(self) -> None:

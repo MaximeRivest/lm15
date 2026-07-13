@@ -98,6 +98,9 @@ from .types import (
     AudioFormat,
     # live session types
     LiveConfig,
+    # part factory for tool results (the one lowercase factory beginners
+    # need at the top level; the rest stay in lm15.types)
+    tool_result,
     # vocabulary aliases + constants
     Role,
     PartType,
@@ -193,7 +196,7 @@ __all__ = [
     "AudioPart", "VideoPart", "DocumentPart", "BinaryPart", "ToolCallPart",
     "ToolResultPart",
     # tools
-    "FunctionTool", "BuiltinTool", "ToolCallInfo",
+    "FunctionTool", "BuiltinTool", "ToolCallInfo", "tool_result",
     # streaming
     "StreamStartEvent", "StreamDeltaEvent", "StreamEndEvent",
     "StreamErrorEvent", "TextDelta", "ThinkingDelta", "AudioDelta",

@@ -22,7 +22,10 @@ class TestTimeoutErrorBuiltinCompat:
         assert err.code == "timeout"
         assert err.provider == "openai"
         assert err.status == 408
-        assert str(err) == "slow"
+        # Displayed form carries provider/status context (API review A3);
+        # the message FIELD is what the contract pins and stays bare.
+        assert str(err) == "slow (openai, HTTP 408)"
+        assert err.message == "slow"
 
     def test_still_caught_as_lm15_hierarchy(self):
         err = errors.TimeoutError("slow")
@@ -75,11 +78,18 @@ class TestTopLevelSurface:
         "text", "thinking", "refusal", "citation", "image", "audio",
         "video", "document", "binary", "tool_call", "tool_result",
     )
+    # Doctrine exemptions (earned, not accidental): `tool_result` is the
+    # error-result spelling beginners must find (API review A1), and it is
+    # not a generic word the way `text`/`image` are.
+    TOP_LEVEL_EXEMPT = ("tool_result",)
 
     def test_factories_not_at_top_level(self):
         import lm15
 
         for name in self.FACTORY_NAMES:
+            if name in self.TOP_LEVEL_EXEMPT:
+                assert hasattr(lm15, name)
+                continue
             assert not hasattr(lm15, name)
             assert name not in lm15.__all__
 

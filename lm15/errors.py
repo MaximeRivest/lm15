@@ -90,6 +90,26 @@ class ProviderError(LM15Error):
 
     default_code = "provider"
 
+    def __str__(self) -> str:
+        # The displayed form carries provider / HTTP status / request id so
+        # a bare relay like "model: x" still says who said it.  The
+        # ``message`` FIELD stays untouched (it is what the contract pins).
+        context = ", ".join(
+            item
+            for item in (
+                self.provider,
+                f"HTTP {self.status}" if self.status is not None else None,
+                f"request {self.request_id}" if self.request_id else None,
+            )
+            if item
+        )
+        base = self.message or self.code
+        if not context:
+            return base
+        head, sep, tail = base.partition("\n\n")
+        suffix = f" ({context})"
+        return f"{head}{suffix}\n\n{tail}" if sep else f"{base}{suffix}"
+
 
 class AuthError(ProviderError):
     """Authentication failed — invalid, expired, or missing API key."""
