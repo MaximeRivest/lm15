@@ -2,9 +2,12 @@
 
 lm15 is one set of types for every LLM API. You build a `Request`, you
 get back a `Response` — the same two objects whichever provider
-answers. This page is the whole core loop: install, one call, switch
-provider, stream, use a tool. Every output below is real captured
-output.
+answers.
+
+This page is the whole core loop: install, one call, switch provider,
+stream, use a tool. You need Python 3.10+, about five minutes, and one
+API key — we sort the key out first. Every output below is real
+captured output, and every block is copy-paste runnable.
 
 ## Install
 
@@ -43,6 +46,10 @@ RouterConfig(api_keys={'anthropic': "..."}).
 
 ## One call
 
+`LMRouter` is the front door: give it a model string and it picks the
+right provider, the right adapter, and the right env var. (It is a
+lookup table you can inspect, not magic — more on that below.)
+
 ```python
 from lm15 import LMRouter, Message, Request
 
@@ -63,6 +70,12 @@ Hello, world friend.
 `14`, `response.finish_reason` is `"stop"`, and `response.message`
 slots straight into the next request's `messages` to continue the
 conversation.
+
+!!! note "Why the trailing comma in `(Message.user(...),)`?"
+    `messages` is a tuple, and in Python a one-element tuple needs a
+    trailing comma. lm15's types are immutable throughout — a `Request`
+    you built is never changed under you — and tuples are the price of
+    that guarantee. (Lists are accepted too and converted.)
 
 ## Any provider: change one string
 
@@ -143,6 +156,10 @@ Prefer no router at all? The adapter classes are equally first-class:
 
 ## Streaming
 
+Two pieces share the work: `router.stream()` yields **typed events**
+as the provider sends them, and `Result` assembles those events —
+iterate it and you get the text as it arrives:
+
 ```python
 from lm15 import Result
 
@@ -157,15 +174,21 @@ for text in result:
 Rivers flow from high elevations to the sea, shaping landscapes and sustaining life along their paths.
 ```
 
-Iterate `result` for text, `result.events()` for typed chunks (tool
-calls, thinking, audio, …), and read `result.response` afterwards — it
-is the same `Response` a non-streaming call returns. Full recipe:
+When you need more than text — tool calls, thinking, audio — iterate
+`result.events()` instead. And after the stream ends,
+`result.response` is the very same `Response` a non-streaming call
+would have returned: nothing about your downstream code has to care
+which way the answer arrived. Full recipe:
 [Streaming](cookbooks/05-streaming.md).
 
 ## Tools
 
-Tool calls arrive as data; you run the function and send the result
-back. lm15 never executes anything for you.
+A tool call is a conversation in two rounds: the model answers your
+question with *"call `get_weather` with `{'city': 'Montreal'}`"*, you
+run the function yourself, send the result back, and the model writes
+the final answer. lm15 hands you each step as plain data — it never
+executes anything for you, which means no framework to fight when you
+want control over errors, retries, or budgets.
 
 ```python
 from lm15 import tool
@@ -195,7 +218,8 @@ Full recipe, including hand-written schemas and parallel calls:
 
 ## Async
 
-Everything has an async mirror with the same shape:
+Working in an async app? Everything has an async mirror with the same
+shape — add `Async` to the name and `await` the call:
 
 ```python
 from lm15 import AsyncLMRouter
@@ -212,7 +236,10 @@ print(response.text)
 Ok.
 ```
 
-## Credentials
+## Credentials, the short version
+
+The one-line summary of each option — the full story, with examples,
+is on [Authentication](authentication.md):
 
 - **Env vars** — the router reads each provider's standard variable
   (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,

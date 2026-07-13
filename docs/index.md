@@ -1,17 +1,30 @@
 # lm15
 
-**lm15** is a small, typed, provider-neutral interface for foundation-model
-requests, responses, streams, tools, media parts, endpoint APIs, errors, and
-canonical JSON serialization — **stdlib-only, zero dependencies**, with its
-own HTTP transport.
+Talk to every major LLM API through one small, typed interface.
 
-It is a **low-level foundation library**: one canonical representation,
-exact serde for it, and adapters that translate it to and from each
-provider's wire format. It is deliberately *not* an opinionated user-facing
-API — no magic `call()`, no automatic tool loops, no DSL. lm15 is meant to
-be **the dependency** for libraries that want to build their own take on
-the right way to talk to AI systems in Python: you bring the opinions,
-lm15 brings every provider.
+Every provider speaks its own HTTP dialect — different JSON shapes,
+auth headers, streaming formats, error codes. lm15 absorbs exactly
+that. You write one `Request`, and a per-provider adapter translates
+it, byte-for-byte correctly, into the dialect of OpenAI, Anthropic,
+Gemini, Groq, OpenRouter, a local ollama/vLLM/SGLang server, or your
+Claude/ChatGPT subscription. Same code, same typed `Response` back,
+whichever provider answers:
+
+```python
+from lm15 import LMRouter, Message, Request
+
+response = LMRouter().complete(
+    Request(model="anthropic:claude-haiku-4-5",
+            messages=(Message.user("Hello!"),))
+)
+print(response.text)
+```
+
+Three things make it different:
+
+**It is tiny, and measurably so.** Zero dependencies — pure stdlib,
+including the HTTP transport with connection pooling. Adding lm15 to
+your project costs half a megabyte:
 
 | package | install size | transitive deps | cold import | import RSS |
 |---|---:|---:|---:|---:|
@@ -21,7 +34,24 @@ lm15 brings every provider.
 | google-genai | 37.2 MiB | 24 | 934 ms | 60.8 MiB |
 | litellm | 133.0 MiB | 54 | 2298 ms | 161.0 MiB |
 
-*(Machine-measured — see [Benchmarks](benchmarks.md).)*
+*(Machine-measured, re-run mechanically, never hand-edited — see
+[Benchmarks](benchmarks.md).)*
+
+**It is exact, and provably so.** The translation layer is not
+best-effort: every provider behavior is pinned by fixtures captured
+from real providers and enforced by a cross-language conformance
+contract — the same 304 checks that the Rust, Go, and TypeScript
+implementations pass identically. When lm15 says two providers behave
+the same, that is a tested claim, not a hope.
+[How lm15 is specified](how-lm15-is-specified.md) tells that story.
+
+**It has no opinions — on purpose.** No automatic retries, no
+tool-execution loop, no cost ledger, no prompt DSL. You can use lm15
+directly (the docs show how, start to finish), and it is equally built
+to be **the dependency** underneath opinionated libraries — you bring
+the opinions, lm15 brings every provider. What it leaves out is a
+design decision with a written reason, not a gap
+([design rationale](design-rationale.md)).
 
 ## The mental model
 
@@ -32,27 +62,26 @@ Message parts → Message → Request → ProviderLM → Response
                               └── stream() → StreamEvent → materialized Response
 ```
 
-One `Request` shape drives OpenAI (Responses API), Anthropic, Gemini,
-Claude Code, OpenAI Codex, and every Chat Completions–compatible server
-(Groq, OpenRouter, DeepSeek, vLLM, SGLang, Ollama, …) — with identical
-canonical behavior, enforced by a cross-language conformance contract.
+Read it left to right: you compose typed `Message`s into a `Request`,
+a provider LM (picked by hand or by the router from a model string)
+sends it, and you get back a `Response` — or a stream of typed events
+that materializes into the identical `Response`.
 
 ## Where to go
 
-- **[Getting started](getting-started.md)** — install and first requests.
-- **Guides** — the [router](using-the-router.md), the
-  [type system](using-the-type-system.md),
-  [tools from functions](tools-from-functions.md),
-  [providers](using-the-a-provider.md),
-  [model profiles](using-model-profiles.md), and
-  [transports](using-the-transports.md).
-- **[Cookbook](cookbooks/index.md)** — sixteen recipes from
-  [first request](cookbooks/01-first-request.md) to
-  [live sessions](cookbooks/13-live-sessions.md) and
-  [provider passthrough](cookbooks/16-provider-passthrough.md), with real
+- **New here?** [Getting started](getting-started.md) — an API key and
+  your first call in about five minutes, every example with real
   captured output.
-- **[How lm15 is specified](how-lm15-is-specified.md)** — the
-  cross-language contract, the authority model, and what "frozen" means
-  here. The part of lm15 you won't find anywhere else.
-- **[API reference](reference/types.md)** — generated from the source.
-- **[Benchmarks](benchmarks.md)** and the **[Roadmap](roadmap.md)**.
+- **Which providers? What does a model cost?**
+  [Providers & models](providers-and-models.md).
+- **Keys, rotating tokens, subscriptions:**
+  [Authentication](authentication.md).
+- **"How do I do X?"** — sixteen [cookbook recipes](cookbooks/index.md),
+  from [first request](cookbooks/01-first-request.md) to
+  [live sessions](cookbooks/13-live-sessions.md).
+- **"Why should I trust the translation?"**
+  [How lm15 is specified](how-lm15-is-specified.md) — the contract,
+  the authority model, and what "frozen" means here. The part of lm15
+  you won't find anywhere else.
+- **[API reference](reference/types.md)**, **[Benchmarks](benchmarks.md)**,
+  and the **[Roadmap](roadmap.md)**.

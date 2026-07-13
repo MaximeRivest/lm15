@@ -1,11 +1,24 @@
 # Authentication
 
 Every way lm15 takes credentials, from zero-setup to rotating tokens.
-The rule behind all of them: **lm15 places the credential you provide
-on the wire, in the provider's dialect, and does nothing else.** It
-never fetches, refreshes, or stores tokens for you, and it depends on
-no auth SDKs — see
-[the design rationale](design-rationale.md#why-api_key-accepts-a-callable-and-lm15-still-has-no-auth-dependencies).
+Find yourself first — most people need exactly one section:
+
+- **Just trying things out?** Export one env var and you're done —
+  [first section](#environment-variables-the-default).
+- **Building an app or service?** Pass keys explicitly, from wherever
+  you keep secrets — [explicit keys](#explicit-keys).
+- **Behind Azure or an enterprise setup where tokens expire?**
+  [Rotating credentials](#rotating-credentials-token-providers).
+- **On a Claude or ChatGPT plan, no API account?**
+  [Subscriptions](#subscriptions-claude-code-codex-cli).
+- **Everything local?** [No key at all](#keyless-local-servers).
+
+One rule sits behind all of them, and it explains everything else on
+this page: **lm15 places the credential you provide on the wire, in
+the provider's dialect, and does nothing else.** It never fetches,
+refreshes, or stores tokens for you, and it depends on no auth SDKs —
+[the design rationale](design-rationale.md#why-api_key-accepts-a-callable-and-lm15-still-has-no-auth-dependencies)
+explains why that restraint is the feature.
 
 ## Environment variables (the default)
 
@@ -35,9 +48,10 @@ print(LMRouter().resolve("claude-haiku-4-5"))
 
 ## Explicit keys
 
-Pass the key yourself and the environment is never consulted — pass
-`env={}` too and the router is fully hermetic (this is how lm15's own
-tests run):
+When keys live in a secrets manager rather than the shell, pass them
+yourself — an explicit key always beats the environment, and passing
+`env={}` as well guarantees the environment is never even looked at
+(useful in tests, and it is how lm15's own test suite runs):
 
 ```python
 from lm15 import AnthropicLM, LMRouter, RouterConfig
@@ -51,11 +65,18 @@ lm = AnthropicLM(api_key="sk-ant-...")   # or skip the router entirely
 
 ## Rotating credentials (token providers)
 
-Anywhere a key string goes, a **zero-argument callable returning a
-string** works too. The adapter calls it at request-build time, once
-per request, so a client that lives for days never holds a stale token.
-Refreshing and caching are your callable's business — which means the
-ecosystem's existing token providers plug in unchanged:
+Some credentials aren't static strings. Azure Entra tokens expire
+after about an hour; enterprises rotate keys on a schedule; OAuth
+tokens refresh themselves. If your process runs for days, a key read
+once at startup *will* eventually be stale — and the failure shows up
+as a confusing 401 at 3 a.m.
+
+lm15's answer: anywhere a key string goes, a **zero-argument callable
+returning a string** works too. The adapter calls it when it builds
+each request, so whatever your callable returns *now* is what goes on
+the wire *now*. Refreshing and caching stay your callable's business —
+which means the ecosystem's existing token providers plug in
+unchanged:
 
 ```python
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
@@ -81,8 +102,10 @@ router = LMRouter(RouterConfig(api_keys={"anthropic": credential}))
 
 ## Subscriptions (Claude Code / Codex CLI)
 
-Already logged in to the `claude` or `codex` CLI? Those local OAuth
-credentials work directly — no API key, billed to the subscription:
+If you use Claude Code or the Codex CLI, you already have working
+credentials on disk — no API platform account needed. These adapters
+use that login directly, and usage bills to your existing subscription
+plan rather than pay-per-token:
 
 ```python
 from lm15 import ClaudeCodeLM, OpenAICodexLM
@@ -107,22 +130,29 @@ explicitly via `api_keys`.
 
 ## What lm15 guarantees
 
-- Credential material never appears in a repr, an error message, or an
-  exception chain — whichever form it takes.
-- Adapters read credentials only from what you passed; nothing is
-  discovered behind your back.
-- Wire placement is contract-tested per provider dialect
-  (`Authorization: Bearer`, `x-api-key`, `x-goog-api-key`, …) — see
+Worth knowing before a security review asks:
+
+- **Your key is never printed.** `print()` an adapter, log an error,
+  render a traceback — credential material appears in none of them,
+  whichever form it takes.
+- **Nothing is discovered behind your back.** Adapters read only what
+  you passed. Env pickup happens in exactly one place (the router),
+  and `resolve()` will tell you which variable it would use.
+- **The right header, every time.** Where each credential goes on the
+  wire (`Authorization: Bearer`, `x-api-key`, `x-goog-api-key`, …) is
+  contract-tested per provider —
   [How lm15 is specified](how-lm15-is-specified.md).
-- Zero auth dependencies, forever: for Azure/Bedrock/Vertex-style
+- **Zero auth dependencies, forever.** For Azure/Bedrock/Vertex-style
   delegated auth you bring the token provider or a signing transport;
   lm15 provides the seam.
 
 ## When it goes wrong
 
-Missing keys fail at construction, not mid-request, and the errors are
-typed (`MissingCredentialError` from the router, `NotConfiguredError` /
-`AuthError` from adapters — all under `LM15Error`) and self-explaining:
+Credential problems surface early and loudly: a missing key fails when
+you *build* the client, not twenty minutes into a batch run. The
+errors are typed (`MissingCredentialError` from the router,
+`NotConfiguredError` / `AuthError` from adapters — all catchable under
+`LM15Error`), and each one states its own fix:
 
 ```output
 MissingCredentialError: no API key found for provider 'anthropic'.
