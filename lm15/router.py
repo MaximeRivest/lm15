@@ -134,7 +134,7 @@ DEFAULT_RULES: tuple[RouteRule, ...] = (
 # Values are the *sync* classes; AsyncLMRouter uses ASYNC_ADAPTERS.
 ADAPTERS: Mapping[str, type] = {
     "openai": OpenAILM,
-    "openai_chat": OpenAIChatLM,
+    "openai-chat": OpenAIChatLM,
     "anthropic": AnthropicLM,
     "gemini": GeminiLM,
     "claude-code": ClaudeCodeLM,
@@ -143,7 +143,7 @@ ADAPTERS: Mapping[str, type] = {
 
 ASYNC_ADAPTERS: Mapping[str, type] = {
     "openai": AsyncOpenAILM,
-    "openai_chat": AsyncOpenAIChatLM,
+    "openai-chat": AsyncOpenAIChatLM,
     "anthropic": AsyncAnthropicLM,
     "gemini": AsyncGeminiLM,
     "claude-code": AsyncClaudeCodeLM,
@@ -183,6 +183,12 @@ CHAT_PRESET_ROUTES: Mapping[str, PresetRoute] = {
 }
 
 
+def _canonical_provider(name: str) -> str:
+    """Provider strings are hyphenated (``openai-chat``); the underscore
+    spelling is accepted everywhere as a permanent alias."""
+    return name.replace("_", "-")
+
+
 def _routable(provider: str, adapters: Mapping[str, type]) -> bool:
     return provider in adapters or provider in CHAT_PRESET_ROUTES
 
@@ -190,7 +196,7 @@ def _routable(provider: str, adapters: Mapping[str, type]) -> bool:
 def _adapter_for(provider: str, adapters: Mapping[str, type]) -> type:
     if provider in adapters:
         return adapters[provider]
-    return adapters["openai_chat"]  # preset route
+    return adapters["openai-chat"]  # preset route
 
 
 # --------------------------------------------------------------- errors ----
@@ -372,7 +378,9 @@ def _resolve(model: str, config: RouterConfig, adapters: Mapping[str, type]) -> 
     # names nothing routable falls through (and is mentioned if nothing
     # else matches either).
     object_provider = getattr(model, "provider", None)
-    if not (isinstance(object_provider, str) and object_provider):
+    if isinstance(object_provider, str) and object_provider:
+        object_provider = _canonical_provider(object_provider)
+    else:
         object_provider = None
     if object_provider is not None and _routable(object_provider, adapters):
         return _resolution(
@@ -386,7 +394,8 @@ def _resolve(model: str, config: RouterConfig, adapters: Mapping[str, type]) -> 
 
     # Rung 1: explicit provider prefix (split on FIRST colon).
     if ":" in model:
-        head, rest = model.split(":", 1)
+        raw_head, rest = model.split(":", 1)
+        head = _canonical_provider(raw_head)
         if _routable(head, adapters) and rest:
             return _resolution(
                 requested=requested,
@@ -431,7 +440,8 @@ def _resolve(model: str, config: RouterConfig, adapters: Mapping[str, type]) -> 
                     providers=providers,
                 )
             info = narrowed[0]
-            if not _routable(info.provider, adapters):
+            catalog_provider = _canonical_provider(info.provider)
+            if not _routable(catalog_provider, adapters):
                 raise UnknownModelError(
                     f"model {model!r} resolved in the catalog to provider "
                     f"{info.provider!r}, but lm15 has no adapter or compat "
@@ -445,7 +455,7 @@ def _resolve(model: str, config: RouterConfig, adapters: Mapping[str, type]) -> 
             return _resolution(
                 requested=requested,
                 wire_model=info.id if model in info.aliases else str(model),
-                provider=info.provider,
+                provider=catalog_provider,
                 source="catalog",
                 config=config,
                 adapters=adapters,
@@ -455,7 +465,8 @@ def _resolve(model: str, config: RouterConfig, adapters: Mapping[str, type]) -> 
     # Rung 3: built-in prefix rules, first match wins.
     for rule in config.rules:
         if model.startswith(rule.prefix):
-            if not _routable(rule.provider, adapters):
+            rule_provider = _canonical_provider(rule.provider)
+            if not _routable(rule_provider, adapters):
                 raise UnknownModelError(
                     f"rule {rule!r} names provider {rule.provider!r}, which has "
                     f"no adapter. Known providers: {_known_providers(adapters)}.",
@@ -466,7 +477,7 @@ def _resolve(model: str, config: RouterConfig, adapters: Mapping[str, type]) -> 
             return _resolution(
                 requested=requested,
                 wire_model=str(model),
-                provider=rule.provider,
+                provider=rule_provider,
                 source="rule",
                 config=config,
                 adapters=adapters,
@@ -474,6 +485,13 @@ def _resolve(model: str, config: RouterConfig, adapters: Mapping[str, type]) -> 
             )
 
     hints = []
+    if ":" in model:
+        import difflib
+
+        head = _canonical_provider(model.split(":", 1)[0])
+        close = difflib.get_close_matches(head, sorted({*adapters, *CHAT_PRESET_ROUTES}), n=1, cutoff=0.75)
+        if close:
+            hints.append(f'Did you mean "{close[0]}:{model.split(":", 1)[1]}"?')
     if object_provider is not None:
         hints.append(
             f"The model value carries provider {object_provider!r}, which has "
@@ -511,6 +529,16 @@ def _declared_env_keys(provider: str, adapters: Mapping[str, type]) -> tuple[str
     return adapters[provider].manifest.env_keys
 
 
+def _api_keys_entry(config: RouterConfig, provider: str) -> tuple[Credential | None, bool]:
+    """Explicit api_keys entry for a provider, matching either spelling."""
+    if config.api_keys is None:
+        return None, False
+    for key, value in config.api_keys.items():
+        if _canonical_provider(key) == provider:
+            return value, True
+    return None, False
+
+
 def _env_key_for(provider: str, config: RouterConfig, adapters: Mapping[str, type]) -> str | None:
     """WHICH env var lm() would read for this provider (never the value).
 
@@ -518,7 +546,7 @@ def _env_key_for(provider: str, config: RouterConfig, adapters: Mapping[str, typ
     (declares no env keys) or when an explicit ``api_keys`` entry
     overrides env lookup entirely.
     """
-    if config.api_keys is not None and provider in config.api_keys:
+    if _api_keys_entry(config, provider)[1]:
         return None
     env_keys = _declared_env_keys(provider, adapters)
     if not env_keys:
@@ -535,9 +563,7 @@ def _build_lm(resolution: Resolution, config: RouterConfig, adapters: Mapping[st
     route = CHAT_PRESET_ROUTES.get(resolution.provider) if resolution.provider not in adapters else None
     if resolution.provider in _OAUTH_PROVIDERS:
         return cls()  # self-resolving local OAuth constructor
-    api_key = None
-    if config.api_keys is not None:
-        api_key = config.api_keys.get(resolution.provider)
+    api_key, _ = _api_keys_entry(config, resolution.provider)
     if api_key is None:
         env = config.env if config.env is not None else os.environ
         for key in _declared_env_keys(resolution.provider, adapters):

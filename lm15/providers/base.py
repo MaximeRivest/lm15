@@ -94,7 +94,7 @@ class HttpResponse:
         return json.loads(self.body)
 
 
-class ProviderLM(Protocol):
+class ProviderDialect(Protocol):
     provider: str
     capabilities: Capabilities
     supports: EndpointSupport

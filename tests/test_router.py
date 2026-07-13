@@ -80,7 +80,7 @@ class TestResolvePrefix:
     def test_prefix_beats_catalog_and_rules(self) -> None:
         registry = _registry(_info("claude-x", "anthropic"))
         res = _router(registry=registry).resolve("openai_chat:claude-x")
-        assert res.provider == "openai_chat"
+        assert res.provider == "openai-chat"  # canonical spelling in the record
         assert res.source == "prefix"
         assert res.model == "claude-x"
 
@@ -105,7 +105,7 @@ class TestResolveCatalog:
         info = _info("llama3.3-70b", "openai_chat")
         res = _router(registry=_registry(info)).resolve("llama3.3-70b")
         assert res.source == "catalog"
-        assert res.provider == "openai_chat"
+        assert res.provider == "openai-chat"  # canonical spelling in the record
         assert res.adapter == "OpenAIChatLM"
         assert res.model_info == info
 
@@ -120,7 +120,7 @@ class TestResolveCatalog:
         # over the built-in claude- -> anthropic rule.
         info = _info("claude-mirror", "openai_chat")
         res = _router(registry=_registry(info)).resolve("claude-mirror")
-        assert res.provider == "openai_chat"
+        assert res.provider == "openai-chat"  # canonical spelling in the record
         assert res.source == "catalog"
 
     def test_ambiguous_catalog_match_raises(self) -> None:
@@ -191,7 +191,7 @@ class TestResolveRules:
     def test_custom_rules_replace_defaults(self) -> None:
         rules = (RouteRule("my-", "openai_chat", note="local vllm naming"),)
         res = _router(rules=rules).resolve("my-model")
-        assert res.provider == "openai_chat"
+        assert res.provider == "openai-chat"  # canonical spelling in the record
         assert res.rule == rules[0]
         with pytest.raises(UnknownModelError):
             _router(rules=rules).resolve("claude-sonnet-4-5")
@@ -687,3 +687,38 @@ class TestRouterCredentialProviders:
             lm.close()
         header = dict(http.headers).get("Authorization")
         assert header == "Bearer sk-fresh"
+
+
+# ─── provider-string grammar: hyphens canonical, underscores aliased ─
+
+
+class TestProviderStringGrammar:
+    def test_hyphen_form_is_canonical(self) -> None:
+        res = _router().resolve("openai-chat:llama-3.3-70b")
+        assert res.provider == "openai-chat"
+        assert res.adapter == "OpenAIChatLM"
+
+    def test_underscore_form_is_permanent_alias(self) -> None:
+        res = _router().resolve("openai_chat:llama-3.3-70b")
+        assert res.provider == "openai-chat"   # canonicalized in the record
+        assert res.adapter == "OpenAIChatLM"
+
+    def test_api_keys_accept_either_spelling(self) -> None:
+        for spelling in ("openai_chat", "openai-chat"):
+            router = _router(env={}, api_keys={spelling: "sk-h"})
+            lm = router.lm("openai-chat:local-model")
+            try:
+                assert lm.api_key == "sk-h"
+            finally:
+                lm.close()
+
+    def test_object_provider_attribute_is_canonicalized(self) -> None:
+        res = _router().resolve(_CatalogId("some-model", provider="openai_chat"))
+        assert res.provider == "openai-chat"
+        assert res.source == "object"
+
+    def test_near_miss_provider_head_is_hinted(self) -> None:
+        with pytest.raises(UnknownModelError) as exc_info:
+            _router().resolve("antropic:claude-sonnet-4-5")
+        assert "anthropic" in str(exc_info.value)
+        assert "did you mean" in str(exc_info.value).lower()

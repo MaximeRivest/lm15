@@ -168,12 +168,12 @@ from .providers import (
     ClaudeCodeLM,
     OpenAICodexLM,
     BaseProviderLM,
-    ProviderLM,
     HttpResponse,
     SyncTransport,
     Credential,
     resolve_credential,
 )
+from .protocols import ProviderLM
 from .providers.async_base import (
     AsyncOpenAILM,
     AsyncOpenAIChatLM,

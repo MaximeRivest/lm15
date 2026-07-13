@@ -53,7 +53,7 @@ def adapter_for_provider(provider: str, api_key: str, base_url: str | None = Non
         kwargs["base_url"] = base_url
     if provider == "openai":
         return OpenAILM(**kwargs)
-    if provider == "openai_chat":
+    if provider in ("openai_chat", "openai-chat"):
         return OpenAIChatLM(**kwargs)
     if provider == "anthropic":
         return AnthropicLM(**kwargs)
