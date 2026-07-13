@@ -114,7 +114,9 @@ No key found → `MissingCredentialError`, which subclasses the existing
 their self-resolving constructors and `env_key` is `None`.
 
 `resolve()` only ever records *which* env var would be read (in
-`Resolution.env_key`), never the value.
+`Resolution.env_key`), never the value. The full credential story —
+every provider's env var, rotating token providers, subscriptions —
+is on [Authentication](authentication.md).
 
 One LM is built per provider, lazily, and reused across calls. The cache
 is the router's only mutable state.

@@ -29,7 +29,9 @@ export OPENAI_API_KEY="sk-..."          # platform.openai.com/api-keys
 
 The examples below use Anthropic; on a different provider, keep the
 code and swap the model string (the tabs below show exactly how).
-Running a local ollama? No key needed at all.
+Running a local ollama? No key needed at all. Every other way to
+authenticate — explicit keys, rotating token providers, Claude/ChatGPT
+subscriptions — is on [Authentication](authentication.md).
 
 If you forget, the error says precisely what to do:
 
@@ -122,8 +124,9 @@ The call never changes — only the model string does. Pick a tab:
     route by name and use a placeholder credential.
 
 The same code covers OpenAI (`gpt-4.1-mini`) and anything else the
-router knows. And nothing about it is magic — ask it to explain
-itself:
+router knows — the full matrix of providers, endpoints, and env vars is
+on [Providers & models](providers-and-models.md). And nothing about it
+is magic — ask it to explain itself:
 
 ```python
 print(router.resolve("claude-haiku-4-5"))

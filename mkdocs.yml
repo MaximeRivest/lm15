@@ -54,6 +54,8 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Guides:
+      - Providers & models: providers-and-models.md
+      - Authentication: authentication.md
       - The router: using-the-router.md
       - The type system: using-the-type-system.md
       - Tools from functions: tools-from-functions.md
