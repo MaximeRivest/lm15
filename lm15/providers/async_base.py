@@ -119,7 +119,7 @@ class AsyncBaseProviderLM:
         # stream yields exactly one final StreamEndEvent.
         from ..result import acoalesce_stream
 
-        return acoalesce_stream(self._stream_raw(request))
+        return acoalesce_stream(self._stream_raw(request), model=request.model)
 
     async def _stream_raw(self, request: Request) -> AsyncIterator[StreamEvent]:
         req = self._inner.build_request(request, stream=True)

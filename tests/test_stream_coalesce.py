@@ -163,8 +163,9 @@ def test_coalescer_never_overwrites_non_none_with_none() -> None:
         StreamEndEvent(usage=Usage(input_tokens=3, output_tokens=4)),
         StreamEndEvent(),  # bare terminator must not erase anything
     ])))
-    assert len(merged) == 1
-    end = merged[0]
+    # MAP-4 opens even an end-only stream with a start event.
+    assert [e.type for e in merged] == ["start", "end"]
+    end = merged[-1]
     assert end.type == "end"
     assert end.finish_reason == "stop"
     assert end.usage == Usage(input_tokens=3, output_tokens=4)
@@ -183,3 +184,57 @@ def test_coalescer_passes_through_non_end_events() -> None:
     assert [e.type for e in out] == ["start", "delta", "end"]
     assert out[0] is src[0]
     assert out[1] is src[1]
+
+
+# ─── MAP-4 — a stream opens with exactly one start event ─────────────
+
+
+def test_chat_stream_opens_with_synthesized_start() -> None:
+    # Chat completions has no start frame; the coalescer synthesizes one.
+    lm = OpenAIChatLM(api_key="sk-test", transport=_FakeTransport(
+        [_FakeStreamResponse(status=200, body=_VLLM_SSE)]
+    ))
+    events = list(lm.stream(_REQ))
+
+    starts = [e for e in events if e.type == "start"]
+    assert len(starts) == 1
+    assert events[0].type == "start"
+    assert events[0].model == "m-test"
+
+
+def test_anthropic_stream_passes_real_start_through() -> None:
+    # message_start is a real start frame; it must survive with its id.
+    lm = AnthropicLM(api_key="sk-test", transport=_FakeTransport(
+        [_FakeStreamResponse(status=200, body=_anthropic_sse())]
+    ))
+    events = list(lm.stream(_REQ))
+
+    starts = [e for e in events if e.type == "start"]
+    assert len(starts) == 1
+    assert events[0].type == "start"
+    assert events[0].id == "msg_1"
+    assert events[0].model == "claude-test"
+
+
+def test_coalescer_drops_duplicate_starts() -> None:
+    from lm15.result import coalesce_stream
+    from lm15.types import StreamDeltaEvent, StreamEndEvent, StreamStartEvent, TextDelta
+
+    out = list(coalesce_stream(iter([
+        StreamStartEvent(id="first", model="m"),
+        StreamStartEvent(id="second", model="m"),
+        StreamDeltaEvent(delta=TextDelta(text="a")),
+        StreamEndEvent(finish_reason="stop"),
+    ])))
+    assert [e.type for e in out] == ["start", "delta", "end"]
+    assert out[0].id == "first"
+
+
+def test_coalescer_error_only_stream_has_no_start() -> None:
+    from lm15.result import coalesce_stream
+    from lm15.types import ErrorDetail, StreamErrorEvent
+
+    out = list(coalesce_stream(iter([
+        StreamErrorEvent(error=ErrorDetail(code="provider", message="boom")),
+    ])))
+    assert [e.type for e in out] == ["error"]

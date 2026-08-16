@@ -176,7 +176,7 @@ class BaseProviderLM:
         # stream yields exactly one final StreamEndEvent.
         from ..result import coalesce_stream
 
-        return coalesce_stream(self._stream_raw(request))
+        return coalesce_stream(self._stream_raw(request), model=request.model)
 
     def _stream_raw(self, request: Request) -> Iterator[StreamEvent]:
         req = self.build_request(request, stream=True)

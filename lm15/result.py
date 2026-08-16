@@ -510,25 +510,40 @@ def response_to_events(response: Response) -> Iterator[StreamEvent]:
     )
 
 
-def coalesce_stream(events: Iterator[StreamEvent]) -> Iterator[StreamEvent]:
-    """Enforce MAP-3: a stream yields exactly one StreamEndEvent, as the final event.
+def coalesce_stream(
+    events: Iterator[StreamEvent], *, model: str | None = None
+) -> Iterator[StreamEvent]:
+    """Enforce MAP-3 and MAP-4: one final StreamEndEvent, one leading StreamStartEvent.
 
     Adapters are stateless and may emit one end event per provider terminal
     frame (finish_reason chunk, usage-only chunk, ``[DONE]``,
-    ``message_delta`` + ``message_stop``).  This wrapper passes start, delta
-    and error events through unchanged, absorbs every end event's fields —
+    ``message_delta`` + ``message_stop``).  This wrapper passes delta and
+    error events through unchanged, absorbs every end event's fields —
     a later non-None field replaces the accumulated value, a None field never
     erases one — and emits the single merged end event once the underlying
     iterator is exhausted.  If no end event was seen (e.g. the stream errored
     or was truncated), no end event is fabricated.
 
-    See docs/mapping-rules.md MAP-3.
+    Dialects without a start frame (chat completions, gemini SSE) get a
+    synthesized ``StreamStartEvent`` before the first delta or end event, so
+    every successful stream reads start → deltas → end (MAP-4).  A provider
+    start passes through; duplicates after the first are dropped.  Error
+    events never force a start: a stream that fails to open has no start.
+
+    See docs/mapping-rules.md MAP-3 and MAP-4.
     """
+    started = False
     saw_end = False
     finish_reason = None
     usage: Usage | None = None
     provider_data = None
     for event in events:
+        if event.type == "start":
+            if started:
+                continue
+            started = True
+            yield event
+            continue
         if event.type == "end":
             saw_end = True
             if event.finish_reason is not None:
@@ -538,8 +553,13 @@ def coalesce_stream(events: Iterator[StreamEvent]) -> Iterator[StreamEvent]:
             if event.provider_data is not None:
                 provider_data = event.provider_data
             continue
+        if not started and event.type == "delta":
+            started = True
+            yield StreamStartEvent(model=model)
         yield event
     if saw_end:
+        if not started:
+            yield StreamStartEvent(model=model)
         yield StreamEndEvent(
             finish_reason=finish_reason,
             usage=usage,
@@ -547,19 +567,30 @@ def coalesce_stream(events: Iterator[StreamEvent]) -> Iterator[StreamEvent]:
         )
 
 
-async def acoalesce_stream(events: "AsyncIterator[StreamEvent]") -> "AsyncIterator[StreamEvent]":
-    """Async mirror of :func:`coalesce_stream` — same MAP-3 merge semantics.
+async def acoalesce_stream(
+    events: "AsyncIterator[StreamEvent]", *, model: str | None = None
+) -> "AsyncIterator[StreamEvent]":
+    """Async mirror of :func:`coalesce_stream` — same MAP-3/MAP-4 semantics.
 
-    Passes start/delta/error events through unchanged, absorbs every end
+    Passes delta/error events through unchanged, absorbs every end
     event's fields (later non-None replaces, None never erases), and emits
     exactly one merged final StreamEndEvent once the source is exhausted.
-    No end event is fabricated if none was seen.
+    No end event is fabricated if none was seen.  Synthesizes one leading
+    StreamStartEvent for dialects without a start frame; duplicate starts
+    are dropped; error events never force a start.
     """
+    started = False
     saw_end = False
     finish_reason = None
     usage: Usage | None = None
     provider_data = None
     async for event in events:
+        if event.type == "start":
+            if started:
+                continue
+            started = True
+            yield event
+            continue
         if event.type == "end":
             saw_end = True
             if event.finish_reason is not None:
@@ -569,8 +600,13 @@ async def acoalesce_stream(events: "AsyncIterator[StreamEvent]") -> "AsyncIterat
             if event.provider_data is not None:
                 provider_data = event.provider_data
             continue
+        if not started and event.type == "delta":
+            started = True
+            yield StreamStartEvent(model=model)
         yield event
     if saw_end:
+        if not started:
+            yield StreamStartEvent(model=model)
         yield StreamEndEvent(
             finish_reason=finish_reason,
             usage=usage,

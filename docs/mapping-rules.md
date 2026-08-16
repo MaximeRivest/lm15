@@ -68,6 +68,25 @@ usage" are the same thing by construction, in every port.
 
 ---
 
+## MAP-4 — A stream opens with exactly one start event
+
+An lm15 stream that yields any delta or end event yields EXACTLY ONE
+`StreamStartEvent`, before all of them. Dialects with a real start frame
+(OpenAI Responses `response.created`, Anthropic `message_start`) pass it
+through with its `id` and `model`; dialects without one (chat completions,
+Gemini SSE) get a synthesized start carrying the request's model, added by
+the same coalescer that enforces MAP-3. Duplicate starts collapse to the
+first. Error events never force a start: a stream that fails to open has no
+start.
+
+**Why:** live testing (dspy-greenfield `tests/live`, 2026-08-16) showed the
+event vocabulary split by dialect — Responses API streams began with a start
+event, chat-completions and Gemini streams began with a bare delta — so any
+consumer that keyed on the start event worked on one provider and broke on
+the next. One vocabulary means the trace shape is provider-independent.
+
+---
+
 History: MAP-1 and MAP-2 were implicit in the reference adapters; they were
 ratified as written rules on 2026-06-10 after the adversarial golden review
 flagged anthropic.container, openai.code_interpreter (MAP-1) and

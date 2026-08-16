@@ -101,6 +101,18 @@ GEMINI_PROVIDER_EXECUTED_PART_KEYS = {
     "codeExecutionResult",
 }
 
+# Effort levels graded into thinkingBudget values that every 2.5-family
+# model accepts (flash-lite floor 512, flash ceiling 24576). "adaptive"
+# maps to -1, Gemini's own dynamic-thinking mode.
+_EFFORT_THINKING_BUDGETS: dict[str, int] = {
+    "adaptive": -1,
+    "minimal": 512,
+    "low": 2048,
+    "medium": 8192,
+    "high": 16384,
+    "xhigh": 24576,
+}
+
 
 def _attach_unmapped(provider_data: dict[str, Any], unmapped: list[dict[str, str]]) -> dict[str, Any]:
     if not unmapped:
@@ -544,8 +556,13 @@ class GeminiLM(BaseProviderLM):
                 generation_config["thinkingConfig"] = {"thinkingBudget": 0}
             else:
                 thinking: dict[str, Any] = {"includeThoughts": True}
-                if request.config.reasoning.thinking_budget is not None:
-                    thinking["thinkingBudget"] = request.config.reasoning.thinking_budget
+                budget = request.config.reasoning.thinking_budget
+                if budget is None:
+                    # Without a budget, models that default to no thinking
+                    # silently ignore the effort level — grade it instead.
+                    budget = _EFFORT_THINKING_BUDGETS.get(request.config.reasoning.effort)
+                if budget is not None:
+                    thinking["thinkingBudget"] = budget
                 generation_config["thinkingConfig"] = thinking
         if generation_config:
             payload["generationConfig"] = generation_config

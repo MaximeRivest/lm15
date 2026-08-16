@@ -122,7 +122,7 @@ def test_stream_mirrors_sync_parse(provider, sync_cls, async_cls):
         for raw in parse_sse(iter(body.splitlines(keepends=True))):
             yield from (e for e in sync_lm.parse_stream_events(_REQ, raw) if e is not None)
 
-    expected = list(coalesce_stream(sync_events()))
+    expected = list(coalesce_stream(sync_events(), model=_REQ.model))
 
     async def collect():
         return [event async for event in async_lm.stream(_REQ)]

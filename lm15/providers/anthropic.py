@@ -113,6 +113,15 @@ def _response_format_to_anthropic_output_config(format_config: dict[str, Any]) -
     return {"format": {"type": "json_schema", "schema": schema}}
 
 
+def _reasoning_tokens(usage_payload: dict) -> int | None:
+    # The wire nests thinking spend under output_tokens_details; absent
+    # when thinking never ran, so None stays the honest "not reported".
+    details = usage_payload.get("output_tokens_details")
+    if isinstance(details, dict) and details.get("thinking_tokens") is not None:
+        return int(details["thinking_tokens"])
+    return None
+
+
 def _reasoning_thinking_budget(request: Request) -> int | None:
     reasoning = request.config.reasoning
     if reasoning is None or reasoning.is_off:
@@ -532,6 +541,7 @@ class AnthropicLM(BaseProviderLM):
             total_tokens=input_tokens + output_tokens,
             cache_read_tokens=usage_payload.get("cache_read_input_tokens"),
             cache_write_tokens=usage_payload.get("cache_creation_input_tokens"),
+            reasoning_tokens=_reasoning_tokens(usage_payload),
         )
         has_tool = any(isinstance(part, ToolCallPart) for part in parts)
         message_continuation: tuple[ContinuationState, ...] = ()
@@ -640,6 +650,7 @@ class AnthropicLM(BaseProviderLM):
                     total_tokens=input_tokens + output_tokens,
                     cache_read_tokens=usage_payload.get("cache_read_input_tokens"),
                     cache_write_tokens=usage_payload.get("cache_creation_input_tokens"),
+                    reasoning_tokens=_reasoning_tokens(usage_payload),
                 )
             stop_reason = delta.get("stop_reason")
             if stop_reason is not None or usage is not None:

@@ -574,3 +574,89 @@ def test_input_file_data_carries_filename():
     payload = part_to_openai_input(DocumentPart(media_type="application/pdf", data="JVBERg=="))
     assert payload["type"] == "input_file"
     assert payload["filename"] == "file.pdf"
+
+
+def test_anthropic_usage_maps_thinking_tokens_to_reasoning_tokens() -> None:
+    # The wire nests thinking spend under output_tokens_details; it must
+    # surface as usage.reasoning_tokens, not vanish (found by the
+    # dspy-greenfield live matrix, 2026-08-16).
+    body = json.dumps({
+        "id": "msg_1", "type": "message", "role": "assistant",
+        "model": "claude-test",
+        "content": [{"type": "text", "text": "156"}],
+        "stop_reason": "end_turn",
+        "usage": {
+            "input_tokens": 66,
+            "output_tokens": 21,
+            "output_tokens_details": {"thinking_tokens": 15},
+        },
+    }).encode("utf-8")
+    lm = AnthropicLM(api_key="sk-ant", transport=_FakeTransport([_FakeResponse(200, body)]))
+
+    response = lm.complete(Request(model="claude-test", messages=(Message.user("12*13?"),)))
+
+    assert response.usage.reasoning_tokens == 15
+
+
+def test_anthropic_usage_without_details_keeps_reasoning_tokens_none() -> None:
+    body = json.dumps({
+        "id": "msg_2", "type": "message", "role": "assistant",
+        "model": "claude-test",
+        "content": [{"type": "text", "text": "hi"}],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 5, "output_tokens": 3},
+    }).encode("utf-8")
+    lm = AnthropicLM(api_key="sk-ant", transport=_FakeTransport([_FakeResponse(200, body)]))
+
+    response = lm.complete(Request(model="claude-test", messages=(Message.user("Hi"),)))
+
+    assert response.usage.reasoning_tokens is None
+
+
+def test_anthropic_stream_message_delta_maps_thinking_tokens() -> None:
+    from lm15.sse import SSEEvent
+
+    lm = AnthropicLM(api_key="sk-ant", transport=_FakeTransport())
+    request = Request(model="claude-test", messages=(Message.user("Hi"),))
+    payload = {
+        "type": "message_delta",
+        "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+        "usage": {
+            "input_tokens": 9,
+            "output_tokens": 12,
+            "output_tokens_details": {"thinking_tokens": 7},
+        },
+    }
+
+    events = list(lm.parse_stream_events(request, SSEEvent(event="message_delta", data=json.dumps(payload))))
+
+    assert len(events) == 1
+    assert events[0].type == "end"
+    assert events[0].usage.reasoning_tokens == 7
+
+
+def test_gemini_reasoning_effort_maps_to_thinking_budget() -> None:
+    # Without a budget, includeThoughts alone lets budget-0 models skip
+    # thinking entirely; effort levels must grade into thinkingBudget.
+    lm = GeminiLM(api_key="sk-gem", transport=_FakeTransport())
+
+    def thinking_config(reasoning: Reasoning) -> dict:
+        request = Request(
+            model="gemini-test",
+            messages=(Message.user("12*13?"),),
+            config=Config(reasoning=reasoning),
+        )
+        payload = json.loads(lm.build_request(request, stream=False).body)
+        return payload["generationConfig"]["thinkingConfig"]
+
+    assert thinking_config(Reasoning(effort="high")) == {
+        "includeThoughts": True, "thinkingBudget": 16384,
+    }
+    assert thinking_config(Reasoning(effort="adaptive")) == {
+        "includeThoughts": True, "thinkingBudget": -1,
+    }
+    # An explicit budget always wins over the effort grade.
+    assert thinking_config(Reasoning(effort="high", thinking_budget=999)) == {
+        "includeThoughts": True, "thinkingBudget": 999,
+    }
+    assert thinking_config(Reasoning(effort="off")) == {"thinkingBudget": 0}
