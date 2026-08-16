@@ -122,7 +122,7 @@ class RouteRule:
 # families need a release (or a catalog, or the provider: prefix).
 DEFAULT_RULES: tuple[RouteRule, ...] = (
     RouteRule("claude-", "anthropic", note="Anthropic Claude family"),
-    RouteRule("gpt-", "openai", note="OpenAI GPT family (Responses API; use openai_chat: for Chat Completions)"),
+    RouteRule("gpt-", "openai", note="OpenAI GPT family (Responses API; use openai-chat: for Chat Completions)"),
     RouteRule("o1", "openai", note="OpenAI o1 reasoning family"),
     RouteRule("o3", "openai", note="OpenAI o3 reasoning family"),
     RouteRule("o4", "openai", note="OpenAI o4 reasoning family"),

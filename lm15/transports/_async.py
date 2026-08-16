@@ -34,6 +34,7 @@ from ._http11 import (
     ResponseHeadParser,
     build_request_head,
 )
+from ._proxy import ProxyRoute, connect_payload, proxy_route_for, route_origin
 from ._ssl import make_ssl_context
 from ._types import AsyncTransportResponse, TransportRequest
 from ._url import ParsedURL, parse_url
@@ -184,6 +185,8 @@ class StdlibAsyncTransport:
         verify: bool = True,
         ca_bundle: str | None = None,
         user_agent: str = "lm15/stdlib",
+        proxy: str | None = None,
+        trust_env: bool = True,
     ) -> None:
         self._connect_timeout = connect_timeout
         self._read_timeout = read_timeout
@@ -191,6 +194,8 @@ class StdlibAsyncTransport:
         self._user_agent = user_agent
         self._verify = verify
         self._ca_bundle = ca_bundle
+        self._proxy = proxy
+        self._trust_env = trust_env
         self._ssl_ctx: ssl.SSLContext | None = None
         self._pool = _AsyncConnectionPool(max_connections)
         self._closed = False
@@ -228,6 +233,8 @@ class StdlibAsyncTransport:
             raise TransportError("transport is closed")
 
         parsed = parse_url(request.url)
+        proxy = proxy_route_for(parsed, proxy=self._proxy, trust_env=self._trust_env)
+        origin = route_origin(parsed, proxy)
         connect_timeout = request.connect_timeout or self._connect_timeout
         read_timeout = request.read_timeout or self._read_timeout
         write_timeout = request.write_timeout or self._write_timeout
@@ -245,16 +252,18 @@ class StdlibAsyncTransport:
             attempt = 0
             while True:
                 conn = (
-                    await self._pool.checkout(parsed.origin()) if attempt == 0 else None
+                    await self._pool.checkout(origin) if attempt == 0 else None
                 )
                 reused = conn is not None
                 if conn is None:
-                    conn = await self._open(parsed, connect_timeout=connect_timeout)
+                    conn = await self._open(
+                        parsed, proxy=proxy, origin=origin, connect_timeout=connect_timeout
+                    )
                     await self._pool.register_new(conn)
 
                 try:
                     await self._send_request(
-                        conn, request, parsed, write_timeout=write_timeout
+                        conn, request, parsed, proxy=proxy, write_timeout=write_timeout
                     )
                     break
                 except (WriteError, ConnectionResetError, BrokenPipeError, OSError) as exc:
@@ -339,14 +348,45 @@ class StdlibAsyncTransport:
     # ─── Connection I/O ───
 
     async def _open(
-        self, parsed: ParsedURL, *, connect_timeout: float
+        self,
+        parsed: ParsedURL,
+        *,
+        proxy: ProxyRoute | None,
+        origin: tuple[str, str, int],
+        connect_timeout: float,
     ) -> _AsyncConnection:
         ctx = self._get_ssl_ctx() if parsed.is_tls else None
+
+        if proxy is not None and parsed.is_tls:
+            # CONNECT over a raw socket, then hand it to open_connection
+            # for the end-to-end TLS handshake (works on 3.10; StreamWriter
+            # gained start_tls only in 3.11).
+            tunnel = await self._connect_tunnel(parsed, proxy, timeout=connect_timeout)
+            try:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(
+                        sock=tunnel, ssl=ctx, server_hostname=parsed.host
+                    ),
+                    timeout=connect_timeout,
+                )
+            except asyncio.TimeoutError as exc:
+                tunnel.close()
+                raise ConnectTimeout("TLS handshake through proxy timed out") from exc
+            except ssl.SSLError as exc:
+                tunnel.close()
+                raise ConnectError(f"TLS handshake failed: {exc}") from exc
+            except OSError as exc:
+                tunnel.close()
+                raise ConnectError(f"TLS handshake through proxy failed: {exc}") from exc
+            return _AsyncConnection(origin, reader, writer)
+
+        connect_host = proxy.host if proxy is not None else parsed.host
+        connect_port = proxy.port if proxy is not None else parsed.port
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(
-                    host=parsed.host,
-                    port=parsed.port,
+                    host=connect_host,
+                    port=connect_port,
                     ssl=ctx,
                     server_hostname=parsed.host if ctx else None,
                 ),
@@ -354,13 +394,13 @@ class StdlibAsyncTransport:
             )
         except asyncio.TimeoutError as exc:
             raise ConnectTimeout(
-                f"timed out connecting to {parsed.host}:{parsed.port}"
+                f"timed out connecting to {connect_host}:{connect_port}"
             ) from exc
         except ssl.SSLError as exc:
             raise ConnectError(f"TLS handshake failed: {exc}") from exc
         except OSError as exc:
             raise ConnectError(
-                f"failed to connect to {parsed.host}:{parsed.port}: {exc}"
+                f"failed to connect to {connect_host}:{connect_port}: {exc}"
             ) from exc
 
         # TCP_NODELAY on the underlying socket
@@ -371,7 +411,64 @@ class StdlibAsyncTransport:
             except OSError:
                 pass
 
-        return _AsyncConnection(parsed.origin(), reader, writer)
+        return _AsyncConnection(origin, reader, writer)
+
+    async def _connect_tunnel(
+        self, parsed: ParsedURL, proxy: ProxyRoute, *, timeout: float
+    ) -> socket.socket:
+        """Open a raw socket to the proxy and CONNECT it to the TLS target."""
+        loop = asyncio.get_running_loop()
+        try:
+            sock = await asyncio.wait_for(
+                asyncio.to_thread(
+                    socket.create_connection, (proxy.host, proxy.port), timeout
+                ),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError as exc:
+            raise ConnectTimeout(
+                f"timed out connecting to proxy {proxy.host}:{proxy.port}"
+            ) from exc
+        except OSError as exc:
+            raise ConnectError(
+                f"failed to connect to proxy {proxy.host}:{proxy.port}: {exc}"
+            ) from exc
+        sock.setblocking(False)
+        try:
+            try:
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            except OSError:
+                pass
+            await asyncio.wait_for(
+                loop.sock_sendall(sock, connect_payload(parsed, proxy)), timeout=timeout
+            )
+            parser = ResponseHeadParser()
+            while not parser.complete:
+                data = await asyncio.wait_for(
+                    loop.sock_recv(sock, _READ_CHUNK), timeout=timeout
+                )
+                if not data:
+                    raise ConnectError("proxy closed connection during CONNECT")
+                parser.feed(data)
+            if not (200 <= parser.status < 300):
+                raise ConnectError(
+                    f"proxy refused CONNECT to {proxy.authority(parsed)}: "
+                    f"{parser.status} {parser.reason}"
+                )
+            if parser.leftover:
+                raise ProtocolError("proxy sent unexpected bytes after the CONNECT response")
+        except asyncio.TimeoutError as exc:
+            sock.close()
+            raise ConnectTimeout(
+                f"CONNECT via {proxy.host}:{proxy.port} timed out"
+            ) from exc
+        except (ConnectError, ProtocolError):
+            sock.close()
+            raise
+        except OSError as exc:
+            sock.close()
+            raise ConnectError(f"CONNECT via {proxy.host}:{proxy.port} failed: {exc}") from exc
+        return sock
 
     async def _send_request(
         self,
@@ -379,18 +476,27 @@ class StdlibAsyncTransport:
         request: TransportRequest,
         parsed: ParsedURL,
         *,
+        proxy: ProxyRoute | None,
         write_timeout: float,
     ) -> None:
         body = request.body or b""
         has_body = request.method.upper() not in ("GET", "HEAD", "DELETE") or bool(body)
         body_length = len(body) if has_body else None
+        target = parsed.target
+        headers = request.headers
+        if proxy is not None and not parsed.is_tls:
+            # Forward-proxy plain HTTP: absolute-URI request line; the
+            # Host header still names the target (build_request_head).
+            target = f"http://{parsed.host_header()}{parsed.target}"
+            if proxy.basic_auth is not None:
+                headers = [*headers, ("Proxy-Authorization", proxy.basic_auth)]
         head = build_request_head(
             method=request.method,
-            target=parsed.target,
+            target=target,
             host=parsed.host,
             port=parsed.port,
             is_tls=parsed.is_tls,
-            headers=request.headers,
+            headers=headers,
             body_length=body_length,
             user_agent=self._user_agent,
         )

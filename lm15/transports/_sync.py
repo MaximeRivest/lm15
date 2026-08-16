@@ -15,6 +15,10 @@ Design:
   socket, readable means the server sent EOF — so we drop it and open fresh.
 - If the server sent `Connection: close`, or the body is still outstanding
   when the response closes, the connection is closed rather than reused.
+- Proxies: `proxy=` pins one explicitly; otherwise `trust_env=True` (default)
+  honors HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / NO_PROXY.  Plain-HTTP targets
+  are forwarded absolute-URI; TLS targets are tunneled with CONNECT and the
+  handshake runs end-to-end to the origin (see `_proxy.py`).
 """
 from __future__ import annotations
 
@@ -41,6 +45,7 @@ from ._http11 import (
     ResponseHeadParser,
     build_request_head,
 )
+from ._proxy import ProxyRoute, connect_payload, proxy_route_for, route_origin
 from ._ssl import make_ssl_context
 from ._types import TransportRequest, TransportResponse
 from ._url import ParsedURL, parse_url
@@ -192,6 +197,8 @@ class StdlibTransport:
         verify: bool = True,
         ca_bundle: str | None = None,
         user_agent: str = "lm15/stdlib",
+        proxy: str | None = None,
+        trust_env: bool = True,
     ) -> None:
         self._connect_timeout = connect_timeout
         self._read_timeout = read_timeout
@@ -199,6 +206,8 @@ class StdlibTransport:
         self._user_agent = user_agent
         self._verify = verify
         self._ca_bundle = ca_bundle
+        self._proxy = proxy
+        self._trust_env = trust_env
         self._ssl_ctx: ssl.SSLContext | None = None
         self._ssl_lock = threading.Lock()
         self._pool = _ConnectionPool(max_connections)
@@ -240,6 +249,8 @@ class StdlibTransport:
             raise TransportError("transport is closed")
 
         parsed = parse_url(request.url)
+        proxy = proxy_route_for(parsed, proxy=self._proxy, trust_env=self._trust_env)
+        origin = route_origin(parsed, proxy)
         connect_timeout = request.connect_timeout or self._connect_timeout
         read_timeout = request.read_timeout or self._read_timeout
         write_timeout = request.write_timeout or self._write_timeout
@@ -261,15 +272,17 @@ class StdlibTransport:
             # and retry once.
             attempt = 0
             while True:
-                conn = self._pool.checkout(parsed.origin()) if attempt == 0 else None
+                conn = self._pool.checkout(origin) if attempt == 0 else None
                 reused = conn is not None
                 if conn is None:
-                    conn = self._open(parsed, connect_timeout=connect_timeout)
+                    conn = self._open(
+                        parsed, proxy=proxy, origin=origin, connect_timeout=connect_timeout
+                    )
                     self._pool.register_new(conn)
 
                 try:
                     self._send_request(
-                        conn, request, parsed, write_timeout=write_timeout
+                        conn, request, parsed, proxy=proxy, write_timeout=write_timeout
                     )
                     break
                 except (WriteError, ConnectionResetError, BrokenPipeError, OSError) as exc:
@@ -317,25 +330,42 @@ class StdlibTransport:
     # ─── Connection I/O ───
 
     def _open(
-        self, parsed: ParsedURL, *, connect_timeout: float
+        self,
+        parsed: ParsedURL,
+        *,
+        proxy: ProxyRoute | None,
+        origin: tuple[str, str, int],
+        connect_timeout: float,
     ) -> _SyncConnection:
+        connect_host = proxy.host if proxy is not None else parsed.host
+        connect_port = proxy.port if proxy is not None else parsed.port
         try:
             sock = socket.create_connection(
-                (parsed.host, parsed.port), timeout=connect_timeout,
+                (connect_host, connect_port), timeout=connect_timeout,
             )
         except socket.timeout as exc:
             raise ConnectTimeout(
-                f"timed out connecting to {parsed.host}:{parsed.port}"
+                f"timed out connecting to {connect_host}:{connect_port}"
             ) from exc
         except OSError as exc:
             raise ConnectError(
-                f"failed to connect to {parsed.host}:{parsed.port}: {exc}"
+                f"failed to connect to {connect_host}:{connect_port}: {exc}"
             ) from exc
 
         try:
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         except OSError:
             pass
+
+        if proxy is not None and parsed.is_tls:
+            try:
+                self._connect_tunnel(sock, parsed, proxy, timeout=connect_timeout)
+            except BaseException:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+                raise
 
         if parsed.is_tls:
             try:
@@ -349,7 +379,38 @@ class StdlibTransport:
                     pass
                 raise ConnectError(f"TLS handshake failed: {exc}") from exc
 
-        return _SyncConnection(parsed.origin(), sock)
+        return _SyncConnection(origin, sock)
+
+    def _connect_tunnel(
+        self, sock: socket.socket, parsed: ParsedURL, proxy: ProxyRoute, *, timeout: float
+    ) -> None:
+        """Ask the proxy to open a CONNECT tunnel to the TLS target."""
+        sock.settimeout(timeout)
+        try:
+            sock.sendall(connect_payload(parsed, proxy))
+        except socket.timeout as exc:
+            raise ConnectTimeout(f"CONNECT to proxy timed out: {exc}") from exc
+        except OSError as exc:
+            raise ConnectError(f"CONNECT write to proxy failed: {exc}") from exc
+
+        parser = ResponseHeadParser()
+        while not parser.complete:
+            try:
+                data = sock.recv(_READ_CHUNK)
+            except socket.timeout as exc:
+                raise ConnectTimeout(f"timed out waiting for CONNECT response: {exc}") from exc
+            except OSError as exc:
+                raise ConnectError(f"read of CONNECT response failed: {exc}") from exc
+            if not data:
+                raise ConnectError("proxy closed connection during CONNECT")
+            parser.feed(data)
+        if not (200 <= parser.status < 300):
+            raise ConnectError(
+                f"proxy refused CONNECT to {proxy.authority(parsed)}: "
+                f"{parser.status} {parser.reason}"
+            )
+        if parser.leftover:
+            raise ProtocolError("proxy sent unexpected bytes after the CONNECT response")
 
     def _send_request(
         self,
@@ -357,18 +418,27 @@ class StdlibTransport:
         request: TransportRequest,
         parsed: ParsedURL,
         *,
+        proxy: ProxyRoute | None,
         write_timeout: float,
     ) -> None:
         body = request.body or b""
         has_body = request.method.upper() not in ("GET", "HEAD", "DELETE") or bool(body)
         body_length = len(body) if has_body else None
+        target = parsed.target
+        headers = request.headers
+        if proxy is not None and not parsed.is_tls:
+            # Forward-proxy plain HTTP: absolute-URI request line; the
+            # Host header still names the target (build_request_head).
+            target = f"http://{parsed.host_header()}{parsed.target}"
+            if proxy.basic_auth is not None:
+                headers = [*headers, ("Proxy-Authorization", proxy.basic_auth)]
         head = build_request_head(
             method=request.method,
-            target=parsed.target,
+            target=target,
             host=parsed.host,
             port=parsed.port,
             is_tls=parsed.is_tls,
-            headers=request.headers,
+            headers=headers,
             body_length=body_length,
             user_agent=self._user_agent,
         )
