@@ -28,8 +28,12 @@ import one module (API review, 2026-07-13):
 RouteRule/DEFAULT_RULES/PresetRoute/CHAT_PRESET_ROUTES tables),
 `lm15.profiles` / `lm15.compat` (profile and compat-policy machinery),
 `lm15.sse`, `lm15.transports` (HTTP plumbing), `lm15.live` (realtime
-sessions; optional `websockets` dependency), and `lm15.vet` (the
-conformance shim CLI: `python -m lm15.vet`).
+sessions; optional `websockets` dependency), `lm15.auth` (local
+subscription credentials: locked, atomic, double-checked refresh),
+`lm15.authkit` (login-flow primitives: PKCE, device-code polling,
+loopback listener, credential store), `lm15.doctor` (`explain_auth`:
+rung-by-rung credential resolution, no secrets rendered), and
+`lm15.vet` (the conformance shim CLI: `python -m lm15.vet`).
 
 The lowercase part-factory helpers (`text`, `image`, `tool_call`, ...) live in
 `lm15.types`, not at the top level — generic lowercase names at package top

@@ -13,9 +13,28 @@ Failure behavior is typed and helpful, never a raw JSON traceback:
   run;
 - an expired token that cannot be refreshed (no refresh token, or the refresh
   call fails) raises :class:`lm15.errors.AuthError` with the same re-login
-  guidance.
+  guidance;
+- lock contention on a credential file raises
+  :class:`lm15.auth.CredentialLockTimeout` (a ``TimeoutError``): it is a
+  local, transient condition, not a provider error, so it deliberately does
+  not wear the AuthError type.
 
 Token material never appears in error messages or reprs.
+
+Concurrency contract (lm15-contract spec/auth.md AUTH-3/AUTH-4, ratified
+2026-08-31):
+
+- refresh runs under a cross-process advisory lock, with a re-read of the
+  file inside the lock (double-checked refresh) so a refresh that another
+  process completed while we waited is used, not repeated — repeating it
+  loses a rotated refresh token;
+- all credential writes are atomic (temp file + rename) and private (0600);
+- the lock is advisory and cooperative between lm15 processes. The Claude
+  Code and Codex CLIs do not take it; the double-checked re-read is the
+  mitigation for foreign writers, not a cure. The network refresh happens
+  while holding the lock — one slow refresh can therefore stall other lm15
+  processes for up to the lock timeout; the alternative (refresh outside the
+  lock) double-spends rotated refresh tokens, which is worse.
 """
 
 from __future__ import annotations
@@ -31,7 +50,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ._authlock import CredentialLockTimeout, hold_file_lock, write_private_json_atomic
 from .errors import AuthError, NotConfiguredError
+
+__all__ = [
+    "CredentialLockTimeout",
+    "LocalOAuthCredential",
+    "get_claude_code_access_token",
+    "get_codex_cli_access_token",
+    "load_claude_code_credential",
+    "load_codex_cli_credential",
+    "read_claude_code_credential",
+    "read_codex_cli_credential",
+    "refresh_claude_code_credential",
+    "refresh_codex_cli_credential",
+    "write_claude_code_credential",
+    "write_codex_cli_credential",
+]
 
 CLAUDE_CODE_CREDENTIALS_PATH = Path("~/.claude/.credentials.json").expanduser()
 CLAUDE_CODE_CLIENT_ID = "9d1c250a-e61b-44d5-88ed-5944d1962f5e"
@@ -91,12 +126,7 @@ def _read_json_file_or_none(path: Path) -> dict[str, Any] | None:
 
 
 def _write_private_json(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+    write_private_json_atomic(path, data)
 
 
 def _base64url_json(segment: str) -> dict[str, Any]:
@@ -229,11 +259,7 @@ def refresh_claude_code_credential(refresh_token: str) -> LocalOAuthCredential:
     )
 
 
-def write_claude_code_credential(
-    credential: LocalOAuthCredential,
-    credentials_path: str | os.PathLike[str] | None = None,
-) -> None:
-    path = _coerce_path(credentials_path, CLAUDE_CODE_CREDENTIALS_PATH)
+def _write_claude_code_credential_unlocked(credential: LocalOAuthCredential, path: Path) -> None:
     data = _read_json_file_or_none(path) or {}
     raw = data.get("claudeAiOauth")
     current = raw if isinstance(raw, dict) else {}
@@ -244,6 +270,15 @@ def write_claude_code_credential(
         current["expiresAt"] = credential.expires_at
     data["claudeAiOauth"] = current
     _write_private_json(path, data)
+
+
+def write_claude_code_credential(
+    credential: LocalOAuthCredential,
+    credentials_path: str | os.PathLike[str] | None = None,
+) -> None:
+    path = _coerce_path(credentials_path, CLAUDE_CODE_CREDENTIALS_PATH)
+    with hold_file_lock(path):
+        _write_claude_code_credential_unlocked(credential, path)
 
 
 def get_claude_code_access_token(
@@ -265,15 +300,28 @@ def get_claude_code_access_token(
             provider="claude-code",
             credential_hint=CLAUDE_CODE_LOGIN_HINT,
         )
-    try:
-        refreshed = refresh_claude_code_credential(credential.refresh_token)
-    except Exception as exc:
-        raise AuthError(
-            "Claude Code OAuth token is expired and the refresh attempt failed.",
-            provider="claude-code",
-            credential_hint=CLAUDE_CODE_LOGIN_HINT,
-        ) from exc
-    write_claude_code_credential(refreshed, credentials_path)
+    path = _coerce_path(credentials_path, CLAUDE_CODE_CREDENTIALS_PATH)
+    with hold_file_lock(path):
+        # Double-checked refresh: another process may have refreshed (and
+        # rotated the refresh token) while we waited for the lock.
+        credential = load_claude_code_credential(path)
+        if not credential.expired:
+            return credential.access_token
+        if not credential.refresh_token:
+            raise AuthError(
+                "Claude Code OAuth token is expired and no refresh token is available.",
+                provider="claude-code",
+                credential_hint=CLAUDE_CODE_LOGIN_HINT,
+            )
+        try:
+            refreshed = refresh_claude_code_credential(credential.refresh_token)
+        except Exception as exc:
+            raise AuthError(
+                "Claude Code OAuth token is expired and the refresh attempt failed.",
+                provider="claude-code",
+                credential_hint=CLAUDE_CODE_LOGIN_HINT,
+            ) from exc
+        _write_claude_code_credential_unlocked(refreshed, path)
     return refreshed.access_token
 
 
@@ -349,6 +397,16 @@ def write_codex_cli_credential(
     id_token: str | None = None,
 ) -> None:
     path = _coerce_path(auth_path, CODEX_CLI_AUTH_PATH)
+    with hold_file_lock(path):
+        _write_codex_cli_credential_unlocked(credential, path, id_token=id_token)
+
+
+def _write_codex_cli_credential_unlocked(
+    credential: LocalOAuthCredential,
+    path: Path,
+    *,
+    id_token: str | None = None,
+) -> None:
     data = _read_json_file_or_none(path) or {}
     tokens = data.get("tokens")
     current = tokens if isinstance(tokens, dict) else {}
@@ -384,16 +442,32 @@ def get_codex_cli_access_token(
             provider="openai-codex",
             credential_hint=OPENAI_CODEX_LOGIN_HINT,
         )
-    try:
-        refreshed = refresh_codex_cli_credential(credential.refresh_token)
-    except Exception as exc:
-        raise AuthError(
-            "Codex CLI OAuth token is expired and the refresh attempt failed.",
-            provider="openai-codex",
-            credential_hint=OPENAI_CODEX_LOGIN_HINT,
-        ) from exc
-    original = _read_json_file_or_none(_coerce_path(auth_path, CODEX_CLI_AUTH_PATH)) or {}
-    tokens = original.get("tokens") if isinstance(original.get("tokens"), dict) else {}
-    id_token = tokens.get("id_token") if isinstance(tokens, dict) and isinstance(tokens.get("id_token"), str) else None
-    write_codex_cli_credential(refreshed, auth_path, id_token=id_token)
+    path = _coerce_path(auth_path, CODEX_CLI_AUTH_PATH)
+    with hold_file_lock(path):
+        # Double-checked refresh: see the Claude Code sibling above.
+        credential = load_codex_cli_credential(path)
+        if not credential.expired:
+            return credential
+        if not credential.refresh_token:
+            raise AuthError(
+                "Codex CLI OAuth token is expired and no refresh token is available.",
+                provider="openai-codex",
+                credential_hint=OPENAI_CODEX_LOGIN_HINT,
+            )
+        try:
+            refreshed = refresh_codex_cli_credential(credential.refresh_token)
+        except Exception as exc:
+            raise AuthError(
+                "Codex CLI OAuth token is expired and the refresh attempt failed.",
+                provider="openai-codex",
+                credential_hint=OPENAI_CODEX_LOGIN_HINT,
+            ) from exc
+        original = _read_json_file_or_none(path) or {}
+        tokens = original.get("tokens") if isinstance(original.get("tokens"), dict) else {}
+        id_token = (
+            tokens.get("id_token")
+            if isinstance(tokens, dict) and isinstance(tokens.get("id_token"), str)
+            else None
+        )
+        _write_codex_cli_credential_unlocked(refreshed, path, id_token=id_token)
     return refreshed

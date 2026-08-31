@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+**Auth hardening + login primitives + doctor** (contract
+`lm15-contract/spec/auth.md`, ratified 2026-08-31; fixtures
+`auth/resolution.json`):
+
+- `lm15.auth`: credential-file writes are now atomic (temp + rename,
+  0600) and serialized by a cross-process advisory lock; token refresh
+  is double-checked under the lock, so a refresh completed by another
+  process is used instead of repeated (repeating it loses rotated
+  refresh tokens). Lock contention raises the new
+  `CredentialLockTimeout` (a `TimeoutError`, deliberately not
+  `AuthError`). Locks live in `$XDG_CACHE_HOME/lm15/locks`
+  (`$LM15_LOCK_DIR` overrides), never inside `~/.claude`/`~/.codex`.
+  Stated trade-offs: the lock is advisory and lm15-cooperative only
+  (foreign CLIs do not take it; the double-checked re-read is the
+  mitigation), and refresh holds the lock across the network call (a
+  slow refresh can stall sibling lm15 processes; the alternative
+  double-spends rotated refresh tokens).
+- New `lm15.authkit`: login-flow primitives for apps that own a login
+  UX — PKCE (S256 only, RFC 7636 vector pinned), the RFC 8628
+  device-code polling state machine (injectable clock/sleep),
+  `OAuthCallbackListener` (one-shot loopback listener, 127.0.0.1
+  only), and `CredentialFileStore` (locked, atomic, 0600, keyed by
+  provider, serialized `mutate`; default
+  `$XDG_CONFIG_HOME/lm15/credentials.json`, `$LM15_CREDENTIALS_PATH`
+  overrides).
+- New `lm15.doctor.explain_auth`: rung-by-rung credential-resolution
+  report (selected / shadowed / absent) mirroring the router's exact
+  chain; no network, secret values never rendered. Purity trade-off vs
+  `resolve()`: it tests env vars for presence, so values transit
+  memory but are never retained or shown.
+- Contract: `spec/auth.md` (AUTH-1..9, ratified 2026-08-31),
+  language-neutral resolution fixtures (mirrored at
+  `conformance/auth_resolution.json`, run by
+  `tests/test_auth_resolution_contract.py`), and a corpus-wide secrecy
+  CI gate (`tools/check_secrecy.py`). Ports are not yet updated; they
+  are formally behind the contract on this surface until they
+  implement AUTH-1..AUTH-9 against `auth/resolution.json`.
+
 **The API review (breaking — the alpha's one-time window).** A
 four-lens fresh-eyes panel reviewed the public surface; findings in
 `architecture-review/api-review-2026-07-13.md`. The breaking set,
