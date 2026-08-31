@@ -1,4 +1,4 @@
-# Batch jobs — DESIGN DRAFT (aspirational)
+a# Batch jobs — DESIGN DRAFT (aspirational)
 
 > **This recipe is a design artifact, not documentation.** Nothing on
 > this page is implemented. The `output` blocks are invented, not
@@ -87,6 +87,39 @@ completed
 `wait()` is a convenience for notebooks and small jobs. The primary
 pattern for real workloads is store-the-id + re-attach — a batch
 outlives your process by design.
+
+### Lost the ticket?
+
+You will lose one eventually — a notebook restart, a crash between
+submit and save. That is fine, because **the provider is the system of
+record, not your memory**. Every provider can enumerate your jobs:
+
+```python
+for job in lm.batches(limit=5):        # newest first
+    print(job.id, job.status, job.created_at, job.label)
+```
+```output
+msgbatch_01XYZ… running   2026-08-31T14:02:11Z nightly-eval
+msgbatch_01ABC… completed 2026-08-30T02:00:09Z nightly-eval
+msgbatch_01DEF… completed 2026-08-29T02:00:12Z None
+```
+
+This is the same lesson Unix `atq`, printer queues, and HPC `squeue`
+taught decades ago: submitters forget, queues remember. Losing the id
+is an inconvenience, not a loss.
+
+To make your job findable among many, label it at submit time:
+
+```python
+job = lm.batch(reqs, label="nightly-eval-2026-08-31")
+```
+
+The label rides the provider's metadata field. If a provider's wire
+has nowhere to carry it, submitting with a label raises
+`UnsupportedFeatureError` — lm15 never silently drops what you asked
+for. Retrying a crashed submitter? List first, filter by label,
+submit only if absent — that pattern also protects you from paying
+twice for the same batch.
 
 ### Results
 
@@ -201,6 +234,13 @@ for chat and models:
 | status | `GET /v1/messages/batches/{id}` | `GET /v1/batches/{id}` | poll the long-running operation |
 | results | `GET results_url` → JSONL, one Messages response per line | `GET /v1/files/{output_file_id}/content` (+ `error_file_id`) → JSONL | operation response inline, or output file |
 | cancel | `POST …/cancel` | `POST …/cancel` | batch cancel |
+| list | `GET /v1/messages/batches` (paginated) | `GET /v1/batches` (paginated) | `batches.list` |
+
+Capture-campaign verification items: which providers carry a
+job-level label (OpenAI `metadata` — yes; Gemini `displayName` —
+yes; Anthropic — verify at capture time) and whether any batch-create
+endpoint accepts a true idempotency key (map through `extensions` if
+so).
 
 The load-bearing fact: **every per-entry result body is a normal chat
 response in that provider's wire format.** Batch build reuses the
@@ -263,12 +303,41 @@ status.
    Providers disagree on the buckets; normalizing them is additive
    later. Trade-off: progress bars need provider-specific code for
    now.
+9. **Enumerability is a core operation, not a nicety.** `lm.batches()`
+   (pure op: `batch_list`) exists because forty years of job systems
+   (`atq`, `lpq`, `squeue`, cloud ListJobs) converged on the same
+   truth: submitters forget, queues remember. All three providers
+   ship a list endpoint, so the coat-check attendant is free.
+   Recovery from a lost id must never depend on the user having been
+   careful.
+10. **Optional `label=` on submit**, surfaced as `job.label` and
+    filterable client-side from `batches()`. Mapped to provider
+    metadata; where the wire cannot carry it, raise — the no-silent-
+    drop invariant applies to labels like everything else. Trade-off:
+    cross-provider code that labels must handle the raise or skip the
+    label.
+11. **No hidden local journal** (rejected: auto-writing
+    `~/.local/state/lm15/batches.jsonl` on submit). Named reason: a
+    journal is prior art for tools that ARE the system of record
+    (git, terraform); here the provider is, and it is enumerable.
+    lm15's stated culture is "reads nothing implicitly" — a library
+    that secretly writes state breaks the same promise, misbehaves in
+    containers and multi-tenant apps, and creates a second truth that
+    drifts from the first. Users who want a journal write one line in
+    their own storage.
+12. **No `get_or_submit(label=...)`** (rejected: Kubernetes-style
+    idempotent named create). Named reason: no provider enforces
+    label uniqueness server-side, so the API would imply a race-free
+    guarantee lm15 cannot keep — two processes can still double-
+    submit. The honest form is the documented pattern (list → filter
+    by label → submit if absent) plus real idempotency keys via
+    `extensions` wherever a provider ever offers one.
 
 ## What ratification would unlock, in order
 
 1. Type/vocab changes (`BatchStatus`, `BatchJobInfo`, `BatchEntry`,
    serde kinds) — offline.
-2. Reference implementation: the four ops × three providers + the
+2. Reference implementation: the five ops × three providers + the
    `BatchJob` handle + async twins, tests against synthetic bodies.
 3. Live capture campaign (one tiny real batch per provider — costs
    cents) → pinned bodies, cases, goldens.
