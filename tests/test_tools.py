@@ -366,7 +366,16 @@ def test_dict_with_non_str_keys_rejected() -> None:
 
 
 def test_builtin_without_signature_rejected() -> None:
+    # ``iter`` has no introspectable signature on every supported CPython.
     with pytest.raises(ToolDerivationError, match=r"not introspectable"):
+        tool(iter)
+
+
+def test_builtin_map_rejected_on_every_python() -> None:
+    # ``map`` gained an introspectable signature in newer CPython. Old
+    # versions reject it as non-introspectable; new versions reject its
+    # positional-only parameter. Both paths must stay ToolDerivationError.
+    with pytest.raises(ToolDerivationError, match=r"not introspectable|positional-only"):
         tool(map)
 
 

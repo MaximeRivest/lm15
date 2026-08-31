@@ -228,6 +228,38 @@ def op_validate(msg: JsonObject) -> JsonObject:
     return {"ok": True, "normalized": to_dict(obj)}
 
 
+def op_explain_auth(msg: JsonObject) -> JsonObject:
+    """AUTH-7 resolution chain over harness-supplied inputs only.
+
+    The harness owns every input: ``env`` (always passed, even empty, so the
+    real process environment never leaks in), ``api_keys_providers`` planted
+    with the fixture sentinel, and ``credentials_path`` pointing at a
+    harness-materialized borrowed file. ``report_text`` carries every human
+    rendering so the harness can enforce AUTH-5 (sentinel absence) itself.
+    """
+    from .doctor import explain_auth
+
+    provider = str(msg["provider"])
+    sentinel = str(msg["sentinel"])
+    kwargs: dict[str, Any] = {"env": {str(k): str(v) for k, v in (msg.get("env") or {}).items()}}
+    providers = msg.get("api_keys_providers") or []
+    if providers:
+        kwargs["api_keys"] = {str(p): sentinel for p in providers}
+    credentials_path = msg.get("credentials_path")
+    if credentials_path is not None:
+        if provider == "claude-code":
+            kwargs["claude_credentials_path"] = str(credentials_path)
+        else:
+            kwargs["codex_auth_path"] = str(credentials_path)
+
+    report = explain_auth(provider, **kwargs)
+    return {
+        "configured": report.configured,
+        "steps": [{"kind": step.kind, "state": step.state} for step in report.steps],
+        "report_text": "\n".join((report.describe(), repr(report), str(report))),
+    }
+
+
 def op_surface_dump(msg: JsonObject) -> JsonObject:
     return {
         "types": _reflect_types(),
@@ -298,6 +330,7 @@ HANDLERS: dict[str, Callable[[JsonObject], JsonObject]] = {
     "serde_roundtrip": op_serde_roundtrip,
     "validate": op_validate,
     "surface_dump": op_surface_dump,
+    "explain_auth": op_explain_auth,
 }
 
 

@@ -25,6 +25,7 @@ pytestmark = pytest.mark.skipif(
 ALL_OPS = [
     "build_request",
     "capabilities",
+    "explain_auth",
     "normalize_error",
     "parse_response",
     "replay_stream",

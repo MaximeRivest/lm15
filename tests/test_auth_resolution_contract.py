@@ -42,19 +42,6 @@ def _materialize_borrowed_file(tmp_path: Path, state: str) -> str | None:
     return str(path)
 
 
-def _step_kind(source: str) -> str:
-    """Map the human display source to the fixture's language-neutral kind."""
-    if source == "explicit api_keys entry":
-        return "api_keys"
-    if source.startswith("env $"):
-        return f"env:{source.removeprefix('env $')}"
-    if source == "local-server placeholder key":
-        return "placeholder"
-    if source.startswith("local OAuth credential"):
-        return "oauth-file"
-    raise AssertionError(f"unmapped auth step source: {source!r}")
-
-
 @pytest.mark.parametrize("case", CASES, ids=[case["id"] for case in CASES])
 def test_auth_resolution_contract_case(case: dict, tmp_path: Path) -> None:
     kwargs: dict = {"env": case.get("env", {})}
@@ -69,7 +56,7 @@ def test_auth_resolution_contract_case(case: dict, tmp_path: Path) -> None:
 
     expect = case["expect"]
     assert report.configured is expect["configured"], case["id"]
-    actual_steps = [{"kind": _step_kind(step.source), "state": step.state} for step in report.steps]
+    actual_steps = [{"kind": step.kind, "state": step.state} for step in report.steps]
     assert actual_steps == expect["steps"], case["id"]
 
     # AUTH-5: the planted sentinel must never surface in any rendering.

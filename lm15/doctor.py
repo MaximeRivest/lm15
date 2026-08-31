@@ -55,9 +55,15 @@ class AuthStep:
     - ``"shadowed"`` — usable, but an earlier rung wins;
     - ``"absent"`` — nothing here.
 
+    ``kind`` is the language-neutral source identifier from the contract
+    fixtures (lm15-contract/auth/resolution.json): ``"api_keys"``,
+    ``"env:<VAR>"``, ``"placeholder"``, or ``"oauth-file"``. Conformance
+    compares kinds, never display strings.
+
     ``detail`` is human text and carries no secret material by construction.
     """
 
+    kind: str
     source: str
     detail: str
     state: str
@@ -115,10 +121,10 @@ def _oauth_step(provider: str, path_override: str | None) -> AuthStep:
     source = f"local OAuth credential {path}"
     credential = reader(path)
     if credential is None:
-        return AuthStep(source=source, detail="missing or unreadable", state="absent")
+        return AuthStep(kind="oauth-file", source=source, detail="missing or unreadable", state="absent")
     detail = _expiry_detail(credential)
     state = "selected" if ("expired" not in detail or credential.refresh_token) else "absent"
-    return AuthStep(source=source, detail=detail, state=state)
+    return AuthStep(kind="oauth-file", source=source, detail=detail, state=state)
 
 
 def explain_auth(
@@ -157,6 +163,7 @@ def explain_auth(
     if has_entry:
         steps.append(
             AuthStep(
+                kind="api_keys",
                 source="explicit api_keys entry",
                 detail="provided (value never shown)",
                 state="selected",
@@ -164,21 +171,33 @@ def explain_auth(
         )
         selected = True
     else:
-        steps.append(AuthStep(source="explicit api_keys entry", detail="not provided", state="absent"))
+        steps.append(
+            AuthStep(
+                kind="api_keys",
+                source="explicit api_keys entry",
+                detail="not provided",
+                state="absent",
+            )
+        )
 
     for key in _declared_env_keys(canonical, ADAPTERS):
         if environment.get(key):
             state = "shadowed" if selected else "selected"
-            steps.append(AuthStep(source=f"env ${key}", detail="set (value never shown)", state=state))
+            steps.append(
+                AuthStep(kind=f"env:{key}", source=f"env ${key}", detail="set (value never shown)", state=state)
+            )
             selected = True
         else:
-            steps.append(AuthStep(source=f"env ${key}", detail="not set", state="absent"))
+            steps.append(
+                AuthStep(kind=f"env:{key}", source=f"env ${key}", detail="not set", state="absent")
+            )
 
     route = CHAT_PRESET_ROUTES.get(canonical)
     if route is not None and route.default_key is not None:
         state = "shadowed" if selected else "selected"
         steps.append(
             AuthStep(
+                kind="placeholder",
                 source="local-server placeholder key",
                 detail=f"preset default for keyless {canonical} servers",
                 state=state,
