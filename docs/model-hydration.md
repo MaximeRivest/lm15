@@ -29,7 +29,6 @@ verbatim and never cleaned.
 | `aliases`    | array of string | omitted when empty |
 | `origin`     | ModelOrigin     | omitted when it is the default `{"type": "provider"}` |
 | `inference`  | InferenceModelInfo | omitted when absent |
-| `training`   | TrainingModelInfo  | omitted when absent |
 | `extensions` | object (opaque) | omitted when absent; contents verbatim |
 
 `ModelInfo.compat` is runtime-only configuration and is NOT part of the
@@ -47,22 +46,11 @@ canonical JSON; it never serializes and always deserializes to `None`.
 `supports_reasoning` (bool, omitted when false), `reasoning_efforts`
 (array of string), `pricing` (InferencePricing), `extensions` (opaque).
 
-### TrainingModelInfo
-
-`supports_lora` / `supports_full_finetune` (bool, omitted when false),
-`trainable_modalities` (array of string), `pricing` (TrainingPricing),
-`extensions` (opaque).
-
 ### InferencePricing
 
 `input_per_million`, `output_per_million`, `cache_read_per_million`,
 `cache_write_per_million` (non-negative number|null), `currency` (string,
 default `"USD"`), `dimensions` (opaque object).
-
-### TrainingPricing
-
-`training_tokens_per_million`, `gpu_second` (non-negative number|null),
-`currency` (string, default `"USD"`), `dimensions` (opaque object).
 
 Validation lives in the constructors: negative prices, empty modality
 strings, non-positive context windows, and empty required strings raise

@@ -19,12 +19,6 @@ class EndpointSupport:
     responses_api: bool = False
     models: bool = False
 
-    # Future training/post-training endpoint families. These are separate from
-    # inference Requests: OpenAI-style fine-tuning is job-based, while
-    # Tinker-style APIs are interactive training sessions.
-    fine_tuning: bool = False
-    training_session: bool = False
-
     # Escape hatch for endpoint names not yet promoted to typed booleans.
     extra: frozenset[str] = field(default_factory=frozenset)
 

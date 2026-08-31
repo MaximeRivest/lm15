@@ -226,8 +226,9 @@ model = ModelInfo(
 ```
 
 Capabilities are endpoint-specific. `ModelInfo.inference` describes inference
-capabilities. `ModelInfo.training` is reserved for future fine-tuning or
-Tinker-style training APIs.
+capabilities; new endpoint families can be described later without touching
+it. Fine-tune provenance lives on `ModelOrigin` (`type`, `base_model`) —
+lm15 does inference with tuned models, not training.
 
 ## Model registry
 
@@ -278,21 +279,6 @@ if pricing is not None:
     )
     print(cost, pricing.currency)
 ```
-
-## Endpoint support and future training APIs
-
-`EndpointSupport` now includes future-oriented flags:
-
-```python
-supports.fine_tuning
-supports.training_session
-supports.supports_endpoint("fine_tuning")
-```
-
-These do not implement fine-tuning by themselves. They keep provider manifests
-from becoming inference-only, so later OpenAI-style fine-tuning jobs or
-Tinker-style interactive training sessions can be added as separate endpoint
-families rather than being squeezed into `Request`.
 
 ## Design rules
 

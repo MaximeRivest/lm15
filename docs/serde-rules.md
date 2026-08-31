@@ -52,7 +52,6 @@ any language.
    - `Config.temperature`, `Config.top_p`
    - `InferencePricing.input_per_million`, `.output_per_million`,
      `.cache_read_per_million`, `.cache_write_per_million`
-   - `TrainingPricing.training_tokens_per_million`, `.gpu_second`
    - `retry_after` on lm15 errors (rate-limit metadata, not serde, but
      float-typed under the same rule)
 2. **Int fields always serialize as JSON ints** (`2`, never `2.0`):

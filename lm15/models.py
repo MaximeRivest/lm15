@@ -3,9 +3,10 @@ lm15.models — Optional model metadata and registry utilities.
 
 The canonical inference request remains Request(model="..."). ModelInfo and
 ModelRegistry are optional helpers for model discovery, validation, routing, and
-cost estimation. Model capabilities are endpoint-specific so the abstraction can
-later describe fine-tuning or Tinker-style training without breaking the
-inference model.
+cost estimation. Model capabilities are endpoint-specific (`inference` today)
+so new endpoint families can be described later without breaking the
+inference model. Fine-tune PROVENANCE stays describable through ModelOrigin
+(`type`, `base_model`) — lm15 does inference with tuned models, not training.
 """
 
 from __future__ import annotations
@@ -118,24 +119,6 @@ class InferencePricing:
         return total
 
 
-@dataclass(frozen=True, slots=True)
-class TrainingPricing:
-    """Reserved for future fine-tuning/Tinker-style training endpoints."""
-
-    training_tokens_per_million: float | None = None
-    gpu_second: float | None = None
-    currency: str = "USD"
-    dimensions: JsonObject | None = None
-
-    def __post_init__(self) -> None:
-        _check_non_negative_or_none(self.training_tokens_per_million, "training_tokens_per_million")
-        _check_non_negative_or_none(self.gpu_second, "gpu_second")
-        _coerce_float_field(self, "training_tokens_per_million")
-        _coerce_float_field(self, "gpu_second")
-        _check_nonempty_text(self.currency, "currency")
-        _check_json_object_or_none(self.dimensions, "dimensions")
-
-
 # ─── Endpoint-specific model capabilities ────────────────────────────
 
 
@@ -168,23 +151,6 @@ class InferenceModelInfo:
 
 
 @dataclass(frozen=True, slots=True)
-class TrainingModelInfo:
-    """Reserved but intentionally present so ModelInfo is not inference-only."""
-
-    supports_lora: bool = False
-    supports_full_finetune: bool = False
-    trainable_modalities: tuple[str, ...] = ()
-    pricing: TrainingPricing | None = None
-    extensions: JsonObject | None = None
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "trainable_modalities", tuple(self.trainable_modalities))
-        if any(not isinstance(v, str) or not v for v in self.trainable_modalities):
-            raise ValueError("trainable_modalities must contain non-empty strings")
-        _check_json_object_or_none(self.extensions, "extensions")
-
-
-@dataclass(frozen=True, slots=True)
 class ModelOrigin:
     type: str = "provider"
     id: str | None = None
@@ -208,7 +174,6 @@ class ModelInfo:
     aliases: tuple[str, ...] = ()
     origin: ModelOrigin = field(default_factory=ModelOrigin)
     inference: InferenceModelInfo | None = None
-    training: TrainingModelInfo | None = None
     compat: CompatProfile | None = None
     extensions: JsonObject | None = None
 

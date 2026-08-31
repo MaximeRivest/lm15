@@ -25,8 +25,6 @@ from .models import (
     ModelInfo,
     ModelOrigin,
     ModelRegistry,
-    TrainingModelInfo,
-    TrainingPricing,
 )
 from .types import JsonObject
 
@@ -45,8 +43,6 @@ __all__ = [
     "OpenAIResponsesCompat",
     "ProviderProfile",
     "ResolvedOpenAIResponsesCompat",
-    "TrainingModelInfo",
-    "TrainingPricing",
     "resolve_openai_responses_compat",
 ]
 

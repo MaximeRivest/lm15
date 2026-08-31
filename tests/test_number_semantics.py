@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from lm15.models import InferencePricing, TrainingPricing
+from lm15.models import InferencePricing
 from lm15.serde import config_to_dict, request_to_dict
 from lm15.types import (
     AudioFormat,
@@ -59,9 +59,6 @@ def test_pricing_rates_are_float_fields():
     p = InferencePricing(input_per_million=3, output_per_million=15)
     assert type(p.input_per_million) is float
     assert type(p.output_per_million) is float
-    t = TrainingPricing(training_tokens_per_million=25, gpu_second=2)
-    assert type(t.training_tokens_per_million) is float
-    assert type(t.gpu_second) is float
 
 
 # ─── One wire form: int fields ───────────────────────────────────────

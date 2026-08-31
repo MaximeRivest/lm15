@@ -15,8 +15,6 @@ from .models import (
     InferencePricing,
     ModelInfo,
     ModelOrigin,
-    TrainingModelInfo,
-    TrainingPricing,
 )
 from .types import (
     AudioDelta,
@@ -693,24 +691,6 @@ def _inference_pricing_from_dict(d: dict[str, Any]) -> InferencePricing:
     )
 
 
-def _training_pricing_to_dict(p: TrainingPricing) -> dict[str, Any]:
-    return _clean_mapping({
-        "training_tokens_per_million": p.training_tokens_per_million,
-        "gpu_second": p.gpu_second,
-        "currency": p.currency,
-        "dimensions": p.dimensions,
-    })
-
-
-def _training_pricing_from_dict(d: dict[str, Any]) -> TrainingPricing:
-    return TrainingPricing(
-        training_tokens_per_million=d.get("training_tokens_per_million"),
-        gpu_second=d.get("gpu_second"),
-        currency=d.get("currency", "USD"),
-        dimensions=d.get("dimensions"),
-    )
-
-
 def _inference_model_info_to_dict(i: InferenceModelInfo) -> dict[str, Any]:
     return _clean_mapping({
         "input_modalities": list(i.input_modalities),
@@ -733,26 +713,6 @@ def _inference_model_info_from_dict(d: dict[str, Any]) -> InferenceModelInfo:
         supports_reasoning=d.get("supports_reasoning", False),
         reasoning_efforts=tuple(d.get("reasoning_efforts", [])),
         pricing=_inference_pricing_from_dict(d["pricing"]) if isinstance(d.get("pricing"), dict) else None,
-        extensions=d.get("extensions"),
-    )
-
-
-def _training_model_info_to_dict(t: TrainingModelInfo) -> dict[str, Any]:
-    return _clean_mapping({
-        "supports_lora": t.supports_lora or None,
-        "supports_full_finetune": t.supports_full_finetune or None,
-        "trainable_modalities": list(t.trainable_modalities),
-        "pricing": _training_pricing_to_dict(t.pricing) if t.pricing else None,
-        "extensions": t.extensions,
-    })
-
-
-def _training_model_info_from_dict(d: dict[str, Any]) -> TrainingModelInfo:
-    return TrainingModelInfo(
-        supports_lora=d.get("supports_lora", False),
-        supports_full_finetune=d.get("supports_full_finetune", False),
-        trainable_modalities=tuple(d.get("trainable_modalities", [])),
-        pricing=_training_pricing_from_dict(d["pricing"]) if isinstance(d.get("pricing"), dict) else None,
         extensions=d.get("extensions"),
     )
 
@@ -786,7 +746,6 @@ def model_info_to_dict(m: ModelInfo) -> dict[str, Any]:
         "aliases": list(m.aliases),
         "origin": origin,
         "inference": _inference_model_info_to_dict(m.inference) if m.inference else None,
-        "training": _training_model_info_to_dict(m.training) if m.training else None,
         "extensions": m.extensions,
     })
 
@@ -799,7 +758,6 @@ def model_info_from_dict(d: dict[str, Any]) -> ModelInfo:
         aliases=tuple(d.get("aliases", [])),
         origin=_model_origin_from_dict(d["origin"]) if isinstance(d.get("origin"), dict) else ModelOrigin(),
         inference=_inference_model_info_from_dict(d["inference"]) if isinstance(d.get("inference"), dict) else None,
-        training=_training_model_info_from_dict(d["training"]) if isinstance(d.get("training"), dict) else None,
         extensions=d.get("extensions"),
     )
 

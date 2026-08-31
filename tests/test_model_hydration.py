@@ -32,11 +32,6 @@ FULL = {
             "currency": "USD",
         },
     },
-    "training": {
-        "supports_lora": True,
-        "trainable_modalities": ["text"],
-        "pricing": {"training_tokens_per_million": 25.0, "currency": "USD"},
-    },
     "extensions": {"vendor": {"empty": {}}},
 }
 
@@ -67,7 +62,6 @@ def test_round_trip_preserves_types():
     info = model_info_from_dict(FULL)
     assert isinstance(info.inference.pricing, InferencePricing)
     assert info.inference.pricing.cache_read_per_million == 0.3
-    assert info.training.pricing.training_tokens_per_million == 25.0
     assert info.origin.base_model == "omega-3"
     assert info.aliases == ("omega-4-latest",)
 
