@@ -23,8 +23,6 @@ from lm15.types import (
     ContinuationDelta,
     ContinuationState,
     DocumentPart,
-    EmbeddingRequest,
-    EmbeddingResponse,
     FileUploadRequest,
     FunctionTool,
     ImageDelta,
@@ -290,7 +288,7 @@ def test_function_tool_is_explicit_serializable_spec() -> None:
 
 def test_endpoint_request_bases_validate_model_and_prompt() -> None:
     with pytest.raises(ValueError, match="model is required"):
-        EmbeddingRequest(model="", inputs=("hello",))
+        ImageGenerationRequest(model="", prompt="draw a duck")
 
     with pytest.raises(ValueError, match="prompt is required"):
         ImageGenerationRequest(model="m", prompt="")
@@ -489,17 +487,6 @@ def test_reasoning_off_rejects_budgets() -> None:
         Reasoning(effort="off", thinking_budget=10)
     with pytest.raises(ValueError, match="effort='off'"):
         Reasoning(effort="off", total_budget=20)
-
-
-def test_embedding_response_validates_payload() -> None:
-    with pytest.raises(ValueError, match="requires model"):
-        EmbeddingResponse(model="", vectors=((1.0,),))
-    with pytest.raises(ValueError, match="at least one vector"):
-        EmbeddingResponse(model="m", vectors=())
-    with pytest.raises(ValueError, match="vectors cannot be empty"):
-        EmbeddingResponse(model="m", vectors=((),))
-    with pytest.raises(ValueError, match="finite"):
-        EmbeddingResponse(model="m", vectors=((float("nan"),),))
 
 
 def test_generated_media_optional_strings_reject_empty() -> None:

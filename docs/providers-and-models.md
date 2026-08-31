@@ -31,8 +31,8 @@ detail: the list of providers, the shortcuts, and the metadata.
 | provider | string | key you need | beyond chat |
 |---|---|---|---|
 | Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | files, batch |
-| OpenAI | `openai` | `OPENAI_API_KEY` | live voice, embeddings, files, batch, images, audio |
-| Google Gemini | `gemini` | `GEMINI_API_KEY` | live voice, embeddings, files, batch, images, audio |
+| OpenAI | `openai` | `OPENAI_API_KEY` | live voice, files, batch, images, audio |
+| Google Gemini | `gemini` | `GEMINI_API_KEY` | live voice, files, batch, images, audio |
 | Groq | `groq` | `GROQ_API_KEY` | — |
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | — |
 | ollama (local) | `ollama` | none | — |

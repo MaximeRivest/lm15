@@ -24,8 +24,6 @@ from ..types import (
     AudioGenerationResponse,
     BatchRequest,
     BatchResponse,
-    EmbeddingRequest,
-    EmbeddingResponse,
     FileUploadRequest,
     FileUploadResponse,
     ImageGenerationRequest,
@@ -268,9 +266,6 @@ class BaseProviderLM:
 
     def live(self, config: LiveConfig) -> LiveSession:
         raise UnsupportedFeatureError(f"{self.provider}: live not supported", provider=self.provider)
-
-    def embeddings(self, request: EmbeddingRequest) -> EmbeddingResponse:
-        raise UnsupportedFeatureError(f"{self.provider}: embeddings not supported", provider=self.provider)
 
     def file_upload(self, request: FileUploadRequest) -> FileUploadResponse:
         raise UnsupportedFeatureError(f"{self.provider}: file upload not supported", provider=self.provider)

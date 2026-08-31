@@ -225,6 +225,6 @@ across all three. See [../using-the-router.md](../using-the-router.md).
 
 - [02 — Multi-turn conversations](02-conversations.md)
 - [10 — Audio, video & reasoning models](10-audio-video-reasoning.md)
-- [12 — Embeddings, batch & media generation](12-embeddings-batch-generation.md)
+- [12 — Batch & media generation](12-batch-media-generation.md)
 - [15 — Errors, retries & testing](15-errors-and-testing.md)
 - [../using-the-router.md](../using-the-router.md)

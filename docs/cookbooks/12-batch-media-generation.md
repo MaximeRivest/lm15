@@ -1,10 +1,10 @@
-# Embeddings, batch & media generation
+# Batch & media generation
 
-**Problem** — Not everything is chat. You need vectors for retrieval,
-half-price overnight batches, a generated image, or spoken audio — and
-each provider hides these behind a different endpoint. lm15 gives them
-one request type each: `EmbeddingRequest`, `BatchRequest`,
-`ImageGenerationRequest`, `AudioGenerationRequest`.
+**Problem** — Not everything is chat. You need half-price overnight
+batches, a generated image, or spoken audio — and each provider hides
+these behind a different endpoint. lm15 gives them one request type
+each: `BatchRequest`, `ImageGenerationRequest`,
+`AudioGenerationRequest`.
 
 **These surfaces are provisional.** The chat core is frozen by the
 cross-language contract; the non-chat endpoints work and are
@@ -19,55 +19,6 @@ The router routes chat; the non-chat methods live on the provider LM.
 `router.lm()` is the bridge: resolve once, get the configured LM, call
 its endpoint methods directly.
 
-### Embeddings
-
-```python
-import base64
-import math
-from pathlib import Path
-
-from lm15 import (
-    AudioGenerationRequest, BatchRequest, EmbeddingRequest,
-    ImageGenerationRequest, LMRouter, Message, Request,
-)
-
-router = LMRouter()
-openai = router.lm("openai:text-embedding-3-small")
-
-emb = openai.embeddings(EmbeddingRequest(
-    model="text-embedding-3-small",
-    inputs=(
-        "the cat sat on the mat",
-        "a feline rested on the rug",
-        "quarterly revenue grew 12%",
-    ),
-))
-print(emb.model, len(emb.vectors), "vectors of dim", len(emb.vectors[0]))
-print(emb.usage)
-```
-```output
-text-embedding-3-small 3 vectors of dim 1536
-Usage(input_tokens=20, output_tokens=0, total_tokens=20, …)
-```
-
-`vectors` is a tuple of float tuples, validated finite — feed it to
-whatever store you use. lm15 does not compute similarity; that is four
-lines of stdlib:
-
-```python
-def cosine(a, b):
-    dot = sum(x * y for x, y in zip(a, b))
-    return dot / math.sqrt(sum(x * x for x in a) * sum(y * y for y in b))
-
-v = emb.vectors
-print(f"cat~feline  {cosine(v[0], v[1]):.3f}")
-print(f"cat~revenue {cosine(v[0], v[2]):.3f}")
-```
-```output
-cat~feline  0.647
-cat~revenue 0.096
-```
-
 ### Batch
 
 A `BatchRequest` nests ordinary `Request` objects, each carrying its
@@ -75,6 +26,15 @@ own model. Anthropic's Message Batches API is a true server-side queue
 — half price, results within 24 hours:
 
 ```python
+import base64
+from pathlib import Path
+
+from lm15 import (
+    AudioGenerationRequest, BatchRequest,
+    ImageGenerationRequest, LMRouter, Message, Request,
+)
+
+router = LMRouter()
 anthropic = router.lm("claude-sonnet-4-5")
 sub = anthropic.batch_submit(BatchRequest(requests=(
     Request(model="claude-sonnet-4-5",
@@ -145,26 +105,25 @@ Trust `media_type`, not `format`, when naming the file.
 ## How it works
 
 Each endpoint is a frozen request/response dataclass pair plus one
-method on the LM (`embeddings`, `batch_submit`, `image_generate`,
+method on the LM (`batch_submit`, `image_generate`,
 `audio_generate`). The base LM raises `UnsupportedFeatureError` for
-endpoints a provider lacks — Anthropic has no embeddings API, so:
+endpoints a provider lacks — Anthropic has no image API, so:
 
 ```python
 from lm15 import UnsupportedFeatureError
 try:
-    anthropic.embeddings(EmbeddingRequest(model="x", inputs=("hi",)))
+    anthropic.image_generate(ImageGenerationRequest(model="x", prompt="hi"))
 except UnsupportedFeatureError as e:
     print(e)
 ```
 ```output
-anthropic: embeddings not supported
+anthropic: image generation not supported
 ```
 
 (`try/except` here because the error *is* the lesson.) On the wire,
 each method maps to the provider's native endpoint: OpenAI
-`/embeddings`, `/images/generations`, `/audio/speech`, `/batches`;
-Anthropic `/messages/batches`; Gemini `:embedContent` and
-`:batchEmbedContents`. `extensions` on every request is the
+`/images/generations`, `/audio/speech`, `/batches`; Anthropic
+`/messages/batches`. `extensions` on every request is the
 passthrough valve for fields lm15 does not model (recipe
 [16](16-provider-passthrough.md)).
 
@@ -174,19 +133,6 @@ provider LM, and the provisional methods live there — when these
 shapes freeze, the router may grow matching verbs.
 
 ## Variations
-
-- **Gemini embeddings** — same request, different model string; one
-  input uses `:embedContent`, several use `:batchEmbedContents`:
-
-  ```python
-  gem = router.lm("gemini-embedding-001")
-  r = gem.embeddings(EmbeddingRequest(
-      model="gemini-embedding-001", inputs=("the cat sat on the mat",)))
-  print(len(r.vectors), len(r.vectors[0]))
-  ```
-  ```output
-  1 3072
-  ```
 
 - **OpenAI batch is two-phase.** Without extensions, lm15 falls back
   to a local sequential fan-out — it calls `complete()` per nested
@@ -201,7 +147,7 @@ shapes freeze, the router may grow matching verbs.
   `responseModalities: ["IMAGE"]` and collects `ImagePart`s from the
   reply. Pick a model that supports the modality.
 - **Async mirror**: the LMs from `AsyncLMRouter().lm(...)` expose
-  awaitable `embeddings` / `batch_submit` / `image_generate` /
+  awaitable `batch_submit` / `image_generate` /
   `audio_generate` with identical types.
 - **Cost**: `gpt-image-1` bills per image even at `quality: "low"`;
   batch APIs are the discount path, local fan-out is not.

@@ -42,8 +42,6 @@ from ..types import (
     CitationPart,
     Config,
     DocumentPart,
-    EmbeddingRequest,
-    EmbeddingResponse,
     ErrorDetail,
     FileUploadRequest,
     FileUploadResponse,
@@ -308,13 +306,12 @@ class GeminiLM(BaseProviderLM):
     capabilities: Capabilities = Capabilities(
         input_modalities=frozenset({"text", "image", "audio", "video", "document", "binary"}),
         output_modalities=frozenset({"text", "image", "audio"}),
-        features=frozenset({"streaming", "tools", "json_output", "live", "embeddings", "files", "batch", "images", "audio"}),
+        features=frozenset({"streaming", "tools", "json_output", "live", "files", "batch", "images", "audio"}),
     )
     supports: ClassVar[EndpointSupport] = EndpointSupport(
         complete=True,
         stream=True,
         live=True,
-        embeddings=True,
         files=True,
         batches=True,
         images=True,
@@ -1293,25 +1290,6 @@ class GeminiLM(BaseProviderLM):
             api_family="gemini_generate_content",
             id_of=id_of,
         )
-
-    def embeddings(self, request: EmbeddingRequest) -> EmbeddingResponse:
-        model_path = self._model_path(request.model)
-        if len(request.inputs) <= 1:
-            payload = {"model": model_path, "content": {"parts": [{"text": request.inputs[0] if request.inputs else ""}]}, **(request.extensions or {})}
-            resp = self._send(make_json_request(method="POST", url=f"{self.base_url.rstrip('/')}/{model_path}:embedContent", headers=self._auth_headers({"Content-Type": "application/json"}), payload=payload, read_timeout=60.0))
-            if resp.status >= 400:
-                raise self.normalize_error(resp.status, resp.text())
-            data = resp.json()
-            values = tuple(float(v) for v in (data.get("embedding", {}) or {}).get("values", []))
-            return EmbeddingResponse(model=request.model, vectors=(values,), provider_data=data)
-
-        payload = {"requests": [{"model": model_path, "content": {"parts": [{"text": value}]}} for value in request.inputs], **(request.extensions or {})}
-        resp = self._send(make_json_request(method="POST", url=f"{self.base_url.rstrip('/')}/{model_path}:batchEmbedContents", headers=self._auth_headers({"Content-Type": "application/json"}), payload=payload, read_timeout=60.0))
-        if resp.status >= 400:
-            raise self.normalize_error(resp.status, resp.text())
-        data = resp.json()
-        vectors = tuple(tuple(float(v) for v in (item.get("values") or [])) for item in data.get("embeddings", []))
-        return EmbeddingResponse(model=request.model, vectors=vectors, provider_data=data)
 
     def file_upload(self, request: FileUploadRequest) -> FileUploadResponse:
         url = build_url(f"{self.upload_base_url.rstrip('/')}/files", request.extensions)

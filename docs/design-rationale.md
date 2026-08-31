@@ -78,7 +78,7 @@ ported onto `AsyncGeminiLM` against the async transport; `complete()` and
 `stream()` invoke it first, mirroring the sync class.
 
 Endpoint status: `complete()` and `stream()` are the 1.0 async mirror. The
-non-chat endpoints (embeddings, file upload, batch, image, audio, live)
+non-chat endpoints (file upload, batch, image, audio, live)
 remain sync-only for now; the async classes implement them as methods that
 raise `UnsupportedFeatureError` ("use the sync adapter for this endpoint
 (async endpoints planned)") so the surface is honest rather than silently

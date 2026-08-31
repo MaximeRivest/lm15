@@ -37,8 +37,6 @@ from ..types import (
     CitationDelta,
     ContinuationState,
     CitationPart,
-    EmbeddingRequest,
-    EmbeddingResponse,
     ErrorDetail,
     FileUploadRequest,
     FileUploadResponse,
@@ -250,13 +248,12 @@ class OpenAILM(BaseProviderLM):
     capabilities: Capabilities = Capabilities(
         input_modalities=frozenset({"text", "image", "audio", "video", "document", "binary"}),
         output_modalities=frozenset({"text", "audio", "image"}),
-        features=frozenset({"streaming", "tools", "json_output", "reasoning", "live", "embeddings", "files", "batch", "images", "audio"}),
+        features=frozenset({"streaming", "tools", "json_output", "reasoning", "live", "files", "batch", "images", "audio"}),
     )
     supports: ClassVar[EndpointSupport] = EndpointSupport(
         complete=True,
         stream=True,
         live=True,
-        embeddings=True,
         files=True,
         batches=True,
         images=True,
@@ -1133,22 +1130,6 @@ class OpenAILM(BaseProviderLM):
             api_family="openai_responses",
             id_of=lambda entry: entry.get("id"),
         )
-
-    def embeddings(self, request: EmbeddingRequest) -> EmbeddingResponse:
-        resp = self._send(make_json_request(
-            method="POST",
-            url=f"{self.base_url.rstrip('/')}/embeddings",
-            headers=self._headers(),
-            payload={"model": request.model, "input": list(request.inputs), **(request.extensions or {})},
-            read_timeout=60.0,
-        ))
-        if resp.status >= 400:
-            raise self.normalize_error(resp.status, resp.text())
-        data = resp.json()
-        vectors = tuple(tuple(float(v) for v in item.get("embedding", [])) for item in data.get("data", []))
-        u = data.get("usage", {}) or {}
-        usage = Usage(input_tokens=int(u.get("prompt_tokens", 0) or 0), output_tokens=0, total_tokens=u.get("total_tokens"))
-        return EmbeddingResponse(model=str(data.get("model") or request.model), vectors=vectors, usage=usage, provider_data=data)
 
     def _multipart_file_body(self, *, purpose: str, filename: str, media_type: str, data: bytes) -> tuple[str, bytes]:
         boundary = f"lm15-{uuid.uuid4().hex}"

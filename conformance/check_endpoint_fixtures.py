@@ -23,8 +23,6 @@ from lm15.types import (  # noqa: E402
     AudioGenerationResponse,
     BatchRequest,
     BatchResponse,
-    EmbeddingRequest,
-    EmbeddingResponse,
     FileUploadRequest,
     FileUploadResponse,
     FunctionTool,
@@ -121,18 +119,6 @@ def run_case(case_id: str, fn: Callable[[], None]) -> EndpointResult:
         return EndpointResult(case_id, "fail", str(exc))
 
 
-def openai_embeddings() -> None:
-    transport = FakeTransport([json_response({"model": "text-embedding-3-small", "data": [{"embedding": [0.1, 0.2]}], "usage": {"prompt_tokens": 1, "total_tokens": 1}})])
-    lm = OpenAILM(api_key="test", transport=transport)
-    out = lm.embeddings(EmbeddingRequest(model="text-embedding-3-small", inputs=("hello",)))
-    req = transport.requests[0]
-    assert req.method == "POST"
-    assert req.url == "https://api.openai.com/v1/embeddings"
-    assert request_body(req)["input"] == ["hello"]
-    assert isinstance(out, EmbeddingResponse)
-    assert out.vectors == ((0.1, 0.2),)
-
-
 def openai_file_upload() -> None:
     transport = FakeTransport([json_response({"id": "file_1"})])
     lm = OpenAILM(api_key="test", transport=transport)
@@ -210,16 +196,6 @@ def anthropic_batch_submit() -> None:
     assert "/v1/messages/batches" in req.url
     assert isinstance(out, BatchResponse)
     assert out.status == "running"
-
-
-def gemini_embeddings() -> None:
-    transport = FakeTransport([json_response({"embedding": {"values": [0.1, 0.2, 0.3]}})])
-    lm = GeminiLM(api_key="test", transport=transport)
-    out = lm.embeddings(EmbeddingRequest(model="text-embedding-004", inputs=("hello",)))
-    req = transport.requests[0]
-    assert ":embedContent" in req.url
-    assert isinstance(out, EmbeddingResponse)
-    assert out.vectors == ((0.1, 0.2, 0.3),)
 
 
 def gemini_file_upload() -> None:
@@ -312,7 +288,6 @@ def openai_live_session_payload_shape() -> None:
 
 
 CASES: tuple[tuple[str, Callable[[], None]], ...] = (
-    ("openai.embeddings", openai_embeddings),
     ("openai.file_upload", openai_file_upload),
     ("openai.batch_submit", openai_batch_submit),
     ("openai.image_generate", openai_image_generate),
@@ -321,7 +296,6 @@ CASES: tuple[tuple[str, Callable[[], None]], ...] = (
     ("openai.live_session_payload_shape", openai_live_session_payload_shape),
     ("anthropic.file_upload", anthropic_file_upload),
     ("anthropic.batch_submit", anthropic_batch_submit),
-    ("gemini.embeddings", gemini_embeddings),
     ("gemini.file_upload", gemini_file_upload),
     ("gemini.image_generate", gemini_image_generate),
     ("gemini.live_url_shape", gemini_live_url_shape),

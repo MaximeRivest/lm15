@@ -22,7 +22,7 @@ conformance/
 ├── check_request_fixtures.py     # logical case → provider HTTP request
 ├── check_response_fixtures.py    # provider response/SSE → canonical Response
 ├── check_error_fixtures.py       # provider error body → typed lm15 error
-├── check_endpoint_fixtures.py    # embeddings/files/batch/image/audio/live
+├── check_endpoint_fixtures.py    # files/batch/image/audio/live
 ├── check_serde_fixtures.py       # canonical JSON round-trips
 ├── check_doc_drift.py            # unmapped doc params vs feature inventory
 ├── cross_sdk/
@@ -75,7 +75,7 @@ Each script writes both JSON and Markdown reports under
   metadata match.
 
 - **endpoint_fixtures**
-  Offline conformance for non-chat endpoints: embeddings, file upload, batch,
+  Offline conformance for non-chat endpoints: file upload, batch,
   image generation, audio generation, plus live URL/header and session shape.
 
 - **serde_fixtures**

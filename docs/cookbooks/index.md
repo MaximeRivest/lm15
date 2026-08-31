@@ -36,8 +36,8 @@ capture. Style rules live in [STYLE.md](STYLE.md).
 
 - [11 — Prompt caching](11-caching.md) — Cache breakpoints that cut cost
   on long prefixes, with real usage numbers before and after.
-- [12 — Embeddings, batch & media generation](12-embeddings-batch-generation.md)
-  — The non-chat endpoints: vectors, async batches, image generation.
+- [12 — Batch & media generation](12-batch-media-generation.md)
+  — The non-chat endpoints: async batches, image and audio generation.
 - [13 — Live sessions (realtime)](13-live-sessions.md) — Bidirectional
   sessions over websockets: events in, audio and text out.
 

@@ -58,7 +58,7 @@ expected provider fixture
         ├── validate_live.py can send the request to the real API
         ├── check_response_fixtures.py parses saved response bodies/SSE
         ├── check_error_fixtures.py normalizes provider error bodies
-        ├── check_endpoint_fixtures.py checks embeddings/files/batch/image/audio/live
+        ├── check_endpoint_fixtures.py checks files/batch/image/audio/live
         ├── check_serde_fixtures.py checks canonical JSON round trips
         └── check_doc_drift.py checks provider docs against features.yaml
 ```
@@ -154,7 +154,7 @@ A provider adapter is responsible for:
 - `parse_stream_events(...)` — map SSE chunks to `StreamEvent`s (the single
   stream-parse path per provider).
 - `normalize_error(status, body)` — map provider errors to `lm15.errors`.
-- Optional endpoint methods: `embeddings`, `file_upload`, `batch_submit`,
+- Optional endpoint methods: `file_upload`, `batch_submit`,
   `image_generate`, `audio_generate`, `live`.
 
 Keep provider-only options in `Config.extensions` rather than adding universal

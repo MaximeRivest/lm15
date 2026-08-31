@@ -25,8 +25,6 @@ from ..types import (
     AudioGenerationResponse,
     BatchRequest,
     BatchResponse,
-    EmbeddingRequest,
-    EmbeddingResponse,
     FileUploadRequest,
     FileUploadResponse,
     ImageGenerationRequest,
@@ -210,9 +208,6 @@ class OpenAICodexLM(OpenAILM):
 
     def live(self, config: LiveConfig) -> LiveSession:
         raise UnsupportedFeatureError("openai-codex: live is not supported", provider=self.provider)
-
-    def embeddings(self, request: EmbeddingRequest) -> EmbeddingResponse:
-        raise UnsupportedFeatureError("openai-codex: embeddings are not supported", provider=self.provider)
 
     def file_upload(self, request: FileUploadRequest) -> FileUploadResponse:
         raise UnsupportedFeatureError("openai-codex: file upload is not supported", provider=self.provider)

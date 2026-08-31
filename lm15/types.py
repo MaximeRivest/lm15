@@ -1987,61 +1987,6 @@ class Response:
         return self.parse_json(default=None)
 
 
-# ─── Embeddings ──────────────────────────────────────────────────────
-
-
-@dataclass(frozen=True, slots=True)
-class EmbeddingRequest(_ModelRequest):
-    inputs: tuple[str, ...]
-    extensions: Extensions | None = None
-
-    def __post_init__(self) -> None:
-        _ModelRequest.__post_init__(self)
-        inputs = (self.inputs,) if isinstance(self.inputs, str) else tuple(self.inputs)
-        object.__setattr__(self, "inputs", inputs)
-        if not self.inputs:
-            raise ValueError("inputs cannot be empty")
-        if any(not isinstance(x, str) or x == "" for x in self.inputs):
-            raise ValueError("inputs must contain non-empty strings")
-        _validate_extensions_field(self)
-
-
-@dataclass(frozen=True, slots=True)
-class EmbeddingResponse:
-    model: str
-    vectors: tuple[tuple[float, ...], ...]
-    usage: Usage = field(default_factory=Usage)
-    provider_data: ProviderData | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.model, str):
-            raise TypeError("EmbeddingResponse.model must be a string")
-        if self.model == "":
-            raise ValueError("EmbeddingResponse requires model")
-        if not isinstance(self.usage, Usage):
-            raise TypeError("EmbeddingResponse.usage must be a Usage")
-        vectors = tuple(tuple(v) for v in self.vectors)
-        if not vectors:
-            raise ValueError("EmbeddingResponse requires at least one vector")
-        for vector in vectors:
-            if not vector:
-                raise ValueError("EmbeddingResponse vectors cannot be empty")
-            for value in vector:
-                if isinstance(value, bool) or not isinstance(value, (int, float)):
-                    raise TypeError(
-                        "EmbeddingResponse vector elements must be numeric"
-                    )
-                if isinstance(value, float) and not _math.isfinite(value):
-                    raise ValueError(
-                        "EmbeddingResponse vector elements must be finite"
-                    )
-        # Number rule: vector elements are float-typed; same-valued ints coerce.
-        object.__setattr__(
-            self, "vectors", tuple(tuple(float(x) for x in vector) for vector in vectors)
-        )
-        _validate_json_field(self, "provider_data")
-
-
 # ─── File Upload ─────────────────────────────────────────────────────
 
 
@@ -2242,7 +2187,6 @@ class AudioGenerationResponse:
 
 EndpointRequest: TypeAlias = (
     Request
-    | EmbeddingRequest
     | FileUploadRequest
     | BatchRequest
     | ImageGenerationRequest
@@ -2251,7 +2195,6 @@ EndpointRequest: TypeAlias = (
 
 EndpointResponse: TypeAlias = (
     Response
-    | EmbeddingResponse
     | FileUploadResponse
     | BatchResponse
     | ImageGenerationResponse

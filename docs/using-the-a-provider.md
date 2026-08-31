@@ -16,7 +16,6 @@ Each LM exposes the same endpoint-oriented surface:
 complete(Request) -> Response
 stream(Request) -> Iterator[StreamEvent]
 live(LiveConfig) -> LiveSession
-embeddings(EmbeddingRequest) -> EmbeddingResponse
 file_upload(FileUploadRequest) -> FileUploadResponse
 batch_submit(BatchRequest) -> BatchResponse
 image_generate(ImageGenerationRequest) -> ImageGenerationResponse
@@ -213,16 +212,12 @@ Common extension keys used by built-in LMs:
 - `transport`: set to `"live"`, `"websocket"`, or `"ws"` to force live
   WebSocket completion for OpenAI/Gemini live-capable models.
 
-## Files, embeddings, images, and audio
+## Files, images, and audio
 
 Endpoint-specific request types also use the same LM surface.
 
 ```python
-from lm15.types import EmbeddingRequest, FileUploadRequest
-
-embeddings = lm.embeddings(
-    EmbeddingRequest(model="text-embedding-3-small", inputs=("hello", "world"))
-)
+from lm15.types import FileUploadRequest
 
 uploaded = lm.file_upload(
     FileUploadRequest(filename="notes.txt", bytes_data=b"hello", media_type="text/plain")

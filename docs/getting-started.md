@@ -314,8 +314,8 @@ is on [Authentication](authentication.md):
 
 ## Where next
 
-- Multimodal input, structured output, reasoning, caching, batch,
-  embeddings: sixteen [cookbook recipes](cookbooks/index.md), each with
+- Multimodal input, structured output, reasoning, caching, batch:
+  sixteen [cookbook recipes](cookbooks/index.md), each with
   real captured output.
 - The canonical types in depth:
   [Using the type system](using-the-type-system.md).

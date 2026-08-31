@@ -324,7 +324,7 @@ Two examples of natural and artificial colors are **red** and **blue**.
 Two common names for a color are **red** (or crimson) and **blue** (often called indigo, cobalt, or azure). Other examples include green, yellow, purple, and brown.
 ```
 
-The non-chat endpoints (embeddings, files, batch, image, audio, live) are
+The non-chat endpoints (files, batch, image, audio, live) are
 sync-only for now; the async classes raise `UnsupportedFeatureError` for them
 rather than pretending. Async endpoint mirrors are planned.
 
@@ -445,24 +445,27 @@ print(lm.complete(request).text)
 This image shows a blue atomic symbol, often used to represent an atom or atomic energy.
 ```
 
-Non-chat endpoints have separate request/response types — `EmbeddingRequest`,
+Non-chat endpoints have separate request/response types —
 `ImageGenerationRequest`, `AudioGenerationRequest`, `FileUploadRequest`,
-`BatchRequest`, `LiveConfig`:
+`BatchRequest`, `LiveConfig` — and generated media comes back as the same
+typed parts you send in:
 
 ```python
-from lm15 import EmbeddingRequest
+import base64
+from lm15 import ImageGenerationRequest
 
-embeddings = lm.embeddings(
-    EmbeddingRequest(
-        model="text-embedding-3-small",
-        inputs=("hello", "world"),
-    )
-)
-print(len(embeddings.vectors), len(embeddings.vectors[0]))
+img = lm.image_generate(ImageGenerationRequest(
+    model="gpt-image-1",
+    prompt="a minimal line drawing of a fox reading a book",
+    size="1024x1024",
+    extensions={"quality": "low"},
+))
+part = img.images[0]  # an ImagePart, same shape as image *inputs*
+print(part.media_type, len(base64.b64decode(part.data)), "bytes")
 ```
 
 ```output
-2 1536
+image/png 1156899 bytes
 ```
 
 ## Canonical JSON serialization

@@ -37,7 +37,6 @@ from ..types import (
     AudioGenerationRequest,
     BatchRequest,
     CacheConfig,
-    EmbeddingRequest,
     FileUploadRequest,
     ImageGenerationRequest,
     LiveConfig,
@@ -188,9 +187,6 @@ class AsyncBaseProviderLM:
 
     def live(self, config: LiveConfig):
         raise self._async_unsupported("live")
-
-    def embeddings(self, request: EmbeddingRequest):
-        raise self._async_unsupported("embeddings")
 
     def file_upload(self, request: FileUploadRequest):
         raise self._async_unsupported("file upload")
@@ -467,9 +463,6 @@ class AsyncOpenAICodexLM(AsyncBaseProviderLM):
 
     def live(self, config: LiveConfig):
         return self._inner.live(config)  # raises UnsupportedFeatureError
-
-    def embeddings(self, request: EmbeddingRequest):
-        return self._inner.embeddings(request)  # raises UnsupportedFeatureError
 
     def file_upload(self, request: FileUploadRequest):
         return self._inner.file_upload(request)  # raises UnsupportedFeatureError

@@ -89,8 +89,6 @@ from .types import (
     CitationDelta,
     ContinuationDelta,
     # auxiliary endpoints
-    EmbeddingRequest,
-    EmbeddingResponse,
     FileUploadRequest,
     FileUploadResponse,
     BatchRequest,
@@ -206,7 +204,7 @@ __all__ = [
     "StreamErrorEvent", "TextDelta", "ThinkingDelta", "AudioDelta",
     "ImageDelta", "ToolCallDelta", "CitationDelta", "ContinuationDelta",
     # auxiliary endpoints
-    "EmbeddingRequest", "EmbeddingResponse", "FileUploadRequest",
+    "FileUploadRequest",
     "FileUploadResponse", "BatchRequest", "BatchResponse",
     "ImageGenerationRequest", "ImageGenerationResponse",
     "AudioGenerationRequest", "AudioGenerationResponse", "AudioFormat",

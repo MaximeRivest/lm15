@@ -11,7 +11,7 @@ same discipline as the code — see
   serde, errors, request building, response parsing, streaming — is frozen
   by the cross-language contract and enforced mechanically (304 conformance
   checks, spec drift gate, surface ratchet).
-- Non-chat endpoints (embeddings, files, batch, image/audio generation) and
+- Non-chat endpoints (files, batch, image/audio generation) and
   live sessions work and are live-tested, but remain **provisional**: their
   shapes may still change before they are frozen.
 - **Shipped in the alpha** (additive, outside the frozen core, not yet

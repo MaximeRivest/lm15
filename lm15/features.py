@@ -12,7 +12,6 @@ class EndpointSupport:
     complete: bool = True
     stream: bool = True
     live: bool = False
-    embeddings: bool = False
     files: bool = False
     batches: bool = False
     images: bool = False

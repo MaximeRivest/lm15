@@ -188,10 +188,10 @@ Promoting a blessed key to canonical later is an additive spec change.
   and it replaces the `generationConfig` lm15 built, canonical knobs
   included. Prefer canonical fields; reach for `extensions` only for
   what they cannot say.
-- **Other endpoints.** `EmbeddingRequest`, `BatchRequest`,
-  `ImageRequest`, and `LiveConfig` carry the same `extensions` field,
-  and their responses the same `provider_data` (see
-  [recipe 12](12-embeddings-batch-generation.md)).
+- **Other endpoints.** `BatchRequest`, `ImageGenerationRequest`,
+  `AudioGenerationRequest`, and `LiveConfig` carry the same
+  `extensions` field, and their responses the same `provider_data`
+  (see [recipe 12](12-batch-media-generation.md)).
 
 ## See also
 
