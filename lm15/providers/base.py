@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Callable, ClassVar, Iterator, Protocol, Union
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Iterator, Protocol, Sequence, Union
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle guard for annotations
+    from ..batch import BatchJob
 
 from ..errors import (
     AuthError,
@@ -22,8 +25,10 @@ from ..transports import TransportError as NetworkTransportError
 from ..types import (
     AudioGenerationRequest,
     AudioGenerationResponse,
+    BATCH_TERMINAL_STATUSES,
+    BatchEntry,
+    BatchJobInfo,
     BatchRequest,
-    BatchResponse,
     FileUploadRequest,
     FileUploadResponse,
     ImageGenerationRequest,
@@ -270,9 +275,6 @@ class BaseProviderLM:
     def file_upload(self, request: FileUploadRequest) -> FileUploadResponse:
         raise UnsupportedFeatureError(f"{self.provider}: file upload not supported", provider=self.provider)
 
-    def batch_submit(self, request: BatchRequest) -> BatchResponse:
-        raise UnsupportedFeatureError(f"{self.provider}: batch submit not supported", provider=self.provider)
-
     def image_generate(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
         raise UnsupportedFeatureError(f"{self.provider}: image generation not supported", provider=self.provider)
 
@@ -300,6 +302,151 @@ class BaseProviderLM:
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
         return self._models_from_body(resp.text())
+
+    # ─── Batch jobs (third execution mode: complete / stream / batch) ───────
+    #
+    # Adapters override the pure hooks; the five drivers (batch_submit,
+    # batch_status, batch_results, batch_cancel, batch_list) are shared, as
+    # are the ergonomic verbs (batch, batch_job, batches) returning BatchJob
+    # handles.  Hooks are pure build/parse so the async twins and the future
+    # harness direction drive the same code.  There is NO local fan-out
+    # fallback: batch() means a provider-side queue or an honest error.
+
+    def _batch_unsupported(self) -> UnsupportedFeatureError:
+        return UnsupportedFeatureError(f"{self.provider}: batch not supported", provider=self.provider)
+
+    def _batch_upload_request(self, request: BatchRequest) -> TransportRequest | None:
+        """Optional pre-submit upload step (OpenAI's JSONL file); None = single-step."""
+        return None
+
+    def _batch_submit_request(self, request: BatchRequest, upload_body: "dict[str, Any] | None") -> TransportRequest:
+        raise self._batch_unsupported()
+
+    def _batch_job_from_body(self, body: str) -> BatchJobInfo:
+        raise self._batch_unsupported()
+
+    def _batch_status_request(self, batch_id: str) -> TransportRequest:
+        raise self._batch_unsupported()
+
+    def _batch_cancel_request(self, batch_id: str) -> TransportRequest:
+        raise self._batch_unsupported()
+
+    def _batch_result_fetches(self, status_body: "dict[str, Any]") -> "tuple[TransportRequest, ...]":
+        raise self._batch_unsupported()
+
+    def _batch_entries(self, status_body: "dict[str, Any]", fetched: "tuple[str, ...]") -> "tuple[BatchEntry, ...]":
+        raise self._batch_unsupported()
+
+    def _batch_list_request(self, limit: int) -> TransportRequest:
+        raise self._batch_unsupported()
+
+    def _batch_jobs_from_list_body(self, body: str) -> "tuple[BatchJobInfo, ...]":
+        raise self._batch_unsupported()
+
+    def batch_submit(self, request: BatchRequest) -> BatchJobInfo:
+        """Submit to the provider's batch queue; returns the ticket snapshot."""
+        upload_body = None
+        upload_req = self._batch_upload_request(request)
+        if upload_req is not None:
+            resp = self._send(upload_req)
+            if resp.status >= 400:
+                raise self.normalize_error(resp.status, resp.text())
+            upload_body = resp.json()
+        resp = self._send(self._batch_submit_request(request, upload_body))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return self._batch_job_from_body(resp.text())
+
+    def batch_status(self, batch_id: str) -> BatchJobInfo:
+        resp = self._send(self._batch_status_request(batch_id))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return self._batch_job_from_body(resp.text())
+
+    def batch_results(self, batch_id: str) -> "tuple[BatchEntry, ...]":
+        """Entries in submission order; raises ValueError while the job runs."""
+        resp = self._send(self._batch_status_request(batch_id))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        job = self._batch_job_from_body(resp.text())
+        if job.status not in BATCH_TERMINAL_STATUSES:
+            raise ValueError(
+                f"batch {batch_id} is not finished (status={job.status!r}); "
+                f"wait() or poll batch_status() until done"
+            )
+        status_body = resp.json()
+        texts = []
+        for fetch in self._batch_result_fetches(status_body):
+            fetched = self._send(fetch)
+            if fetched.status >= 400:
+                raise self.normalize_error(fetched.status, fetched.text())
+            texts.append(fetched.text())
+        return self._batch_entries(status_body, tuple(texts))
+
+    def batch_cancel(self, batch_id: str) -> BatchJobInfo:
+        """Request cancellation — a request, not a guarantee."""
+        resp = self._send(self._batch_cancel_request(batch_id))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return self._batch_job_from_body(resp.text())
+
+    def batch_list(self, limit: int = 20) -> "tuple[BatchJobInfo, ...]":
+        """Enumerate this credential's batch jobs, newest first.
+
+        The provider is the system of record; recovery from a lost id must
+        never depend on the user having been careful.
+        """
+        resp = self._send(self._batch_list_request(limit))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return self._batch_jobs_from_list_body(resp.text())
+
+    def batch(self, requests: "BatchRequest | Sequence[Request]", *, model: str | None = None,
+              label: str | None = None, extensions: "dict[str, Any] | None" = None) -> "BatchJob":
+        """Third execution mode: many requests, later, ~half price."""
+        from ..batch import BatchJob
+
+        if isinstance(requests, BatchRequest):
+            request = requests
+        else:
+            request = BatchRequest(model=model, requests=tuple(requests), label=label, extensions=extensions)
+        return BatchJob(self, self.batch_submit(request))
+
+    def batch_job(self, batch_id: str) -> "BatchJob":
+        """Re-attach to a submitted batch from its id (one status round trip)."""
+        from ..batch import BatchJob
+
+        return BatchJob(self, self.batch_status(batch_id))
+
+    def batches(self, limit: int = 20) -> "tuple[BatchJob, ...]":
+        """Lost the ticket? The queue remembers."""
+        from ..batch import BatchJob
+
+        return tuple(BatchJob(self, info) for info in self.batch_list(limit))
+
+
+def batch_entry_request(model: object) -> Request:
+    """Synthetic Request for parsing a batch entry body.
+
+    Batch results outlive the submitting process (re-attach by id), so the
+    original Request is not available; parse_response only reads
+    ``request.model`` as a fallback when the body lacks one, and every
+    batch entry body carries its model.
+    """
+    from ..types import Message
+
+    name = model if isinstance(model, str) and model else "batch"
+    return Request(model=name, messages=(Message.user("-"),))
+
+
+def batch_entry_http(body: "dict[str, Any]", status: int = 200) -> HttpResponse:
+    """Wrap a decoded batch entry body for the frozen parse_response path."""
+    return HttpResponse(
+        status=status,
+        reason="OK" if status < 400 else "Error",
+        headers=[("content-type", "application/json")],
+        body=json.dumps(body).encode("utf-8"),
+    )
 
 
 class UnsupportedLiveSession:

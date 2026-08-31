@@ -14,6 +14,7 @@ from ..errors import (
     RateLimitError,
     ServerError,
     TimeoutError,
+    UnsupportedFeatureError,
     UnsupportedModelError,
     canonical_error_code,
     map_http_error,
@@ -23,8 +24,9 @@ from ..protocols import Capabilities
 from ..sse import SSEEvent
 from ..transports import TransportRequest
 from ..types import (
+    BatchEntry,
+    BatchJobInfo,
     BatchRequest,
-    BatchResponse,
     BuiltinTool,
     CitationDelta,
     ContinuationDelta,
@@ -54,8 +56,17 @@ from ..types import (
     ToolResultPart,
     Usage,
 )
-from .base import BaseProviderLM, Credential, HttpResponse, SyncTransport, default_transport, resolve_credential
-from .common import anthropic_source, make_json_request, model_infos_from_entries, parts_to_text
+from .base import (
+    BaseProviderLM,
+    Credential,
+    HttpResponse,
+    SyncTransport,
+    batch_entry_http,
+    batch_entry_request,
+    default_transport,
+    resolve_credential,
+)
+from .common import anthropic_source, iso_utc, make_json_request, model_infos_from_entries, parts_to_text
 
 # Canonical builtin tool name → Anthropic tool format
 _ANTHROPIC_BUILTIN_MAP: dict[str, str] = {
@@ -159,15 +170,34 @@ def _finish_reason(stop_reason: str | None, *, has_tool_call: bool = False) -> s
     return "stop"
 
 
-def _batch_status(status: str) -> str:
-    status = status.lower()
-    if status in {"completed", "failed", "cancelled"}:
-        return status
-    if status in {"in_progress", "running", "processing"}:
+def _anthropic_batch_status(data: dict[str, Any]) -> str:
+    """Map an Anthropic Message Batch object to the canonical BatchStatus.
+
+    ``ended`` is Anthropic's single terminal processing_status; the
+    canonical terminal splits on request_counts — all-cancelled →
+    ``cancelled``, all-expired → ``expired``, anything else →
+    ``completed`` (per-entry outcomes live in the results, not the job).
+    """
+    status = str(data.get("processing_status") or "").lower()
+    if status == "in_progress":
         return "running"
-    if status in {"queued", "validating"}:
-        return "queued"
-    return "submitted"
+    if status == "canceling":
+        return "cancelling"
+    if status == "ended":
+        counts = data.get("request_counts") or {}
+
+        def n(key: str) -> int:
+            try:
+                return int(counts.get(key) or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        if n("canceled") and not (n("succeeded") or n("errored") or n("expired")):
+            return "cancelled"
+        if n("expired") and not (n("succeeded") or n("errored") or n("canceled")):
+            return "expired"
+        return "completed"
+    return "queued"
 
 
 def _citation_from_anthropic(citation: dict[str, Any]) -> CitationPart | None:
@@ -717,24 +747,117 @@ class AnthropicLM(BaseProviderLM):
         file_id = data.get("id") or (data.get("file") or {}).get("id") or ""
         return FileUploadResponse(id=str(file_id), provider_data=data)
 
-    def batch_submit(self, request: BatchRequest) -> BatchResponse:
+    # ─── Batch hooks (Message Batches API) ────────────────────────
+
+    def _batch_submit_request(self, request: BatchRequest, upload_body: dict[str, Any] | None) -> TransportRequest:
+        if request.label is not None:
+            raise UnsupportedFeatureError(
+                "anthropic: batch labels are not supported — the Message Batches "
+                "create body has no metadata field (verified live 2026-08-31); "
+                "submit without a label and correlate by id",
+                provider=self.provider,
+            )
         payload = {
             "requests": [
-                {"custom_id": f"req_{i}", "params": self._payload(nested, stream=False)}
+                {"custom_id": str(i), "params": self._payload(nested, stream=False)}
                 for i, nested in enumerate(request.requests)
             ],
             **(request.extensions or {}),
         }
-        resp = self._send(make_json_request(
+        return make_json_request(
             method="POST",
             url=f"{self.base_url.rstrip('/')}/messages/batches",
             headers=self._headers(),
             payload=payload,
             read_timeout=120.0,
-        ))
-        if resp.status >= 400:
-            raise self.normalize_error(resp.status, resp.text())
-        data = resp.json()
-        batch_id = data.get("id") or f"batch_{uuid.uuid4().hex[:12]}"
-        status = _batch_status(str(data.get("processing_status") or data.get("status") or "submitted"))
-        return BatchResponse(id=str(batch_id), status=status, provider_data=data)
+        )
+
+    def _batch_job_from_body(self, body: str) -> BatchJobInfo:
+        return self._batch_job_info(json.loads(body))
+
+    def _batch_job_info(self, data: dict[str, Any]) -> BatchJobInfo:
+        batch_id = data.get("id")
+        if not isinstance(batch_id, str) or not batch_id:
+            raise ProviderError("anthropic: batch object carries no id", provider=self.provider)
+        return BatchJobInfo(
+            id=batch_id,
+            status=_anthropic_batch_status(data),
+            created_at=iso_utc(data.get("created_at")),
+            provider_data=data,
+        )
+
+    def _batch_status_request(self, batch_id: str) -> TransportRequest:
+        return make_json_request(
+            method="GET",
+            url=f"{self.base_url.rstrip('/')}/messages/batches/{batch_id}",
+            headers=self._headers(),
+            read_timeout=60.0,
+        )
+
+    def _batch_cancel_request(self, batch_id: str) -> TransportRequest:
+        return make_json_request(
+            method="POST",
+            url=f"{self.base_url.rstrip('/')}/messages/batches/{batch_id}/cancel",
+            headers=self._headers(),
+            read_timeout=60.0,
+        )
+
+    def _batch_result_fetches(self, status_body: dict[str, Any]) -> tuple[TransportRequest, ...]:
+        url = status_body.get("results_url")
+        if not isinstance(url, str) or not url:
+            raise ProviderError("anthropic: ended batch carries no results_url", provider=self.provider)
+        return (make_json_request(method="GET", url=url, headers=self._headers(), read_timeout=300.0),)
+
+    def _batch_entries(self, status_body: dict[str, Any], fetched: tuple[str, ...]) -> tuple[BatchEntry, ...]:
+        entries: list[BatchEntry] = []
+        for line in fetched[0].splitlines():
+            if not line.strip():
+                continue
+            item = json.loads(line)
+            index = int(str(item.get("custom_id")))
+            result = item.get("result") or {}
+            rtype = str(result.get("type") or "")
+            if rtype == "succeeded":
+                message = result.get("message") or {}
+                response = self.parse_response(
+                    batch_entry_request(message.get("model")), batch_entry_http(message)
+                )
+                entries.append(BatchEntry(index=index, outcome="succeeded", response=response))
+            elif rtype == "errored":
+                raw = result.get("error") or {}
+                envelope = raw if isinstance(raw, dict) and "error" in raw else {"error": raw}
+                err = self.normalize_error(400, json.dumps(envelope))
+                entries.append(BatchEntry(
+                    index=index,
+                    outcome="errored",
+                    error=ErrorDetail(
+                        code=canonical_error_code(err),
+                        message=err.message or "batch entry errored",
+                        provider_code=err.provider_code,
+                    ),
+                ))
+            elif rtype == "canceled":
+                entries.append(BatchEntry(index=index, outcome="cancelled"))
+            elif rtype == "expired":
+                entries.append(BatchEntry(index=index, outcome="expired"))
+            else:
+                entries.append(BatchEntry(
+                    index=index,
+                    outcome="errored",
+                    error=ErrorDetail(code="provider", message=f"unrecognized batch result type {rtype!r}"),
+                ))
+        return tuple(sorted(entries, key=lambda e: e.index))
+
+    def _batch_list_request(self, limit: int) -> TransportRequest:
+        return make_json_request(
+            method="GET",
+            url=f"{self.base_url.rstrip('/')}/messages/batches",
+            params={"limit": int(limit)},
+            headers=self._headers(),
+            read_timeout=60.0,
+        )
+
+    def _batch_jobs_from_list_body(self, body: str) -> tuple[BatchJobInfo, ...]:
+        data = json.loads(body)
+        items = data.get("data") if isinstance(data, dict) else None
+        return tuple(self._batch_job_info(item) for item in (items or []) if isinstance(item, dict))

@@ -165,6 +165,81 @@ class AsyncBaseProviderLM:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._models_from_body(resp.text())
 
+    # ── Batch: async drivers over the sync adapter's pure hooks ──────
+
+    async def batch_submit(self, request: "BatchRequest"):
+        upload_body = None
+        upload_req = self._inner._batch_upload_request(request)
+        if upload_req is not None:
+            resp = await self._send(upload_req)
+            if resp.status >= 400:
+                raise self._inner.normalize_error(resp.status, resp.text())
+            upload_body = resp.json()
+        resp = await self._send(self._inner._batch_submit_request(request, upload_body))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return self._inner._batch_job_from_body(resp.text())
+
+    async def batch_status(self, batch_id: str):
+        resp = await self._send(self._inner._batch_status_request(batch_id))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return self._inner._batch_job_from_body(resp.text())
+
+    async def batch_results(self, batch_id: str):
+        from ..types import BATCH_TERMINAL_STATUSES
+
+        resp = await self._send(self._inner._batch_status_request(batch_id))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        job = self._inner._batch_job_from_body(resp.text())
+        if job.status not in BATCH_TERMINAL_STATUSES:
+            raise ValueError(
+                f"batch {batch_id} is not finished (status={job.status!r}); "
+                f"await wait() or poll batch_status() until done"
+            )
+        status_body = resp.json()
+        texts = []
+        for fetch in self._inner._batch_result_fetches(status_body):
+            fetched = await self._send(fetch)
+            if fetched.status >= 400:
+                raise self._inner.normalize_error(fetched.status, fetched.text())
+            texts.append(fetched.text())
+        return self._inner._batch_entries(status_body, tuple(texts))
+
+    async def batch_cancel(self, batch_id: str):
+        resp = await self._send(self._inner._batch_cancel_request(batch_id))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return self._inner._batch_job_from_body(resp.text())
+
+    async def batch_list(self, limit: int = 20):
+        resp = await self._send(self._inner._batch_list_request(limit))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return self._inner._batch_jobs_from_list_body(resp.text())
+
+    async def batch(self, requests, *, model: str | None = None, label: str | None = None,
+                    extensions=None):
+        """Third execution mode, async twin: returns an AsyncBatchJob."""
+        from ..batch import AsyncBatchJob
+
+        if isinstance(requests, BatchRequest):
+            request = requests
+        else:
+            request = BatchRequest(model=model, requests=tuple(requests), label=label, extensions=extensions)
+        return AsyncBatchJob(self, await self.batch_submit(request))
+
+    async def batch_job(self, batch_id: str):
+        from ..batch import AsyncBatchJob
+
+        return AsyncBatchJob(self, await self.batch_status(batch_id))
+
+    async def batches(self, limit: int = 20):
+        from ..batch import AsyncBatchJob
+
+        return tuple(AsyncBatchJob(self, info) for info in await self.batch_list(limit))
+
     async def aclose(self) -> None:
         aclose = getattr(self.transport, "aclose", None)
         if callable(aclose):
@@ -190,9 +265,6 @@ class AsyncBaseProviderLM:
 
     def file_upload(self, request: FileUploadRequest):
         raise self._async_unsupported("file upload")
-
-    def batch_submit(self, request: BatchRequest):
-        raise self._async_unsupported("batch submit")
 
     def image_generate(self, request: ImageGenerationRequest):
         raise self._async_unsupported("image generation")
@@ -416,8 +488,22 @@ class AsyncClaudeCodeLM(AsyncBaseProviderLM):
     def file_upload(self, request: FileUploadRequest):
         return self._inner.file_upload(request)  # raises UnsupportedFeatureError
 
+    # Batch is an API-key surface; the subscription credential does not
+    # carry it. Block every inherited async driver, not just submit.
     def batch_submit(self, request: BatchRequest):
         return self._inner.batch_submit(request)  # raises UnsupportedFeatureError
+
+    def batch_status(self, batch_id: str):
+        return self._inner.batch_status(batch_id)  # raises UnsupportedFeatureError
+
+    def batch_results(self, batch_id: str):
+        return self._inner.batch_results(batch_id)  # raises UnsupportedFeatureError
+
+    def batch_cancel(self, batch_id: str):
+        return self._inner.batch_cancel(batch_id)  # raises UnsupportedFeatureError
+
+    def batch_list(self, limit: int = 20):
+        return self._inner.batch_list(limit)  # raises UnsupportedFeatureError
 
     def live(self, config: LiveConfig):
         return self._inner.live(config)  # raises UnsupportedFeatureError
@@ -467,8 +553,22 @@ class AsyncOpenAICodexLM(AsyncBaseProviderLM):
     def file_upload(self, request: FileUploadRequest):
         return self._inner.file_upload(request)  # raises UnsupportedFeatureError
 
+    # Batch is an API-key surface; the subscription credential does not
+    # carry it. Block every inherited async driver, not just submit.
     def batch_submit(self, request: BatchRequest):
         return self._inner.batch_submit(request)  # raises UnsupportedFeatureError
+
+    def batch_status(self, batch_id: str):
+        return self._inner.batch_status(batch_id)  # raises UnsupportedFeatureError
+
+    def batch_results(self, batch_id: str):
+        return self._inner.batch_results(batch_id)  # raises UnsupportedFeatureError
+
+    def batch_cancel(self, batch_id: str):
+        return self._inner.batch_cancel(batch_id)  # raises UnsupportedFeatureError
+
+    def batch_list(self, limit: int = 20):
+        return self._inner.batch_list(limit)  # raises UnsupportedFeatureError
 
     def image_generate(self, request: ImageGenerationRequest):
         return self._inner.image_generate(request)  # raises UnsupportedFeatureError

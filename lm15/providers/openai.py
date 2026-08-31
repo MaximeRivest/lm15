@@ -31,8 +31,9 @@ from ..types import (
     AudioGenerationRequest,
     AudioGenerationResponse,
     AudioPart,
+    BatchEntry,
+    BatchJobInfo,
     BatchRequest,
-    BatchResponse,
     BuiltinTool,
     CitationDelta,
     ContinuationState,
@@ -79,8 +80,18 @@ from ..types import (
     ToolResultPart,
     Usage,
 )
-from .base import BaseProviderLM, Credential, HttpResponse, SyncTransport, default_transport, resolve_credential
+from .base import (
+    BaseProviderLM,
+    Credential,
+    HttpResponse,
+    SyncTransport,
+    batch_entry_http,
+    batch_entry_request,
+    default_transport,
+    resolve_credential,
+)
 from .common import (
+    iso_utc,
     make_json_request,
     model_infos_from_entries,
     parse_json_object,
@@ -165,17 +176,16 @@ def _finish_from_status(data: dict[str, Any], *, has_tool_call: bool = False) ->
     return "stop"
 
 
-def _batch_status(status: str) -> str:
+def _openai_batch_status(status: str) -> str:
+    """Map an OpenAI Batch status to the canonical BatchStatus."""
     status = status.lower()
-    if status in {"completed", "failed", "cancelled"}:
+    if status in {"completed", "failed", "cancelled", "expired"}:
         return status
     if status in {"cancelling", "canceling"}:
-        return "cancelled"
-    if status in {"in_progress", "finalizing", "running"}:
+        return "cancelling"
+    if status in {"in_progress", "finalizing"}:
         return "running"
-    if status in {"validating", "queued"}:
-        return "queued"
-    return "submitted"
+    return "queued"  # validating / queued / anything pre-run
 
 
 def _str_or_none(value: Any) -> str | None:
@@ -1163,27 +1173,153 @@ class OpenAILM(BaseProviderLM):
         data = resp.json()
         return FileUploadResponse(id=str(data.get("id") or ""), provider_data=data)
 
-    def batch_submit(self, request: BatchRequest) -> BatchResponse:
-        extensions = request.extensions or {}
-        input_file_id = extensions.get("input_file_id")
-        if input_file_id:
-            payload = {
-                "input_file_id": input_file_id,
-                "endpoint": extensions.get("endpoint", "/v1/responses"),
-                "completion_window": extensions.get("completion_window", "24h"),
-            }
-            resp = self._send(make_json_request(method="POST", url=f"{self.base_url.rstrip('/')}/batches", headers=self._headers(), payload=payload, read_timeout=120.0))
-            if resp.status >= 400:
-                raise self.normalize_error(resp.status, resp.text())
-            data = resp.json()
-            status = _batch_status(str(data.get("status") or "submitted"))
-            return BatchResponse(id=str(data.get("id") or ""), status=status, provider_data=data)
+    # ─── Batch hooks (Batch API over /v1/responses) ──────────────────
+    #
+    # OpenAI batches are two-step: the requests travel as an uploaded JSONL
+    # file, then /batches references it. The file is wire syntax, not
+    # semantics — batch() owns the upload; the file id stays visible in
+    # provider_data. lm15 assigns positional custom_ids and re-sorts
+    # results so entry order always equals submission order.
 
-        results: list[dict[str, Any]] = []
-        for nested in request.requests:
-            out = self.complete(nested)
-            results.append({"id": out.id, "finish_reason": out.finish_reason, "usage": {"input_tokens": out.usage.input_tokens, "output_tokens": out.usage.output_tokens, "total_tokens": out.usage.total_tokens}})
-        return BatchResponse(id=f"batch_{uuid.uuid4().hex[:12]}", status="completed", provider_data={"results": results})
+    def _batch_upload_request(self, request: BatchRequest) -> TransportRequest:
+        lines = []
+        for i, nested in enumerate(request.requests):
+            lines.append(json.dumps({
+                "custom_id": str(i),
+                "method": "POST",
+                "url": "/v1/responses",
+                "body": self._payload(nested, stream=False),
+            }, separators=(",", ":"), ensure_ascii=False))
+        data = ("\n".join(lines) + "\n").encode("utf-8")
+        boundary, body = self._multipart_file_body(
+            purpose="batch", filename="lm15-batch.jsonl", media_type="application/jsonl", data=data
+        )
+        return TransportRequest(
+            method="POST",
+            url=f"{self.base_url.rstrip('/')}/files",
+            headers=list(self._headers(content_type=f"multipart/form-data; boundary={boundary}").items()),
+            body=body,
+            read_timeout=300.0,
+        )
+
+    def _batch_submit_request(self, request: BatchRequest, upload_body: dict[str, Any] | None) -> TransportRequest:
+        input_file_id = (upload_body or {}).get("id")
+        if not isinstance(input_file_id, str) or not input_file_id:
+            raise ProviderError("openai: batch input file upload returned no id", provider=self.provider)
+        extensions = dict(request.extensions or {})
+        payload: dict[str, Any] = {
+            "input_file_id": input_file_id,
+            "endpoint": extensions.pop("endpoint", "/v1/responses"),
+            "completion_window": extensions.pop("completion_window", "24h"),
+        }
+        if request.label is not None:
+            payload["metadata"] = {"label": request.label}
+        payload.update(extensions)
+        return make_json_request(
+            method="POST",
+            url=f"{self.base_url.rstrip('/')}/batches",
+            headers=self._headers(),
+            payload=payload,
+            read_timeout=120.0,
+        )
+
+    def _batch_job_from_body(self, body: str) -> BatchJobInfo:
+        return self._batch_job_info(json.loads(body))
+
+    def _batch_job_info(self, data: dict[str, Any]) -> BatchJobInfo:
+        batch_id = data.get("id")
+        if not isinstance(batch_id, str) or not batch_id:
+            raise ProviderError("openai: batch object carries no id", provider=self.provider)
+        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+        label = metadata.get("label")
+        return BatchJobInfo(
+            id=batch_id,
+            status=_openai_batch_status(str(data.get("status") or "")),
+            label=label if isinstance(label, str) and label else None,
+            created_at=iso_utc(data.get("created_at")),
+            provider_data=data,
+        )
+
+    def _batch_status_request(self, batch_id: str) -> TransportRequest:
+        return make_json_request(
+            method="GET", url=f"{self.base_url.rstrip('/')}/batches/{batch_id}",
+            headers=self._headers(), read_timeout=60.0,
+        )
+
+    def _batch_cancel_request(self, batch_id: str) -> TransportRequest:
+        return make_json_request(
+            method="POST", url=f"{self.base_url.rstrip('/')}/batches/{batch_id}/cancel",
+            headers=self._headers(), read_timeout=60.0,
+        )
+
+    def _batch_result_fetches(self, status_body: dict[str, Any]) -> tuple[TransportRequest, ...]:
+        fetches = []
+        for key in ("output_file_id", "error_file_id"):
+            file_id = status_body.get(key)
+            if isinstance(file_id, str) and file_id:
+                fetches.append(make_json_request(
+                    method="GET", url=f"{self.base_url.rstrip('/')}/files/{file_id}/content",
+                    headers=self._headers(), read_timeout=300.0,
+                ))
+        return tuple(fetches)
+
+    def _batch_entries(self, status_body: dict[str, Any], fetched: tuple[str, ...]) -> tuple[BatchEntry, ...]:
+        job_status = _openai_batch_status(str(status_body.get("status") or ""))
+        found: dict[int, BatchEntry] = {}
+        for text in fetched:
+            for line in text.splitlines():
+                if not line.strip():
+                    continue
+                item = json.loads(line)
+                index = int(str(item.get("custom_id")))
+                response_obj = item.get("response") if isinstance(item.get("response"), dict) else {}
+                status_code = int(response_obj.get("status_code") or 0)
+                body_obj = response_obj.get("body") if isinstance(response_obj.get("body"), dict) else {}
+                if status_code == 200 and body_obj:
+                    response = self.parse_response(
+                        batch_entry_request(body_obj.get("model")), batch_entry_http(body_obj)
+                    )
+                    found[index] = BatchEntry(index=index, outcome="succeeded", response=response)
+                else:
+                    err_source = body_obj or item.get("error") or {}
+                    err = self.normalize_error(status_code or 400, json.dumps(err_source))
+                    found[index] = BatchEntry(
+                        index=index,
+                        outcome="errored",
+                        error=ErrorDetail(
+                            code=canonical_error_code(err),
+                            message=err.message or "batch entry errored",
+                            provider_code=err.provider_code,
+                        ),
+                    )
+        # Entries the output files never mention (an expired or cancelled
+        # batch stops mid-flight): fill from the job's terminal status.
+        counts = status_body.get("request_counts") if isinstance(status_body.get("request_counts"), dict) else {}
+        total = int(counts.get("total") or 0) or (max(found) + 1 if found else 0)
+        fill: str = "expired" if job_status == "expired" else "cancelled" if job_status == "cancelled" else "errored"
+        entries = []
+        for index in range(total):
+            if index in found:
+                entries.append(found[index])
+            elif fill == "errored":
+                entries.append(BatchEntry(
+                    index=index, outcome="errored",
+                    error=ErrorDetail(code="provider", message="entry missing from batch output files"),
+                ))
+            else:
+                entries.append(BatchEntry(index=index, outcome=fill))
+        return tuple(entries)
+
+    def _batch_list_request(self, limit: int) -> TransportRequest:
+        return make_json_request(
+            method="GET", url=f"{self.base_url.rstrip('/')}/batches",
+            params={"limit": int(limit)}, headers=self._headers(), read_timeout=60.0,
+        )
+
+    def _batch_jobs_from_list_body(self, body: str) -> tuple[BatchJobInfo, ...]:
+        data = json.loads(body)
+        items = data.get("data") if isinstance(data, dict) else None
+        return tuple(self._batch_job_info(item) for item in (items or []) if isinstance(item, dict))
 
     def image_generate(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
         payload = {"model": request.model, "prompt": request.prompt, "size": request.size, **(request.extensions or {})}

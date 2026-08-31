@@ -74,6 +74,13 @@
 
     {"id": "config.number-float-fields-integral", "kind": "config", "value": {"temperature": 1.0, "top_p": 1.0}},
     {"id": "config.number-int-fields", "kind": "config", "value": {"max_tokens": 64, "top_k": 2}},
-    {"id": "model_info.number-integral-pricing", "kind": "model_info", "value": {"id": "flat-1", "provider": "exampleai", "api_family": "openai-chat", "inference": {"input_modalities": ["text"], "output_modalities": ["text"], "pricing": {"input_per_million": 1.0, "output_per_million": 2.0, "currency": "USD"}}}}
+    {"id": "model_info.number-integral-pricing", "kind": "model_info", "value": {"id": "flat-1", "provider": "exampleai", "api_family": "openai-chat", "inference": {"input_modalities": ["text"], "output_modalities": ["text"], "pricing": {"input_per_million": 1.0, "output_per_million": 2.0, "currency": "USD"}}}},
+    {"id": "batch_request.minimal", "kind": "batch_request", "value": {"model": "omega-4", "requests": [{"model": "omega-4", "messages": [{"role": "user", "parts": [{"type": "text", "text": "Capital of France? One word."}]}]}]}},
+    {"id": "batch_request.full", "kind": "batch_request", "value": {"model": "omega-4", "requests": [{"model": "omega-4", "messages": [{"role": "user", "parts": [{"type": "text", "text": "a"}]}]}, {"model": "omega-4-mini", "messages": [{"role": "user", "parts": [{"type": "text", "text": "b"}]}]}], "label": "nightly-eval", "extensions": {"completion_window": "24h"}}},
+    {"id": "batch_job.minimal", "kind": "batch_job", "value": {"id": "batch_abc", "status": "queued"}},
+    {"id": "batch_job.full", "kind": "batch_job", "value": {"id": "msgbatch_abc", "status": "completed", "label": "nightly-eval", "created_at": "2026-08-31T19:22:09Z", "provider_data": {"processing_status": "ended"}}},
+    {"id": "batch_entry.succeeded", "kind": "batch_entry", "value": {"index": 0, "outcome": "succeeded", "response": {"id": "msg_1", "model": "omega-4", "message": {"role": "assistant", "parts": [{"type": "text", "text": "Paris"}]}, "finish_reason": "stop", "usage": {"input_tokens": 8, "output_tokens": 1, "total_tokens": 9}}}},
+    {"id": "batch_entry.errored", "kind": "batch_entry", "value": {"index": 1, "outcome": "errored", "error": {"code": "invalid_request", "message": "model not found", "provider_code": "invalid_request_error"}}},
+    {"id": "batch_entry.expired", "kind": "batch_entry", "value": {"index": 2, "outcome": "expired"}}
   ]
 }

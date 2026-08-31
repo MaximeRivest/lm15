@@ -23,8 +23,9 @@ from ..result import materialize_response
 from ..types import (
     AudioGenerationRequest,
     AudioGenerationResponse,
+    BatchEntry,
+    BatchJobInfo,
     BatchRequest,
-    BatchResponse,
     FileUploadRequest,
     FileUploadResponse,
     ImageGenerationRequest,
@@ -212,8 +213,22 @@ class OpenAICodexLM(OpenAILM):
     def file_upload(self, request: FileUploadRequest) -> FileUploadResponse:
         raise UnsupportedFeatureError("openai-codex: file upload is not supported", provider=self.provider)
 
-    def batch_submit(self, request: BatchRequest) -> BatchResponse:
-        raise UnsupportedFeatureError("openai-codex: batch submit is not supported", provider=self.provider)
+    # Batch is an API-key surface; the subscription credential does not
+    # carry it. Block every inherited driver, not just submit.
+    def batch_submit(self, request: BatchRequest) -> BatchJobInfo:
+        raise UnsupportedFeatureError("openai-codex: batch is not supported", provider=self.provider)
+
+    def batch_status(self, batch_id: str) -> BatchJobInfo:
+        raise UnsupportedFeatureError("openai-codex: batch is not supported", provider=self.provider)
+
+    def batch_results(self, batch_id: str) -> tuple[BatchEntry, ...]:
+        raise UnsupportedFeatureError("openai-codex: batch is not supported", provider=self.provider)
+
+    def batch_cancel(self, batch_id: str) -> BatchJobInfo:
+        raise UnsupportedFeatureError("openai-codex: batch is not supported", provider=self.provider)
+
+    def batch_list(self, limit: int = 20) -> tuple[BatchJobInfo, ...]:
+        raise UnsupportedFeatureError("openai-codex: batch is not supported", provider=self.provider)
 
     def image_generate(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
         raise UnsupportedFeatureError("openai-codex: image generation is not supported", provider=self.provider)

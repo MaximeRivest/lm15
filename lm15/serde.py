@@ -20,6 +20,9 @@ from .types import (
     AudioDelta,
     AudioFormat,
     AudioPart,
+    BatchEntry,
+    BatchJobInfo,
+    BatchRequest,
     BinaryPart,
     BuiltinTool,
     CacheConfig,
@@ -664,6 +667,64 @@ def response_from_dict(d: dict[str, Any]) -> Response:
         finish_reason=d["finish_reason"],
         usage=usage_from_dict(d.get("usage", {})),
         provider_data=d.get("provider_data"),
+    )
+
+
+# ─── Batch ─────────────────────────────────────────────────────────────
+
+def batch_request_to_dict(b: BatchRequest) -> dict[str, Any]:
+    return _clean_mapping({
+        "model": b.model,
+        "requests": [request_to_dict(r) for r in b.requests],
+        "label": b.label,
+        "extensions": b.extensions,
+    })
+
+
+def batch_request_from_dict(d: dict[str, Any]) -> BatchRequest:
+    return BatchRequest(
+        model=d.get("model"),
+        requests=tuple(request_from_dict(r) for r in d.get("requests", [])),
+        label=d.get("label"),
+        extensions=d.get("extensions"),
+    )
+
+
+def batch_job_to_dict(j: BatchJobInfo) -> dict[str, Any]:
+    return _clean_mapping({
+        "id": j.id,
+        "status": j.status,
+        "label": j.label,
+        "created_at": j.created_at,
+        "provider_data": j.provider_data,
+    })
+
+
+def batch_job_from_dict(d: dict[str, Any]) -> BatchJobInfo:
+    return BatchJobInfo(
+        id=d["id"],
+        status=d["status"],
+        label=d.get("label"),
+        created_at=d.get("created_at"),
+        provider_data=d.get("provider_data"),
+    )
+
+
+def batch_entry_to_dict(e: BatchEntry) -> dict[str, Any]:
+    return _clean_mapping({
+        "index": e.index,
+        "outcome": e.outcome,
+        "response": response_to_dict(e.response, include_provider_data=True) if e.response else None,
+        "error": error_detail_to_dict(e.error) if e.error else None,
+    })
+
+
+def batch_entry_from_dict(d: dict[str, Any]) -> BatchEntry:
+    return BatchEntry(
+        index=d["index"],
+        outcome=d["outcome"],
+        response=response_from_dict(d["response"]) if isinstance(d.get("response"), dict) else None,
+        error=error_detail_from_dict(d["error"]) if isinstance(d.get("error"), dict) else None,
     )
 
 

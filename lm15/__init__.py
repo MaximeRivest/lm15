@@ -48,6 +48,7 @@ except PackageNotFoundError:  # running from a source checkout
     __version__ = "0.0.0"
 
 # ── Canonical types ──────────────────────────────────────────────────
+from .batch import AsyncBatchJob, BatchJob
 from .types import (
     # request/response core
     Request,
@@ -92,7 +93,8 @@ from .types import (
     FileUploadRequest,
     FileUploadResponse,
     BatchRequest,
-    BatchResponse,
+    BatchEntry,
+    BatchJobInfo,
     ImageGenerationRequest,
     ImageGenerationResponse,
     AudioGenerationRequest,
@@ -205,7 +207,8 @@ __all__ = [
     "ImageDelta", "ToolCallDelta", "CitationDelta", "ContinuationDelta",
     # auxiliary endpoints
     "FileUploadRequest",
-    "FileUploadResponse", "BatchRequest", "BatchResponse",
+    "FileUploadResponse", "BatchRequest", "BatchJobInfo", "BatchEntry",
+    "BatchJob", "AsyncBatchJob",
     "ImageGenerationRequest", "ImageGenerationResponse",
     "AudioGenerationRequest", "AudioGenerationResponse", "AudioFormat",
     "LiveConfig",

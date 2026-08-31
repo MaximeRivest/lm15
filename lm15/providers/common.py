@@ -223,3 +223,34 @@ def parse_json_object(value: Any) -> dict[str, Any]:
             return parsed
         return {"value": parsed}
     return {}
+
+
+def iso_utc(value: object) -> str | None:
+    """Normalize a provider timestamp (unix epoch or ISO-8601 string) to
+    canonical ``YYYY-MM-DDTHH:MM:SSZ``. Returns None when unparseable —
+    the raw value stays available in provider_data."""
+    import datetime
+
+    try:
+        if isinstance(value, bool) or value is None:
+            return None
+        if isinstance(value, (int, float)):
+            dt = datetime.datetime.fromtimestamp(float(value), tz=datetime.timezone.utc)
+        elif isinstance(value, str) and value:
+            text = value.strip()
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            # datetime.fromisoformat rejects >6 fractional digits (Gemini
+            # emits nanoseconds); trim the fraction to microseconds.
+            import re
+
+            text = re.sub(r"\.(\d{6})\d+", r".\1", text)
+            dt = datetime.datetime.fromisoformat(text)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+            dt = dt.astimezone(datetime.timezone.utc)
+        else:
+            return None
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, OverflowError, OSError):
+        return None

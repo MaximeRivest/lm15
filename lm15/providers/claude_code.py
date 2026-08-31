@@ -10,7 +10,7 @@ from ..auth import (
 from ..errors import ProviderError, UnsupportedFeatureError, with_credential_hint
 from ..features import EndpointSupport, ProviderManifest
 from ..protocols import Capabilities, LiveSession
-from ..types import BatchRequest, BatchResponse, BuiltinTool, FileUploadRequest, FileUploadResponse, LiveConfig, Request
+from ..types import BatchEntry, BatchJobInfo, BatchRequest, BuiltinTool, FileUploadRequest, FileUploadResponse, LiveConfig, Request
 from .anthropic import AnthropicLM
 from .base import Credential, SyncTransport, default_transport, resolve_credential
 
@@ -126,8 +126,22 @@ class ClaudeCodeLM(AnthropicLM):
     def file_upload(self, request: FileUploadRequest) -> FileUploadResponse:
         raise UnsupportedFeatureError("claude-code: file upload is not supported", provider=self.provider)
 
-    def batch_submit(self, request: BatchRequest) -> BatchResponse:
-        raise UnsupportedFeatureError("claude-code: batch submit is not supported", provider=self.provider)
+    # Batch is an API-key surface; the subscription credential does not
+    # carry it. Block every inherited driver, not just submit.
+    def batch_submit(self, request: BatchRequest) -> BatchJobInfo:
+        raise UnsupportedFeatureError("claude-code: batch is not supported", provider=self.provider)
+
+    def batch_status(self, batch_id: str) -> BatchJobInfo:
+        raise UnsupportedFeatureError("claude-code: batch is not supported", provider=self.provider)
+
+    def batch_results(self, batch_id: str) -> tuple[BatchEntry, ...]:
+        raise UnsupportedFeatureError("claude-code: batch is not supported", provider=self.provider)
+
+    def batch_cancel(self, batch_id: str) -> BatchJobInfo:
+        raise UnsupportedFeatureError("claude-code: batch is not supported", provider=self.provider)
+
+    def batch_list(self, limit: int = 20) -> tuple[BatchJobInfo, ...]:
+        raise UnsupportedFeatureError("claude-code: batch is not supported", provider=self.provider)
 
     def live(self, config: LiveConfig) -> LiveSession:
         raise UnsupportedFeatureError("claude-code: live is not supported", provider=self.provider)

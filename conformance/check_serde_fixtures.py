@@ -54,6 +54,9 @@ KIND_SERDE: dict[str, tuple[JsonToObj, ObjToJson]] = {
     "live_config": (serde.live_config_from_dict, serde.live_config_to_dict),
     "live_client_event": (serde.live_client_event_from_dict, serde.live_client_event_to_dict),
     "live_server_event": (serde.live_server_event_from_dict, serde.live_server_event_to_dict),
+    "batch_request": (serde.batch_request_from_dict, serde.batch_request_to_dict),
+    "batch_job": (serde.batch_job_from_dict, serde.batch_job_to_dict),
+    "batch_entry": (serde.batch_entry_from_dict, serde.batch_entry_to_dict),
 }
 
 

@@ -98,7 +98,8 @@ ErrorCode = Literal[
 ERROR_CODES = frozenset(get_args(ErrorCode))
 
 StreamEventType = Literal["start", "delta", "end", "error"]
-BatchStatus = Literal["submitted", "queued", "running", "completed", "failed", "cancelled"]
+BatchStatus = Literal["queued", "running", "cancelling", "completed", "failed", "cancelled", "expired"]
+BatchOutcome = Literal["succeeded", "errored", "cancelled", "expired"]
 AudioEncoding = Literal["pcm16", "opus", "mp3", "aac"]
 ToolChoiceMode = Literal["auto", "required", "none"]
 LiveClientEventType = Literal["turn", "audio", "image", "text", "tool_result", "interrupt", "end_audio"]
@@ -109,6 +110,9 @@ FINISH_REASONS = frozenset(get_args(FinishReason))
 REASONING_EFFORTS = frozenset(get_args(ReasoningEffort))
 REASONING_SUMMARIES = frozenset(get_args(ReasoningSummary))
 BATCH_STATUSES = frozenset(get_args(BatchStatus))
+BATCH_OUTCOMES = frozenset(get_args(BatchOutcome))
+# Job statuses in which a batch will make no further progress.
+BATCH_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "expired"})
 AUDIO_ENCODINGS = frozenset(get_args(AudioEncoding))
 TOOL_CHOICE_MODES = frozenset(get_args(ToolChoiceMode))
 
@@ -2075,6 +2079,7 @@ class BatchRequest:
 
     model: str | None = None
     requests: tuple[Request, ...] = ()
+    label: str | None = None
     extensions: Extensions | None = None
 
     def __post_init__(self) -> None:
@@ -2086,20 +2091,71 @@ class BatchRequest:
         _validate_optional_text(self.model, field_name="BatchRequest.model", allow_empty=False)
         if self.model is None:
             object.__setattr__(self, "model", self.requests[0].model)
+        _validate_optional_text(self.label, field_name="BatchRequest.label", allow_empty=False)
         _validate_extensions_field(self)
 
 
 @dataclass(frozen=True, slots=True)
-class BatchResponse:
+class BatchJobInfo:
+    """A snapshot of a provider-side batch job — the ticket.
+
+    ``id`` is the provider's job id, a plain string; store it anywhere.
+    ``created_at`` is normalized to an ISO-8601 UTC string when the
+    provider reports a creation time. Raw job state stays verbatim in
+    ``provider_data``.
+    """
+
     id: str
     status: BatchStatus
+    label: str | None = None
+    created_at: str | None = None
     provider_data: ProviderData | None = None
 
+    @property
+    def done(self) -> bool:
+        return self.status in BATCH_TERMINAL_STATUSES
+
     def __post_init__(self) -> None:
-        _validate_text(self.id, field_name="BatchResponse.id", allow_empty=False)
+        _validate_text(self.id, field_name="BatchJobInfo.id", allow_empty=False)
         if self.status not in BATCH_STATUSES:
             raise ValueError(f"unsupported batch status: {self.status}")
+        _validate_optional_text(self.label, field_name="BatchJobInfo.label", allow_empty=False)
+        _validate_optional_text(self.created_at, field_name="BatchJobInfo.created_at", allow_empty=False)
         _validate_json_field(self, "provider_data")
+
+
+@dataclass(frozen=True, slots=True)
+class BatchEntry:
+    """The fate of one request in a batch, in submission order.
+
+    Partial failure is a first-class outcome: a ``completed`` job may mix
+    ``succeeded`` and ``errored`` entries. ``succeeded`` carries a full
+    canonical Response; ``errored`` carries a canonical ErrorDetail;
+    ``cancelled`` and ``expired`` carry neither.
+    """
+
+    index: int
+    outcome: BatchOutcome
+    response: Response | None = None
+    error: ErrorDetail | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.outcome == "succeeded"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.index, int) or isinstance(self.index, bool) or self.index < 0:
+            raise ValueError("BatchEntry.index must be a non-negative int")
+        if self.outcome not in BATCH_OUTCOMES:
+            raise ValueError(f"unsupported batch outcome: {self.outcome}")
+        if self.outcome == "succeeded":
+            if not isinstance(self.response, Response) or self.error is not None:
+                raise ValueError("succeeded entries carry a Response and no error")
+        elif self.outcome == "errored":
+            if not isinstance(self.error, ErrorDetail) or self.response is not None:
+                raise ValueError("errored entries carry an ErrorDetail and no response")
+        elif self.response is not None or self.error is not None:
+            raise ValueError(f"{self.outcome} entries carry neither response nor error")
 
 
 @dataclass(frozen=True, slots=True)
@@ -2196,7 +2252,7 @@ EndpointRequest: TypeAlias = (
 EndpointResponse: TypeAlias = (
     Response
     | FileUploadResponse
-    | BatchResponse
+    | BatchJobInfo
     | ImageGenerationResponse
     | AudioGenerationResponse
 )

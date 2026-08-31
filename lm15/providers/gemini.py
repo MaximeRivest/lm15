@@ -32,10 +32,11 @@ from ..types import (
     AudioGenerationRequest,
     AudioGenerationResponse,
     AudioPart,
+    BatchEntry,
+    BatchJobInfo,
     BatchRequest,
     ContinuationDelta,
     ContinuationState,
-    BatchResponse,
     BinaryPart,
     BuiltinTool,
     CacheConfig,
@@ -85,8 +86,17 @@ from ..types import (
     Usage,
     VideoPart,
 )
-from .base import BaseProviderLM, Credential, HttpResponse, SyncTransport, default_transport, resolve_credential
-from .common import build_url, make_json_request, model_infos_from_entries, parse_json_object, parts_to_text
+from .base import (
+    BaseProviderLM,
+    Credential,
+    HttpResponse,
+    SyncTransport,
+    batch_entry_http,
+    batch_entry_request,
+    default_transport,
+    resolve_credential,
+)
+from .common import build_url, iso_utc, make_json_request, model_infos_from_entries, parse_json_object, parts_to_text
 
 # Canonical builtin tool name → Gemini tool key
 _GEMINI_BUILTIN_MAP: dict[str, str] = {
@@ -216,15 +226,26 @@ def _finish_reason(reason: str | None, *, has_tool_call: bool = False) -> str:
     return "stop"
 
 
-def _batch_status(status: str) -> str:
-    status = status.lower()
-    if status in {"completed", "failed", "cancelled"}:
-        return status
-    if status in {"running", "processing", "in_progress"}:
-        return "running"
-    if status in {"queued", "validating"}:
-        return "queued"
-    return "submitted"
+def _gemini_batch_status(data: dict[str, Any]) -> str:
+    """Map a Gemini batch operation to the canonical BatchStatus.
+
+    States observed live 2026-08-31: BATCH_STATE_PENDING / RUNNING /
+    SUCCEEDED (wire fact — the docs' JOB_STATE_* naming is wrong for
+    this endpoint).
+    """
+    state = str((data.get("metadata") or {}).get("state") or "").upper()
+    mapping = {
+        "BATCH_STATE_PENDING": "queued",
+        "BATCH_STATE_RUNNING": "running",
+        "BATCH_STATE_CANCELLING": "cancelling",
+        "BATCH_STATE_SUCCEEDED": "completed",
+        "BATCH_STATE_FAILED": "failed",
+        "BATCH_STATE_CANCELLED": "cancelled",
+        "BATCH_STATE_EXPIRED": "expired",
+    }
+    if state in mapping:
+        return mapping[state]
+    return "completed" if data.get("done") else "queued"
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -1311,15 +1332,124 @@ class GeminiLM(BaseProviderLM):
         file_name = (data.get("file") or {}).get("name") or data.get("name") or ""
         return FileUploadResponse(id=str(file_name), provider_data=data)
 
-    def batch_submit(self, request: BatchRequest) -> BatchResponse:
-        # Gemini's public batch surface changes across API versions; provide a
-        # deterministic local fan-out fallback until a stable file-backed path is
-        # selected through extensions.
-        results: list[dict[str, Any]] = []
-        for nested in request.requests:
-            resp = self.complete(nested)
-            results.append({"id": resp.id, "finish_reason": resp.finish_reason, "usage": {"input_tokens": resp.usage.input_tokens, "output_tokens": resp.usage.output_tokens, "total_tokens": resp.usage.total_tokens}})
-        return BatchResponse(id=f"batch_{uuid.uuid4().hex[:12]}", status="completed", provider_data={"results": results})
+    # ─── Batch hooks (Batch Mode, inline requests) ───────────────────
+    #
+    # Wire shapes verified live 2026-08-31: submit → POST
+    # {model}:batchGenerateContent, job id = operation "name"
+    # ("batches/<id>"), inline results under
+    # response.inlinedResponses.inlinedResponses[] with metadata.key
+    # correlation, list → GET /batches?pageSize=N → {"operations": [...]}.
+
+    def _batch_submit_request(self, request: BatchRequest, upload_body: dict[str, Any] | None) -> TransportRequest:
+        model = request.model or request.requests[0].model
+        batch: dict[str, Any] = {
+            "inputConfig": {
+                "requests": {
+                    "requests": [
+                        {"request": self._payload(nested), "metadata": {"key": str(i)}}
+                        for i, nested in enumerate(request.requests)
+                    ]
+                }
+            },
+        }
+        if request.label is not None:
+            batch["displayName"] = request.label
+        payload = {"batch": batch, **(request.extensions or {})}
+        return make_json_request(
+            method="POST",
+            url=f"{self.base_url.rstrip('/')}/{self._model_path(model)}:batchGenerateContent",
+            headers=self._auth_headers({"Content-Type": "application/json"}),
+            payload=payload,
+            read_timeout=120.0,
+        )
+
+    def _batch_job_from_body(self, body: str) -> BatchJobInfo:
+        return self._batch_job_info(json.loads(body))
+
+    def _batch_job_info(self, data: dict[str, Any]) -> BatchJobInfo:
+        name = data.get("name")
+        if not isinstance(name, str) or not name:
+            raise ProviderError("gemini: batch operation carries no name", provider=self.provider)
+        metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+        label = metadata.get("displayName")
+        return BatchJobInfo(
+            id=name,
+            status=_gemini_batch_status(data),
+            label=label if isinstance(label, str) and label else None,
+            created_at=iso_utc(metadata.get("createTime")),
+            provider_data=data,
+        )
+
+    def _batch_status_request(self, batch_id: str) -> TransportRequest:
+        return make_json_request(
+            method="GET",
+            url=f"{self.base_url.rstrip('/')}/{batch_id}",
+            headers=self._auth_headers(),
+            read_timeout=60.0,
+        )
+
+    def _batch_cancel_request(self, batch_id: str) -> TransportRequest:
+        return make_json_request(
+            method="POST",
+            url=f"{self.base_url.rstrip('/')}/{batch_id}:cancel",
+            headers=self._auth_headers({"Content-Type": "application/json"}),
+            payload={},
+            read_timeout=60.0,
+        )
+
+    def _batch_result_fetches(self, status_body: dict[str, Any]) -> tuple[TransportRequest, ...]:
+        # Inline submissions carry their results in the operation body.
+        return ()
+
+    def _batch_entries(self, status_body: dict[str, Any], fetched: tuple[str, ...]) -> tuple[BatchEntry, ...]:
+        response_obj = status_body.get("response") if isinstance(status_body.get("response"), dict) else {}
+        inlined = response_obj.get("inlinedResponses")
+        if isinstance(inlined, dict):
+            inlined = inlined.get("inlinedResponses")
+        entries: list[BatchEntry] = []
+        for position, item in enumerate(inlined or []):
+            if not isinstance(item, dict):
+                continue
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            try:
+                index = int(str(metadata.get("key")))
+            except (TypeError, ValueError):
+                index = position
+            if isinstance(item.get("response"), dict):
+                body_obj = item["response"]
+                response = self.parse_response(
+                    batch_entry_request(body_obj.get("modelVersion")), batch_entry_http(body_obj)
+                )
+                entries.append(BatchEntry(index=index, outcome="succeeded", response=response))
+            else:
+                # Per-entry failures arrive as a google.rpc.Status, not the
+                # HTTP error envelope; map directly.
+                err = item.get("error") if isinstance(item.get("error"), dict) else {}
+                provider_code = err.get("status") or err.get("code")
+                entries.append(BatchEntry(
+                    index=index,
+                    outcome="errored",
+                    error=ErrorDetail(
+                        code="provider",
+                        message=str(err.get("message") or "batch entry errored"),
+                        provider_code=str(provider_code) if provider_code is not None else None,
+                    ),
+                ))
+        return tuple(sorted(entries, key=lambda e: e.index))
+
+    def _batch_list_request(self, limit: int) -> TransportRequest:
+        return make_json_request(
+            method="GET",
+            url=f"{self.base_url.rstrip('/')}/batches",
+            params={"pageSize": int(limit)},
+            headers=self._auth_headers(),
+            read_timeout=60.0,
+        )
+
+    def _batch_jobs_from_list_body(self, body: str) -> tuple[BatchJobInfo, ...]:
+        data = json.loads(body)
+        items = data.get("operations") if isinstance(data, dict) else None
+        return tuple(self._batch_job_info(item) for item in (items or []) if isinstance(item, dict))
 
     def image_generate(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
         extensions = {"generationConfig": {"responseModalities": ["IMAGE"]}, **(request.extensions or {})}

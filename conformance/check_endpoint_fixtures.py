@@ -22,7 +22,7 @@ from lm15.types import (  # noqa: E402
     AudioGenerationRequest,
     AudioGenerationResponse,
     BatchRequest,
-    BatchResponse,
+    BatchJobInfo,
     FileUploadRequest,
     FileUploadResponse,
     FunctionTool,
@@ -133,14 +133,23 @@ def openai_file_upload() -> None:
 
 
 def openai_batch_submit() -> None:
-    transport = FakeTransport([json_response({"id": "batch_1", "status": "validating"})])
+    # Two-step wire: JSONL file upload, then the batch referencing it.
+    transport = FakeTransport([
+        json_response({"id": "file_1", "purpose": "batch"}),
+        json_response({"id": "batch_1", "status": "validating", "created_at": 1756666000}),
+    ])
     lm = OpenAILM(api_key="test", transport=transport)
-    out = lm.batch_submit(BatchRequest(requests=(Request(model="gpt-test", messages=(Message.user("hi"),)),), extensions={"input_file_id": "file_1"}))
-    req = transport.requests[0]
-    assert req.url == "https://api.openai.com/v1/batches"
-    assert request_body(req)["input_file_id"] == "file_1"
-    assert isinstance(out, BatchResponse)
+    out = lm.batch_submit(BatchRequest(requests=(Request(model="gpt-test", messages=(Message.user("hi"),)),)))
+    upload, submit = transport.requests
+    assert upload.url == "https://api.openai.com/v1/files"
+    assert b'"custom_id": "0"' in upload.body or b'"custom_id":"0"' in upload.body
+    assert submit.url == "https://api.openai.com/v1/batches"
+    body = request_body(submit)
+    assert body["input_file_id"] == "file_1"
+    assert body["endpoint"] == "/v1/responses"
+    assert isinstance(out, BatchJobInfo)
     assert out.status == "queued"
+    assert out.created_at == "2025-08-31T18:46:40Z"
 
 
 def openai_image_generate() -> None:
@@ -194,7 +203,8 @@ def anthropic_batch_submit() -> None:
     out = lm.batch_submit(BatchRequest(requests=(Request(model="claude-test", messages=(Message.user("hi"),)),)))
     req = transport.requests[0]
     assert "/v1/messages/batches" in req.url
-    assert isinstance(out, BatchResponse)
+    assert request_body(req)["requests"][0]["custom_id"] == "0"
+    assert isinstance(out, BatchJobInfo)
     assert out.status == "running"
 
 
