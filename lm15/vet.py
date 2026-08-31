@@ -158,9 +158,11 @@ def _parse_stream_body(lm: BaseProviderLM, request: Request, body: bytes) -> lis
                 if event is not None:
                     yield event
 
-    # MAP-3: the canonical event trace is the POST-coalesce trace — exactly
-    # one merged StreamEndEvent, final.
-    return list(coalesce_stream(raw_events()))
+    # MAP-3/MAP-4: the canonical event trace is the POST-coalesce trace —
+    # exactly one merged StreamEndEvent, final, and exactly one leading
+    # StreamStartEvent (synthesized with the request's model for dialects
+    # without a start frame).
+    return list(coalesce_stream(raw_events(), model=request.model))
 
 
 # ─── Ops ─────────────────────────────────────────────────────────────

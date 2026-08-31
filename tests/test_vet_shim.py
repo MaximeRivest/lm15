@@ -71,6 +71,7 @@ def ok_result(reply: dict) -> dict:
 def replies() -> dict[str, dict]:
     basic = load_case("openai", "basic_text")
     streaming = load_case("openai", "streaming")
+    streaming_synth = load_case("gemini", "streaming")
     error_cases = json.loads((CONTRACT_ROOT / "errors" / "cases" / "openai.json").read_text())["cases"]
     auth_case = next(c for c in error_cases if c["id"] == "openai.auth_invalid_key")
     serde_cases = json.loads((CONTRACT_ROOT / "serde" / "canonical.json").read_text())["cases"]
@@ -101,6 +102,13 @@ def replies() -> dict[str, dict]:
             "body_b64": pinned_body_b64(streaming),
         },
         {
+            "op": "replay_stream",
+            "id": "replay_stream_synth",
+            "provider": "gemini",
+            "canonical_request": streaming_synth["canonical_request"],
+            "body_b64": pinned_body_b64(streaming_synth),
+        },
+        {
             "op": "normalize_error",
             "id": "normalize_error",
             "provider": "openai",
@@ -119,6 +127,7 @@ def replies() -> dict[str, dict]:
     out = run_shim(requests)
     out["_serde_cases"] = serde_cases  # type: ignore[assignment]
     out["_basic_case"] = basic  # type: ignore[assignment]
+    out["_synth_case"] = streaming_synth  # type: ignore[assignment]
     out["_auth_case"] = auth_case  # type: ignore[assignment]
     return out
 
@@ -166,6 +175,17 @@ def test_replay_stream(replies: dict[str, dict]) -> None:
     response = result["canonical_response"]
     assert response["finish_reason"] == "stop"
     assert any(p["type"] == "text" and p["text"] for p in response["message"]["parts"])
+
+
+def test_replay_stream_synthesized_start_carries_model(replies: dict[str, dict]) -> None:
+    # MAP-4: dialects without a native start frame (gemini SSE) get a
+    # synthesized StreamStartEvent carrying the REQUEST's model.
+    result = ok_result(replies["replay_stream_synth"])
+    events = result["events"]
+    assert events[0]["type"] == "start"
+    assert events[0]["model"] == replies["_synth_case"]["canonical_request"]["model"]
+    assert sum(1 for e in events if e["type"] == "start") == 1
+    assert events[-1]["type"] == "end"
 
 
 def test_normalize_error(replies: dict[str, dict]) -> None:
