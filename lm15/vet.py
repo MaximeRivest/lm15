@@ -59,6 +59,16 @@ def adapter_for_provider(provider: str, api_key: str, base_url: str | None = Non
         return AnthropicLM(**kwargs)
     if provider == "gemini":
         return GeminiLM(**kwargs)
+    if provider in ("claude-code", "claude_code"):
+        from .providers.claude_code import ClaudeCodeLM
+
+        return ClaudeCodeLM(**kwargs)
+    if provider in ("openai-codex", "openai_codex"):
+        from .providers.openai_codex import OpenAICodexLM
+
+        # PROTOCOL.md pins the harness account id: the ctor cannot derive one
+        # from a non-JWT injected key, and the wire header must be exact.
+        return OpenAICodexLM(account_id="test-account", **kwargs)
     raise ValueError(f"unknown provider: {provider}")
 
 
@@ -228,6 +238,21 @@ def op_validate(msg: JsonObject) -> JsonObject:
     return {"ok": True, "normalized": to_dict(obj)}
 
 
+def op_build_models_request(msg: JsonObject) -> JsonObject:
+    lm = adapter_for_provider(str(msg["provider"]), str(msg["api_key"]), _base_url(msg))
+    return normalize_transport_request(lm._models_request())
+
+
+def op_parse_models_response(msg: JsonObject) -> JsonObject:
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg))
+    body = base64.b64decode(msg["body_b64"]).decode("utf-8")
+    status = int(msg["status"])
+    if status >= 400:
+        raise lm.normalize_error(status, body)
+    models = lm._models_from_body(body)
+    return {"models": [serde.model_info_to_dict(m) for m in models]}
+
+
 def op_explain_auth(msg: JsonObject) -> JsonObject:
     """AUTH-7 resolution chain over harness-supplied inputs only.
 
@@ -331,6 +356,8 @@ HANDLERS: dict[str, Callable[[JsonObject], JsonObject]] = {
     "validate": op_validate,
     "surface_dump": op_surface_dump,
     "explain_auth": op_explain_auth,
+    "build_models_request": op_build_models_request,
+    "parse_models_response": op_parse_models_response,
 }
 
 
