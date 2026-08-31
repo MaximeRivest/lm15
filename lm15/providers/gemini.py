@@ -88,7 +88,7 @@ from ..types import (
     VideoPart,
 )
 from .base import BaseProviderLM, Credential, HttpResponse, SyncTransport, default_transport, resolve_credential
-from .common import build_url, make_json_request, parse_json_object, parts_to_text
+from .common import build_url, make_json_request, model_infos_from_entries, parse_json_object, parts_to_text
 
 # Canonical builtin tool name → Gemini tool key
 _GEMINI_BUILTIN_MAP: dict[str, str] = {
@@ -319,6 +319,7 @@ class GeminiLM(BaseProviderLM):
         batches=True,
         images=True,
         audio=True,
+        models=True,
     )
     manifest: ClassVar[ProviderManifest] = ProviderManifest(
         provider="gemini",
@@ -1260,6 +1261,38 @@ class GeminiLM(BaseProviderLM):
         return events
 
     # ─── Other endpoints ────────────────────────────────────────────
+
+    # ─── Live model listing (provisional endpoint) ──────────────────────
+
+    def _models_request(self):
+        # pageSize=1000 covers the catalog in one page (53 models observed
+        # live 2026-08-31, no nextPageToken).
+        return make_json_request(
+            method="GET",
+            url=f"{self.base_url.rstrip('/')}/models",
+            params={"pageSize": 1000},
+            headers=self._auth_headers(),
+            read_timeout=30.0,
+        )
+
+    def _models_from_body(self, body: str):
+        data = json.loads(body)
+        entries = data.get("models") if isinstance(data, dict) else None
+
+        def id_of(entry: dict) -> str | None:
+            # The wire name is "models/<id>"; the usable Request.model string
+            # is the bare id (build_request re-prefixes via _model_path).
+            name = entry.get("name")
+            if isinstance(name, str) and name.startswith("models/"):
+                return name[len("models/"):]
+            return name if isinstance(name, str) else None
+
+        return model_infos_from_entries(
+            entries,
+            provider=self.provider,
+            api_family="gemini_generate_content",
+            id_of=id_of,
+        )
 
     def embeddings(self, request: EmbeddingRequest) -> EmbeddingResponse:
         model_path = self._model_path(request.model)

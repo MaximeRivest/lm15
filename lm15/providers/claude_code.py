@@ -21,7 +21,9 @@ DEFAULT_CLAUDE_CODE_SYSTEM_PROMPT = "You are Claude Code, Anthropic's official C
 class ClaudeCodeLM(AnthropicLM):
     """Anthropic Messages adapter authenticated with local Claude Code OAuth."""
 
-    supports: ClassVar[EndpointSupport] = EndpointSupport(complete=True, stream=True)
+    # models=True: the Anthropic /v1/models hooks are inherited and work with
+    # the OAuth headers (validated live 2026-08-31, HTTP 200).
+    supports: ClassVar[EndpointSupport] = EndpointSupport(complete=True, stream=True, models=True)
     manifest: ClassVar[ProviderManifest] = ProviderManifest(
         provider="claude-code",
         supports=supports,

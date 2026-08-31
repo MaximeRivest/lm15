@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from typing import ClassVar, Iterator
 
@@ -8,7 +9,14 @@ from ..auth import (
     extract_chatgpt_account_id,
     get_codex_cli_access_token,
 )
-from ..errors import NotConfiguredError, ProviderError, UnsupportedFeatureError, with_credential_hint
+from ..errors import (
+    NotConfiguredError,
+    ProviderError,
+    UnsupportedFeatureError,
+    UnsupportedModelError,
+    map_http_error,
+    with_credential_hint,
+)
 from ..features import EndpointSupport, ProviderManifest
 from ..protocols import Capabilities, LiveSession
 from ..result import materialize_response
@@ -29,17 +37,22 @@ from ..types import (
     StreamEvent,
 )
 from .base import BaseProviderLM, Credential, SyncTransport, default_transport, resolve_credential
+from .common import make_json_request, model_infos_from_entries
 from .openai import OpenAILM
 
 DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
 DEFAULT_CODEX_ORIGINATOR = "lm15"
 DEFAULT_CODEX_INSTRUCTIONS = "You are a helpful assistant."
+# The backend's /models endpoint requires a client_version query parameter
+# (a Codex CLI release); any recent release is accepted.
+DEFAULT_CODEX_CLIENT_VERSION = "0.147.0"
+MODEL_LIST_HINT = "List the models your subscription accepts: call .list_models() on this client."
 
 
 class OpenAICodexLM(OpenAILM):
     """OpenAI Responses adapter authenticated with local Codex CLI OAuth."""
 
-    supports: ClassVar[EndpointSupport] = EndpointSupport(complete=True, stream=True)
+    supports: ClassVar[EndpointSupport] = EndpointSupport(complete=True, stream=True, models=True)
     manifest: ClassVar[ProviderManifest] = ProviderManifest(
         provider="openai-codex",
         supports=supports,
@@ -61,7 +74,9 @@ class OpenAICodexLM(OpenAILM):
         transport: SyncTransport | None = None,
         base_url: str = DEFAULT_CODEX_BASE_URL,
         originator: str = DEFAULT_CODEX_ORIGINATOR,
+        client_version: str = DEFAULT_CODEX_CLIENT_VERSION,
     ) -> None:
+        self.client_version = client_version
         if api_key:
             credential: Credential = api_key
             resolved_account_id = account_id or extract_chatgpt_account_id(resolve_credential(api_key))
@@ -112,9 +127,54 @@ class OpenAICodexLM(OpenAILM):
         )
 
     def normalize_error(self, status: int, body: str) -> ProviderError:
-        # Same canonical mapping as OpenAILM, but auth failures guide the
-        # user to re-login (there is no env var for subscription auth).
-        return with_credential_hint(super().normalize_error(status, body), OPENAI_CODEX_LOGIN_HINT)
+        # The ChatGPT Codex backend does not always use the OpenAI error
+        # envelope ({"error": {...}}); rejections arrive as {"detail": "..."}
+        # (e.g. an unknown model slug -> HTTP 400 with a plain-text reason).
+        # Recover that message and classify it first; otherwise fall through
+        # to the canonical OpenAI mapping.  Either way, auth failures guide
+        # the user to re-login (there is no env var for subscription auth).
+        error = self._normalize_detail_error(status, body) or super().normalize_error(status, body)
+        return with_credential_hint(error, OPENAI_CODEX_LOGIN_HINT)
+
+    def _normalize_detail_error(self, status: int, body: str) -> ProviderError | None:
+        try:
+            data = json.loads(body)
+        except ValueError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        detail = data.get("detail")
+        if not isinstance(detail, str) or not detail.strip():
+            return None
+        detail = detail.strip()
+        if self._is_model_error(detail):
+            return self._provider_error(
+                UnsupportedModelError, f"{detail}\n{MODEL_LIST_HINT}", status=status
+            )
+        return map_http_error(status, detail, provider=self.provider)
+
+    # ─── Model catalog ────────────────────────────────────────────────
+
+    def _models_request(self):
+        return make_json_request(
+            method="GET",
+            url=f"{self.base_url.rstrip('/')}/models",
+            params={"client_version": self.client_version},
+            headers=self._headers(),
+            read_timeout=30.0,
+        )
+
+    def _models_from_body(self, body: str):
+        # The Codex backend's usable model names are the `slug` values, and
+        # the list lives under "models" (not the OpenAI "data" envelope).
+        data = json.loads(body)
+        entries = data.get("models") if isinstance(data, dict) else None
+        return model_infos_from_entries(
+            entries,
+            provider=self.provider,
+            api_family="openai_responses",
+            id_of=lambda entry: entry.get("slug"),
+        )
 
     def _headers(self, content_type: str = "application/json") -> dict[str, str]:
         return {

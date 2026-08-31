@@ -18,6 +18,7 @@ class EndpointSupport:
     images: bool = False
     audio: bool = False
     responses_api: bool = False
+    models: bool = False
 
     # Future training/post-training endpoint families. These are separate from
     # inference Requests: OpenAI-style fine-tuning is job-based, while

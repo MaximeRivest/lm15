@@ -12,6 +12,7 @@ from ..errors import (
     map_http_error,
 )
 from ..features import EndpointSupport, ProviderManifest
+from ..models import ModelInfo
 from ..protocols import Capabilities, LiveSession
 from ..sse import SSEEvent, parse_sse
 from ..transports import TransportRequest
@@ -282,6 +283,28 @@ class BaseProviderLM:
 
     def audio_generate(self, request: AudioGenerationRequest) -> AudioGenerationResponse:
         raise UnsupportedFeatureError(f"{self.provider}: audio generation not supported", provider=self.provider)
+
+    # ─── Live model listing (provisional endpoint) ──────────────────────────
+    #
+    # Adapters that support their provider's list-models endpoint override the
+    # two hooks; list_models() itself is shared.  Each canonical ModelInfo
+    # carries the usable Request.model string as `id` and the verbatim wire
+    # entry under `origin.provider_data` (opaque, never cleaned).  Listing is
+    # ADVISORY metadata per docs/model-hydration.md: it never changes what
+    # build_request produces.
+
+    def _models_request(self) -> TransportRequest:
+        raise UnsupportedFeatureError(f"{self.provider}: model listing not supported", provider=self.provider)
+
+    def _models_from_body(self, body: str) -> "tuple[ModelInfo, ...]":
+        raise UnsupportedFeatureError(f"{self.provider}: model listing not supported", provider=self.provider)
+
+    def list_models(self) -> "tuple[ModelInfo, ...]":
+        """Fetch the models this credential can use, as canonical ModelInfo."""
+        resp = self._send(self._models_request())
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return self._models_from_body(resp.text())
 
 
 class UnsupportedLiveSession:

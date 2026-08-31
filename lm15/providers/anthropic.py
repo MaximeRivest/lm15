@@ -55,7 +55,7 @@ from ..types import (
     Usage,
 )
 from .base import BaseProviderLM, Credential, HttpResponse, SyncTransport, default_transport, resolve_credential
-from .common import anthropic_source, make_json_request, parts_to_text
+from .common import anthropic_source, make_json_request, model_infos_from_entries, parts_to_text
 
 # Canonical builtin tool name → Anthropic tool format
 _ANTHROPIC_BUILTIN_MAP: dict[str, str] = {
@@ -196,7 +196,7 @@ class AnthropicLM(BaseProviderLM):
         features=frozenset({"streaming", "tools", "reasoning", "files", "batch"}),
     )
     supports: ClassVar[EndpointSupport] = EndpointSupport(
-        complete=True, stream=True, files=True, batches=True
+        complete=True, stream=True, files=True, batches=True, models=True
     )
     manifest: ClassVar[ProviderManifest] = ProviderManifest(
         provider="anthropic",
@@ -673,6 +673,29 @@ class AnthropicLM(BaseProviderLM):
             yield StreamErrorEvent(error=self._error_detail(provider_code, message))
 
     # ─── Other endpoints ────────────────────────────────────────────
+
+    # ─── Live model listing (provisional endpoint) ──────────────────────
+
+    def _models_request(self):
+        # limit=1000 is the endpoint maximum; the catalog fits in one page
+        # today (has_more=false observed live 2026-08-31).
+        return make_json_request(
+            method="GET",
+            url=f"{self.base_url.rstrip('/')}/models",
+            params={"limit": 1000},
+            headers=self._headers(),
+            read_timeout=30.0,
+        )
+
+    def _models_from_body(self, body: str):
+        data = json.loads(body)
+        entries = data.get("data") if isinstance(data, dict) else None
+        return model_infos_from_entries(
+            entries,
+            provider=self.provider,
+            api_family="anthropic_messages",
+            id_of=lambda entry: entry.get("id"),
+        )
 
     def file_upload(self, request: FileUploadRequest) -> FileUploadResponse:
         req = TransportRequest(

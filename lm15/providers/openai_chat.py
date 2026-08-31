@@ -48,6 +48,7 @@ from .base import BaseProviderLM, Credential, HttpResponse, SyncTransport, defau
 from .common import (
     make_json_request,
     media_data_uri,
+    model_infos_from_entries,
     parse_json_object,
     parts_to_text,
 )
@@ -151,6 +152,7 @@ class OpenAIChatLM(BaseProviderLM):
     supports: ClassVar[EndpointSupport] = EndpointSupport(
         complete=True,
         stream=True,
+        models=True,
     )
     manifest: ClassVar[ProviderManifest] = ProviderManifest(
         provider="openai_chat",
@@ -190,6 +192,26 @@ class OpenAIChatLM(BaseProviderLM):
             "Authorization": f"Bearer {resolve_credential(self.api_key)}",
             "Content-Type": "application/json",
         }
+
+    # ─── Live model listing (provisional endpoint) ──────────────────────
+
+    def _models_request(self):
+        return make_json_request(
+            method="GET",
+            url=f"{self.base_url.rstrip('/')}/models",
+            headers=self._headers(),
+            read_timeout=30.0,
+        )
+
+    def _models_from_body(self, body: str):
+        data = json.loads(body)
+        entries = data.get("data") if isinstance(data, dict) else None
+        return model_infos_from_entries(
+            entries,
+            provider=self.provider,
+            api_family="openai_chat",
+            id_of=lambda entry: entry.get("id"),
+        )
 
     # ─── Request serialization ──────────────────────────────────────
 

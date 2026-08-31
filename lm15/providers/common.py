@@ -5,6 +5,7 @@ import json
 import urllib.parse
 from typing import Any
 
+from ..models import ModelInfo, ModelOrigin
 from ..transports import TransportRequest
 from ..types import (
     AudioPart,
@@ -97,6 +98,39 @@ def make_json_request(
         read_timeout=read_timeout,
         write_timeout=write_timeout,
     )
+
+
+def model_infos_from_entries(
+    entries: Any,
+    *,
+    provider: str,
+    api_family: str,
+    id_of: "callable",
+) -> tuple[ModelInfo, ...]:
+    """Map a provider's list-models entries to canonical ModelInfo.
+
+    ``id`` is the usable Request.model string (``id_of`` extracts it); the
+    verbatim wire entry is preserved under ``origin.provider_data`` (opaque,
+    never cleaned).  Entries without a usable id are skipped.
+    """
+    if not isinstance(entries, list):
+        return ()
+    out: list[ModelInfo] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        model_id = id_of(entry)
+        if not isinstance(model_id, str) or not model_id:
+            continue
+        out.append(
+            ModelInfo(
+                id=model_id,
+                provider=provider,
+                api_family=api_family,
+                origin=ModelOrigin(type="provider", provider_data=entry),
+            )
+        )
+    return tuple(out)
 
 
 def part_to_openai_input(part: Part) -> dict[str, Any]:

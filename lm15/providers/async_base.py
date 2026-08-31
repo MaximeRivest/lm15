@@ -52,7 +52,12 @@ from .common import make_json_request
 from .gemini import GeminiLM
 from .openai import OpenAILM
 from .openai_chat import OpenAIChatLM
-from .openai_codex import DEFAULT_CODEX_BASE_URL, DEFAULT_CODEX_ORIGINATOR, OpenAICodexLM
+from .openai_codex import (
+    DEFAULT_CODEX_BASE_URL,
+    DEFAULT_CODEX_CLIENT_VERSION,
+    DEFAULT_CODEX_ORIGINATOR,
+    OpenAICodexLM,
+)
 
 
 class AsyncTransport(Protocol):
@@ -153,6 +158,13 @@ class AsyncBaseProviderLM:
 
     def normalize_error(self, status: int, body: str) -> ProviderError:
         return self._inner.normalize_error(status, body)
+
+    async def list_models(self):
+        """Async mirror of BaseProviderLM.list_models (canonical ModelInfo)."""
+        resp = await self._send(self._inner._models_request())
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return self._inner._models_from_body(resp.text())
 
     async def aclose(self) -> None:
         aclose = getattr(self.transport, "aclose", None)
@@ -423,6 +435,7 @@ class AsyncOpenAICodexLM(AsyncBaseProviderLM):
     transport: AsyncTransport = field(default_factory=default_async_transport)
     base_url: str = DEFAULT_CODEX_BASE_URL
     originator: str = DEFAULT_CODEX_ORIGINATOR
+    client_version: str = DEFAULT_CODEX_CLIENT_VERSION
 
     # Not constructor params on the sync sibling either (it is not a dataclass).
     provider: str = field(default="openai-codex", init=False)
@@ -440,6 +453,7 @@ class AsyncOpenAICodexLM(AsyncBaseProviderLM):
             transport=_ForbiddenTransport(),
             base_url=self.base_url,
             originator=self.originator,
+            client_version=self.client_version,
         )
         self.api_key = self._inner.api_key  # static key or per-request credential provider (repr-suppressed)
         self.account_id = self._inner.account_id
