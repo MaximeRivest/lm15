@@ -29,8 +29,9 @@ from ..types import (
     BatchEntry,
     BatchJobInfo,
     BatchRequest,
+    FileInfo,
+    FilePage,
     FileUploadRequest,
-    FileUploadResponse,
     ImageGenerationRequest,
     ImageGenerationResponse,
     LiveConfig,
@@ -272,9 +273,6 @@ class BaseProviderLM:
     def live(self, config: LiveConfig) -> LiveSession:
         raise UnsupportedFeatureError(f"{self.provider}: live not supported", provider=self.provider)
 
-    def file_upload(self, request: FileUploadRequest) -> FileUploadResponse:
-        raise UnsupportedFeatureError(f"{self.provider}: file upload not supported", provider=self.provider)
-
     def image_generate(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
         raise UnsupportedFeatureError(f"{self.provider}: image generation not supported", provider=self.provider)
 
@@ -423,6 +421,105 @@ class BaseProviderLM:
         from ..batch import BatchJob
 
         return tuple(BatchJob(self, info) for info in self.batch_list(limit))
+
+    # ─── Files (account-scoped storage: upload / get / list / delete / download) ─
+    #
+    # Adapters override the pure build/parse hooks; the drivers are shared
+    # so the async twins and a future harness direction drive identical
+    # code.  All five operations exist on all three first-party providers
+    # (verified live 2026-08-31); which FILES support download is per-file
+    # provider policy — lm15 forwards the provider's typed refusal instead
+    # of second-guessing it.
+
+    def _files_unsupported(self) -> UnsupportedFeatureError:
+        return UnsupportedFeatureError(f"{self.provider}: files not supported", provider=self.provider)
+
+    def _file_upload_request(self, request: FileUploadRequest) -> TransportRequest:
+        raise self._files_unsupported()
+
+    def _file_info_from_body(self, body: str) -> FileInfo:
+        raise self._files_unsupported()
+
+    def _file_get_request(self, file_id: str) -> TransportRequest:
+        raise self._files_unsupported()
+
+    def _file_list_request(self, limit: int, cursor: str | None) -> TransportRequest:
+        raise self._files_unsupported()
+
+    def _file_page_from_list_body(self, body: str) -> FilePage:
+        raise self._files_unsupported()
+
+    def _file_delete_request(self, file_id: str) -> TransportRequest:
+        raise self._files_unsupported()
+
+    def _file_download_request(self, file_id: str) -> TransportRequest:
+        raise self._files_unsupported()
+
+    def file_upload(self, request: FileUploadRequest) -> FileInfo:
+        """Store a file with the provider; returns its canonical snapshot.
+
+        ``FileInfo.id`` is the reference to place in a media Part's
+        ``file_id``.  On Gemini the file may come back ``pending``
+        (processing); ``file_wait_ready`` covers that.
+        """
+        resp = self._send(self._file_upload_request(request))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return self._file_info_from_body(resp.text())
+
+    def file_get(self, file_id: str) -> FileInfo:
+        resp = self._send(self._file_get_request(file_id))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return self._file_info_from_body(resp.text())
+
+    def file_list(self, limit: int = 20, cursor: str | None = None) -> FilePage:
+        """One page of this credential's stored files.
+
+        The provider is the system of record: a lost file id is recovered
+        by listing, never by client-side bookkeeping.  ``cursor`` is the
+        opaque ``next_cursor`` of the previous page.
+        """
+        resp = self._send(self._file_list_request(limit, cursor))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return self._file_page_from_list_body(resp.text())
+
+    def file_delete(self, file_id: str) -> None:
+        """Delete a stored file.  Returning without an exception IS the
+        confirmation; provider acknowledgement bodies differ and carry no
+        canonical information."""
+        resp = self._send(self._file_delete_request(file_id))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+
+    def file_download(self, file_id: str) -> bytes:
+        """Download a file's content, when THIS file supports download.
+
+        Every provider restricts which files are downloadable (Anthropic:
+        tool-generated only; OpenAI: by purpose; Gemini: generated only)
+        and refuses the rest with a typed error — forwarded, not masked.
+        """
+        resp = self._send(self._file_download_request(file_id))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return resp.body
+
+    def file_wait_ready(self, file_id: str, poll_every: float = 2.0, timeout: float | None = None) -> FileInfo:
+        """Poll until the file leaves ``pending``; returns the terminal
+        snapshot (``ready`` or ``failed``) — check ``readiness``, mirroring
+        BatchJob.wait's return-don't-raise convention.  Only Gemini uploads
+        (large media) are ever pending; the first poll usually returns."""
+        import time as _time
+
+        deadline = None if timeout is None else _time.monotonic() + timeout
+        info = self.file_get(file_id)
+        while info.readiness == "pending":
+            if deadline is not None and _time.monotonic() >= deadline:
+                raise TimeoutError(f"file {file_id} still pending after {timeout}s")
+            _time.sleep(poll_every)
+            info = self.file_get(file_id)
+        return info
 
 
 def batch_entry_request(model: object) -> Request:

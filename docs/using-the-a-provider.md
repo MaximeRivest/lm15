@@ -16,8 +16,12 @@ Each LM exposes the same endpoint-oriented surface:
 complete(Request) -> Response
 stream(Request) -> Iterator[StreamEvent]
 live(LiveConfig) -> LiveSession
-file_upload(FileUploadRequest) -> FileUploadResponse
-batch_submit(BatchRequest) -> BatchResponse
+file_upload(FileUploadRequest) -> FileInfo
+file_get(file_id) -> FileInfo
+file_list(limit, cursor) -> FilePage
+file_delete(file_id) -> None
+file_download(file_id) -> bytes
+batch(requests) -> BatchJob
 image_generate(ImageGenerationRequest) -> ImageGenerationResponse
 audio_generate(AudioGenerationRequest) -> AudioGenerationResponse
 ```
@@ -214,15 +218,25 @@ Common extension keys used by built-in LMs:
 
 ## Files, images, and audio
 
-Endpoint-specific request types also use the same LM surface.
+Endpoint-specific request types also use the same LM surface. A stored
+file's `id` goes straight into a media Part's `file_id`; the provider is
+the system of record, so a lost id is recovered with `file_list`, never
+with client-side bookkeeping.
 
 ```python
 from lm15.types import FileUploadRequest
 
-uploaded = lm.file_upload(
+info = lm.file_upload(
     FileUploadRequest(filename="notes.txt", bytes_data=b"hello", media_type="text/plain")
 )
+info = lm.file_wait_ready(info.id)   # only Gemini uploads are ever pending
+lm.file_list(limit=10)               # the queue remembers
+lm.file_delete(info.id)              # returning without an exception IS the confirmation
 ```
+
+Download works only for files the provider marks downloadable (for
+example tool-generated output); other files raise the provider's typed
+refusal.
 
 Generated media responses return typed media parts.
 

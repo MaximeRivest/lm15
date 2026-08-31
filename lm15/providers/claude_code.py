@@ -10,7 +10,7 @@ from ..auth import (
 from ..errors import ProviderError, UnsupportedFeatureError, with_credential_hint
 from ..features import EndpointSupport, ProviderManifest
 from ..protocols import Capabilities, LiveSession
-from ..types import BatchEntry, BatchJobInfo, BatchRequest, BuiltinTool, FileUploadRequest, FileUploadResponse, LiveConfig, Request
+from ..types import BatchEntry, BatchJobInfo, BatchRequest, BuiltinTool, FileInfo, FilePage, FileUploadRequest, LiveConfig, Request
 from .anthropic import AnthropicLM
 from .base import Credential, SyncTransport, default_transport, resolve_credential
 
@@ -123,8 +123,22 @@ class ClaudeCodeLM(AnthropicLM):
             payload["system"] = [default_system, {"type": "text", "text": str(existing)}]
         return payload
 
-    def file_upload(self, request: FileUploadRequest) -> FileUploadResponse:
-        raise UnsupportedFeatureError("claude-code: file upload is not supported", provider=self.provider)
+    # Files are an API-key surface; the subscription credential does not
+    # carry them. Block every inherited driver, not just upload.
+    def file_upload(self, request: FileUploadRequest) -> FileInfo:
+        raise UnsupportedFeatureError("claude-code: files are not supported", provider=self.provider)
+
+    def file_get(self, file_id: str) -> FileInfo:
+        raise UnsupportedFeatureError("claude-code: files are not supported", provider=self.provider)
+
+    def file_list(self, limit: int = 20, cursor: str | None = None) -> FilePage:
+        raise UnsupportedFeatureError("claude-code: files are not supported", provider=self.provider)
+
+    def file_delete(self, file_id: str) -> None:
+        raise UnsupportedFeatureError("claude-code: files are not supported", provider=self.provider)
+
+    def file_download(self, file_id: str) -> bytes:
+        raise UnsupportedFeatureError("claude-code: files are not supported", provider=self.provider)
 
     # Batch is an API-key surface; the subscription credential does not
     # carry it. Block every inherited driver, not just submit.

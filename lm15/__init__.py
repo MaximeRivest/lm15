@@ -91,7 +91,8 @@ from .types import (
     ContinuationDelta,
     # auxiliary endpoints
     FileUploadRequest,
-    FileUploadResponse,
+    FileInfo,
+    FilePage,
     BatchRequest,
     BatchEntry,
     BatchJobInfo,
@@ -206,8 +207,8 @@ __all__ = [
     "StreamErrorEvent", "TextDelta", "ThinkingDelta", "AudioDelta",
     "ImageDelta", "ToolCallDelta", "CitationDelta", "ContinuationDelta",
     # auxiliary endpoints
-    "FileUploadRequest",
-    "FileUploadResponse", "BatchRequest", "BatchJobInfo", "BatchEntry",
+    "FileUploadRequest", "FileInfo", "FilePage",
+    "BatchRequest", "BatchJobInfo", "BatchEntry",
     "BatchJob", "AsyncBatchJob",
     "ImageGenerationRequest", "ImageGenerationResponse",
     "AudioGenerationRequest", "AudioGenerationResponse", "AudioFormat",

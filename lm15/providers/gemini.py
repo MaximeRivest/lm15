@@ -44,8 +44,9 @@ from ..types import (
     Config,
     DocumentPart,
     ErrorDetail,
+    FileInfo,
+    FilePage,
     FileUploadRequest,
-    FileUploadResponse,
     FunctionTool,
     ImageDelta,
     ImageGenerationRequest,
@@ -96,7 +97,7 @@ from .base import (
     default_transport,
     resolve_credential,
 )
-from .common import build_url, iso_utc, make_json_request, model_infos_from_entries, parse_json_object, parts_to_text
+from .common import build_url, iso_utc, make_json_request, model_infos_from_entries, multipart_related_body, parse_json_object, parts_to_text
 
 # Canonical builtin tool name → Gemini tool key
 _GEMINI_BUILTIN_MAP: dict[str, str] = {
@@ -1312,25 +1313,127 @@ class GeminiLM(BaseProviderLM):
             id_of=id_of,
         )
 
-    def file_upload(self, request: FileUploadRequest) -> FileUploadResponse:
+    # ─── File hooks (Files API) ─────────────────────────────────
+    #
+    # Wire shapes verified live 2026-08-31 (curl-fixtures/files-2026-08-31/):
+    # multipart/related upload (metadata display_name + media) so the
+    # filename survives the round trip; upload wraps the object in
+    # {"file": {...}} while get/list return it bare; list paginates with
+    # pageToken; download (`:download?alt=media`) EXISTS but the server
+    # refuses non-generated files (400, forwarded typed).
+    #
+    # FileInfo.id is the file's `uri` VERBATIM — Gemini model requests
+    # address files by URI (the frozen chat mapping places Part.file_id
+    # into fileData.fileUri), while the REST resource lives at the
+    # `files/<id>` name; _file_resource() derives one from the other.
+
+    @staticmethod
+    def _file_resource(file_id: str) -> str:
+        """`files/<id>` resource path from a canonical id (URI or name)."""
+        if "://" in file_id:
+            tail = file_id.rstrip("/").rsplit("/files/", 1)
+            if len(tail) == 2 and tail[1]:
+                return f"files/{tail[1]}"
+        if file_id.startswith("files/"):
+            return file_id
+        return f"files/{file_id}"
+
+    def _file_upload_request(self, request: FileUploadRequest) -> TransportRequest:
         url = build_url(f"{self.upload_base_url.rstrip('/')}/files", request.extensions)
-        req = TransportRequest(
+        content_type, body = multipart_related_body(
+            metadata={"file": {"display_name": request.filename}},
+            media_type=request.media_type,
+            data=request.bytes,
+        )
+        return TransportRequest(
             method="POST",
             url=url,
             headers=list(self._auth_headers({
-                "X-Goog-Upload-Protocol": "raw",
-                "X-Goog-Upload-File-Name": request.filename,
-                "Content-Type": request.media_type,
+                "X-Goog-Upload-Protocol": "multipart",
+                "Content-Type": content_type,
             }).items()),
-            body=request.bytes,
-            read_timeout=120.0,
+            body=body,
+            read_timeout=300.0,
         )
-        resp = self._send(req)
-        if resp.status >= 400:
-            raise self.normalize_error(resp.status, resp.text())
-        data = resp.json()
-        file_name = (data.get("file") or {}).get("name") or data.get("name") or ""
-        return FileUploadResponse(id=str(file_name), provider_data=data)
+
+    def _file_info_from_body(self, body: str) -> FileInfo:
+        data = json.loads(body)
+        if isinstance(data.get("file"), dict):  # upload wraps; get/list do not
+            return self._file_info(data["file"])
+        return self._file_info(data)
+
+    def _file_info(self, data: dict[str, Any]) -> FileInfo:
+        uri = data.get("uri")
+        name = data.get("name")
+        file_id = uri if isinstance(uri, str) and uri else name
+        if not isinstance(file_id, str) or not file_id:
+            raise ProviderError("gemini: file object carries no uri or name", provider=self.provider)
+        state = str(data.get("state") or "")
+        if state.endswith("PROCESSING"):
+            readiness = "pending"
+        elif state.endswith("FAILED"):
+            readiness = "failed"
+        else:  # ACTIVE, absent, or unknown
+            readiness = "ready"
+        if isinstance(data.get("downloadUri"), str) and data.get("downloadUri"):
+            downloadable: bool | None = True
+        elif data.get("source") == "UPLOADED":
+            downloadable = False  # the server's stated rule: only GENERATED files download
+        else:
+            downloadable = None
+        display_name = data.get("displayName")
+        mime = data.get("mimeType")
+        size_raw = data.get("sizeBytes")  # the wire carries int64 as a string
+        try:
+            size_bytes = int(size_raw) if isinstance(size_raw, (str, int)) and not isinstance(size_raw, bool) else None
+        except ValueError:
+            size_bytes = None
+        return FileInfo(
+            id=file_id,
+            filename=display_name if isinstance(display_name, str) and display_name else None,
+            media_type=mime if isinstance(mime, str) and mime else None,
+            size_bytes=size_bytes,
+            created_at=iso_utc(data.get("createTime")),
+            expires_at=iso_utc(data.get("expirationTime")),
+            readiness=readiness,
+            downloadable=downloadable,
+            provider_data=data,
+        )
+
+    def _file_get_request(self, file_id: str) -> TransportRequest:
+        return make_json_request(
+            method="GET", url=f"{self.base_url.rstrip('/')}/{self._file_resource(file_id)}",
+            headers=self._auth_headers(), read_timeout=60.0,
+        )
+
+    def _file_list_request(self, limit: int, cursor: str | None) -> TransportRequest:
+        params: dict[str, Any] = {"pageSize": limit}
+        if cursor is not None:
+            params["pageToken"] = cursor
+        return make_json_request(
+            method="GET", url=f"{self.base_url.rstrip('/')}/files",
+            params=params, headers=self._auth_headers(), read_timeout=60.0,
+        )
+
+    def _file_page_from_list_body(self, body: str) -> FilePage:
+        data = json.loads(body)
+        entries = data.get("files") if isinstance(data.get("files"), list) else []
+        items = tuple(self._file_info(entry) for entry in entries if isinstance(entry, dict))
+        cursor = data.get("nextPageToken")
+        return FilePage(items=items, next_cursor=cursor if isinstance(cursor, str) and cursor else None)
+
+    def _file_delete_request(self, file_id: str) -> TransportRequest:
+        return make_json_request(
+            method="DELETE", url=f"{self.base_url.rstrip('/')}/{self._file_resource(file_id)}",
+            headers=self._auth_headers(), read_timeout=60.0,
+        )
+
+    def _file_download_request(self, file_id: str) -> TransportRequest:
+        return make_json_request(
+            method="GET",
+            url=f"{self.base_url.rstrip('/')}/{self._file_resource(file_id)}:download?alt=media",
+            headers=self._auth_headers(), read_timeout=300.0,
+        )
 
     # ─── Batch hooks (Batch Mode, inline requests) ───────────────────
     #

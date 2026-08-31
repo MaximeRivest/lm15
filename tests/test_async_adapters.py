@@ -190,10 +190,10 @@ def test_inner_sync_transport_raises_if_touched(provider, sync_cls, async_cls):
 
 def test_async_unsupported_endpoints_are_honest():
     lm = AsyncOpenAILM(api_key="test", transport=FakeAsyncTransport(b"{}"))
-    from lm15.types import FileUploadRequest
+    from lm15.types import ImageGenerationRequest
 
     with pytest.raises(UnsupportedFeatureError, match="use the sync adapter"):
-        lm.file_upload(FileUploadRequest(filename="x.txt", bytes_data=b"x", media_type="text/plain"))
+        lm.image_generate(ImageGenerationRequest(model="m", prompt="a cat"))
 
 
 # ─── live smoke vs local ollama ──────────────────────────────────────

@@ -100,6 +100,7 @@ ERROR_CODES = frozenset(get_args(ErrorCode))
 StreamEventType = Literal["start", "delta", "end", "error"]
 BatchStatus = Literal["queued", "running", "cancelling", "completed", "failed", "cancelled", "expired"]
 BatchOutcome = Literal["succeeded", "errored", "cancelled", "expired"]
+FileReadiness = Literal["pending", "ready", "failed"]
 AudioEncoding = Literal["pcm16", "opus", "mp3", "aac"]
 ToolChoiceMode = Literal["auto", "required", "none"]
 LiveClientEventType = Literal["turn", "audio", "image", "text", "tool_result", "interrupt", "end_audio"]
@@ -113,6 +114,7 @@ BATCH_STATUSES = frozenset(get_args(BatchStatus))
 BATCH_OUTCOMES = frozenset(get_args(BatchOutcome))
 # Job statuses in which a batch will make no further progress.
 BATCH_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "expired"})
+FILE_READINESS_VALUES = frozenset(get_args(FileReadiness))
 AUDIO_ENCODINGS = frozenset(get_args(AudioEncoding))
 TOOL_CHOICE_MODES = frozenset(get_args(ToolChoiceMode))
 
@@ -1998,22 +2000,21 @@ class Response:
 class FileUploadRequest:
     """A file upload request.
 
-    Unlike most endpoint requests, ``model`` is optional because some
-    providers scope file uploads to the account, not a specific model.
-    Uploads can be backed by in-memory bytes or by a local path.  Path-backed
-    uploads are lazy: LMs can stream from disk instead of forcing the
-    whole file into memory at construction time.
+    Files are an ACCOUNT-scoped resource on every provider, so there is
+    no ``model`` field.  Uploads can be backed by in-memory bytes or by a
+    local path.  Path-backed uploads are lazy: LMs can stream from disk
+    instead of forcing the whole file into memory at construction time,
+    and they are runtime-only — the canonical serializer rejects them
+    because a local path is meaningless off this machine.
     """
 
     filename: str
     bytes_data: bytes | None = None
     media_type: str = "application/octet-stream"
-    model: str | None = None
     extensions: Extensions | None = None
     path: Path | None = None
 
     def __post_init__(self) -> None:
-        _validate_optional_text(self.model, field_name="FileUploadRequest.model", allow_empty=False)
         _validate_text(self.filename, field_name="FileUploadRequest.filename", allow_empty=False)
         if self.path is not None and not isinstance(self.path, Path):
             if str(self.path) == "":
@@ -2041,7 +2042,6 @@ class FileUploadRequest:
             f"filename={self.filename!r}, "
             f"bytes_data={_bytes_summary(self.bytes_data)!r}, "
             f"media_type={self.media_type!r}, "
-            f"model={self.model!r}, "
             f"extensions={self.extensions!r}, "
             f"path={self.path!r})"
         )
@@ -2056,13 +2056,66 @@ class FileUploadRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class FileUploadResponse:
+class FileInfo:
+    """A snapshot of one provider-side stored file.
+
+    ``id`` is the canonical reference for this provider: paste it into a
+    media Part's ``file_id`` and the chat mapping places it on the wire
+    (OpenAI/Anthropic file ids verbatim; Gemini the file URI, because
+    Gemini requests address files by URI, not resource name).
+
+    Optional fields stay ``None`` when the provider does not report the
+    value (OpenAI reports no MIME type; only Gemini reports expiry).
+    ``downloadable`` is tri-state: ``True``/``False`` when the provider
+    states the capability, ``None`` when it does not say.
+    """
+
     id: str
+    filename: str | None = None
+    media_type: str | None = None
+    size_bytes: int | None = None
+    created_at: str | None = None
+    expires_at: str | None = None
+    readiness: FileReadiness = "ready"
+    downloadable: bool | None = None
     provider_data: ProviderData | None = None
 
+    @property
+    def ready(self) -> bool:
+        return self.readiness == "ready"
+
     def __post_init__(self) -> None:
-        _validate_text(self.id, field_name="FileUploadResponse.id", allow_empty=False)
+        _validate_text(self.id, field_name="FileInfo.id", allow_empty=False)
+        _validate_optional_text(self.filename, field_name="FileInfo.filename", allow_empty=False)
+        _validate_optional_text(self.media_type, field_name="FileInfo.media_type", allow_empty=False)
+        _coerce_int_field(self, "size_bytes")
+        _validate_non_negative(self.size_bytes, field_name="FileInfo.size_bytes")
+        _validate_optional_text(self.created_at, field_name="FileInfo.created_at", allow_empty=False)
+        _validate_optional_text(self.expires_at, field_name="FileInfo.expires_at", allow_empty=False)
+        if self.readiness not in FILE_READINESS_VALUES:
+            raise ValueError(f"unsupported file readiness: {self.readiness}")
+        if self.downloadable is not None and not isinstance(self.downloadable, bool):
+            raise TypeError("FileInfo.downloadable must be a bool or None")
         _validate_json_field(self, "provider_data")
+
+
+@dataclass(frozen=True, slots=True)
+class FilePage:
+    """One page of stored files plus an opaque continuation cursor.
+
+    ``next_cursor`` is provider-issued and opaque: pass it back to
+    ``file_list`` to fetch the next page; ``None`` means the listing is
+    complete.
+    """
+
+    items: tuple[FileInfo, ...] = ()
+    next_cursor: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "items", tuple(self.items))
+        if not all(isinstance(item, FileInfo) for item in self.items):
+            raise TypeError("FilePage.items must contain FileInfo objects")
+        _validate_optional_text(self.next_cursor, field_name="FilePage.next_cursor", allow_empty=False)
 
 
 # ─── Batch ───────────────────────────────────────────────────────────
@@ -2251,7 +2304,7 @@ EndpointRequest: TypeAlias = (
 
 EndpointResponse: TypeAlias = (
     Response
-    | FileUploadResponse
+    | FileInfo
     | BatchJobInfo
     | ImageGenerationResponse
     | AudioGenerationResponse
@@ -2523,6 +2576,8 @@ def _check_literal_vocabularies() -> None:
         ("Role", set(get_args(Role)), set(ROLE_VALUES)),
         ("StreamEventType", set(get_args(StreamEventType)), {_variant_type(cls) for cls in STREAM_EVENT_CLASSES}),
         ("BatchStatus", set(get_args(BatchStatus)), set(BATCH_STATUSES)),
+        ("BatchOutcome", set(get_args(BatchOutcome)), set(BATCH_OUTCOMES)),
+        ("FileReadiness", set(get_args(FileReadiness)), set(FILE_READINESS_VALUES)),
         ("AudioEncoding", set(get_args(AudioEncoding)), set(AUDIO_ENCODINGS)),
         ("ToolChoiceMode", set(get_args(ToolChoiceMode)), set(TOOL_CHOICE_MODES)),
         ("ReasoningEffort", set(get_args(ReasoningEffort)), set(REASONING_EFFORTS)),

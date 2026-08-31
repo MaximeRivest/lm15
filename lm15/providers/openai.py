@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import json
 import urllib.parse
-import uuid
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Iterator
 
@@ -39,8 +38,9 @@ from ..types import (
     ContinuationState,
     CitationPart,
     ErrorDetail,
+    FileInfo,
+    FilePage,
     FileUploadRequest,
-    FileUploadResponse,
     FunctionTool,
     ImageDelta,
     ImageGenerationRequest,
@@ -94,6 +94,7 @@ from .common import (
     iso_utc,
     make_json_request,
     model_infos_from_entries,
+    multipart_form_body,
     parse_json_object,
     part_to_openai_input,
     parts_to_text,
@@ -1141,37 +1142,92 @@ class OpenAILM(BaseProviderLM):
             id_of=lambda entry: entry.get("id"),
         )
 
-    def _multipart_file_body(self, *, purpose: str, filename: str, media_type: str, data: bytes) -> tuple[str, bytes]:
-        boundary = f"lm15-{uuid.uuid4().hex}"
-        safe_filename = filename.replace('"', "%22")
-        lines: list[bytes] = []
-        def add(s: str) -> None:
-            lines.append(s.encode("utf-8"))
-        add(f"--{boundary}\r\n")
-        add('Content-Disposition: form-data; name="purpose"\r\n\r\n')
-        add(f"{purpose}\r\n")
-        add(f"--{boundary}\r\n")
-        add(f'Content-Disposition: form-data; name="file"; filename="{safe_filename}"\r\n')
-        add(f"Content-Type: {media_type}\r\n\r\n")
-        lines.append(data)
-        add("\r\n")
-        add(f"--{boundary}--\r\n")
-        return boundary, b"".join(lines)
+    # ─── File hooks (Files API) ─────────────────────────────────
+    #
+    # Wire shapes verified live 2026-08-31 (curl-fixtures/files-2026-08-31/):
+    # multipart upload with a required `purpose` form field (an OpenAI
+    # storage classification, NOT part of the portable surface — lm15
+    # defaults to `user_data` per current OpenAI guidance and sets `batch`
+    # itself for batch inputs; extensions["purpose"] overrides).  List
+    # pages with `after=<last id>` + `has_more`.  Download is refused for
+    # some purposes (observed: 400 for user_data) — forwarded typed.
 
-    def file_upload(self, request: FileUploadRequest) -> FileUploadResponse:
-        purpose = str((request.extensions or {}).get("purpose", "assistants"))
-        boundary, body = self._multipart_file_body(purpose=purpose, filename=request.filename, media_type=request.media_type, data=request.bytes)
-        resp = self._send(TransportRequest(
+    def _file_upload_request(self, request: FileUploadRequest) -> TransportRequest:
+        extensions = dict(request.extensions or {})
+        purpose = str(extensions.pop("purpose", "user_data"))
+        fields = [("purpose", purpose)] + [(k, str(v)) for k, v in extensions.items()]
+        content_type, body = multipart_form_body(
+            fields=fields,
+            files=[("file", request.filename, request.media_type, request.bytes)],
+        )
+        return TransportRequest(
             method="POST",
             url=f"{self.base_url.rstrip('/')}/files",
-            headers=list(self._headers(content_type=f"multipart/form-data; boundary={boundary}").items()),
+            headers=list(self._headers(content_type=content_type).items()),
             body=body,
-            read_timeout=120.0,
-        ))
-        if resp.status >= 400:
-            raise self.normalize_error(resp.status, resp.text())
-        data = resp.json()
-        return FileUploadResponse(id=str(data.get("id") or ""), provider_data=data)
+            read_timeout=300.0,
+        )
+
+    def _file_info_from_body(self, body: str) -> FileInfo:
+        return self._file_info(json.loads(body))
+
+    def _file_info(self, data: dict[str, Any]) -> FileInfo:
+        file_id = data.get("id")
+        if not isinstance(file_id, str) or not file_id:
+            raise ProviderError("openai: file object carries no id", provider=self.provider)
+        status = str(data.get("status") or "")
+        if status == "error":
+            readiness = "failed"
+        elif status == "uploaded":
+            readiness = "pending"
+        else:  # "processed", absent (the field is deprecated), or unknown
+            readiness = "ready"
+        filename = data.get("filename")
+        return FileInfo(
+            id=file_id,
+            filename=filename if isinstance(filename, str) and filename else None,
+            media_type=None,  # OpenAI file metadata reports no MIME type
+            size_bytes=data.get("bytes") if isinstance(data.get("bytes"), int) else None,
+            created_at=iso_utc(data.get("created_at")),
+            expires_at=iso_utc(data.get("expires_at")),
+            readiness=readiness,
+            downloadable=None,  # purpose-dependent policy, not reported per file
+            provider_data=data,
+        )
+
+    def _file_get_request(self, file_id: str) -> TransportRequest:
+        return make_json_request(
+            method="GET", url=f"{self.base_url.rstrip('/')}/files/{file_id}",
+            headers=self._headers(), read_timeout=60.0,
+        )
+
+    def _file_list_request(self, limit: int, cursor: str | None) -> TransportRequest:
+        params: dict[str, Any] = {"limit": limit}
+        if cursor is not None:
+            params["after"] = cursor
+        return make_json_request(
+            method="GET", url=f"{self.base_url.rstrip('/')}/files",
+            params=params, headers=self._headers(), read_timeout=60.0,
+        )
+
+    def _file_page_from_list_body(self, body: str) -> FilePage:
+        data = json.loads(body)
+        entries = data.get("data") if isinstance(data.get("data"), list) else []
+        items = tuple(self._file_info(entry) for entry in entries if isinstance(entry, dict))
+        cursor = data.get("last_id") if data.get("has_more") and items else None
+        return FilePage(items=items, next_cursor=cursor if isinstance(cursor, str) and cursor else None)
+
+    def _file_delete_request(self, file_id: str) -> TransportRequest:
+        return make_json_request(
+            method="DELETE", url=f"{self.base_url.rstrip('/')}/files/{file_id}",
+            headers=self._headers(), read_timeout=60.0,
+        )
+
+    def _file_download_request(self, file_id: str) -> TransportRequest:
+        return make_json_request(
+            method="GET", url=f"{self.base_url.rstrip('/')}/files/{file_id}/content",
+            headers=self._headers(), read_timeout=300.0,
+        )
 
     # ─── Batch hooks (Batch API over /v1/responses) ──────────────────
     #
@@ -1191,13 +1247,14 @@ class OpenAILM(BaseProviderLM):
                 "body": self._payload(nested, stream=False),
             }, separators=(",", ":"), ensure_ascii=False))
         data = ("\n".join(lines) + "\n").encode("utf-8")
-        boundary, body = self._multipart_file_body(
-            purpose="batch", filename="lm15-batch.jsonl", media_type="application/jsonl", data=data
+        content_type, body = multipart_form_body(
+            fields=[("purpose", "batch")],
+            files=[("file", "lm15-batch.jsonl", "application/jsonl", data)],
         )
         return TransportRequest(
             method="POST",
             url=f"{self.base_url.rstrip('/')}/files",
-            headers=list(self._headers(content_type=f"multipart/form-data; boundary={boundary}").items()),
+            headers=list(self._headers(content_type=content_type).items()),
             body=body,
             read_timeout=300.0,
         )

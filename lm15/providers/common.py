@@ -254,3 +254,59 @@ def iso_utc(value: object) -> str | None:
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     except (ValueError, OverflowError, OSError):
         return None
+
+
+def multipart_form_body(
+    *,
+    fields: list[tuple[str, str]] | None = None,
+    files: list[tuple[str, str, str, bytes]] | None = None,
+) -> tuple[str, bytes]:
+    """Build a multipart/form-data body (OpenAI and Anthropic file uploads).
+
+    ``files`` entries are ``(field_name, filename, content_type, data)``.
+    Returns ``(content_type_header_value, body)``.
+    """
+    import uuid
+
+    boundary = f"lm15-{uuid.uuid4().hex}"
+    chunks: list[bytes] = []
+    for name, value in fields or []:
+        chunks.append(f"--{boundary}\r\n".encode("utf-8"))
+        chunks.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+        chunks.append(f"{value}\r\n".encode("utf-8"))
+    for name, filename, content_type, data in files or []:
+        safe_filename = filename.replace('"', "%22")
+        chunks.append(f"--{boundary}\r\n".encode("utf-8"))
+        chunks.append(
+            f'Content-Disposition: form-data; name="{name}"; filename="{safe_filename}"\r\n'.encode("utf-8")
+        )
+        chunks.append(f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"))
+        chunks.append(data)
+        chunks.append(b"\r\n")
+    chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
+    return f"multipart/form-data; boundary={boundary}", b"".join(chunks)
+
+
+def multipart_related_body(
+    *,
+    metadata: dict[str, Any],
+    media_type: str,
+    data: bytes,
+) -> tuple[str, bytes]:
+    """Build a multipart/related body (Gemini media upload: JSON metadata
+    part followed by one media part).  Returns ``(content_type, body)``."""
+    import uuid
+
+    boundary = f"lm15-{uuid.uuid4().hex}"
+    chunks: list[bytes] = [
+        f"--{boundary}\r\n".encode("utf-8"),
+        b"Content-Type: application/json; charset=UTF-8\r\n\r\n",
+        json_dumps(metadata),
+        b"\r\n",
+        f"--{boundary}\r\n".encode("utf-8"),
+        f"Content-Type: {media_type}\r\n\r\n".encode("utf-8"),
+        data,
+        b"\r\n",
+        f"--{boundary}--\r\n".encode("utf-8"),
+    ]
+    return f"multipart/related; boundary={boundary}", b"".join(chunks)

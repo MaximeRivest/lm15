@@ -240,6 +240,50 @@ class AsyncBaseProviderLM:
 
         return tuple(AsyncBatchJob(self, info) for info in await self.batch_list(limit))
 
+    # ── Files: async drivers over the sync adapter's pure hooks ──────
+
+    async def file_upload(self, request: "FileUploadRequest"):
+        resp = await self._send(self._inner._file_upload_request(request))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return self._inner._file_info_from_body(resp.text())
+
+    async def file_get(self, file_id: str):
+        resp = await self._send(self._inner._file_get_request(file_id))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return self._inner._file_info_from_body(resp.text())
+
+    async def file_list(self, limit: int = 20, cursor: str | None = None):
+        resp = await self._send(self._inner._file_list_request(limit, cursor))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return self._inner._file_page_from_list_body(resp.text())
+
+    async def file_delete(self, file_id: str) -> None:
+        resp = await self._send(self._inner._file_delete_request(file_id))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+
+    async def file_download(self, file_id: str) -> bytes:
+        resp = await self._send(self._inner._file_download_request(file_id))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return resp.body
+
+    async def file_wait_ready(self, file_id: str, poll_every: float = 2.0, timeout: float | None = None):
+        import asyncio
+        import time as _time
+
+        deadline = None if timeout is None else _time.monotonic() + timeout
+        info = await self.file_get(file_id)
+        while info.readiness == "pending":
+            if deadline is not None and _time.monotonic() >= deadline:
+                raise TimeoutError(f"file {file_id} still pending after {timeout}s")
+            await asyncio.sleep(poll_every)
+            info = await self.file_get(file_id)
+        return info
+
     async def aclose(self) -> None:
         aclose = getattr(self.transport, "aclose", None)
         if callable(aclose):
@@ -262,9 +306,6 @@ class AsyncBaseProviderLM:
 
     def live(self, config: LiveConfig):
         raise self._async_unsupported("live")
-
-    def file_upload(self, request: FileUploadRequest):
-        raise self._async_unsupported("file upload")
 
     def image_generate(self, request: ImageGenerationRequest):
         raise self._async_unsupported("image generation")
@@ -485,8 +526,22 @@ class AsyncClaudeCodeLM(AsyncBaseProviderLM):
         )
         self.api_key = self._inner.api_key  # static key or per-request credential provider (repr-suppressed)
 
+    # Files are an API-key surface; the subscription credential does not
+    # carry them. Block every inherited async driver, not just upload.
     def file_upload(self, request: FileUploadRequest):
         return self._inner.file_upload(request)  # raises UnsupportedFeatureError
+
+    def file_get(self, file_id: str):
+        return self._inner.file_get(file_id)  # raises UnsupportedFeatureError
+
+    def file_list(self, limit: int = 20, cursor: str | None = None):
+        return self._inner.file_list(limit, cursor)  # raises UnsupportedFeatureError
+
+    def file_delete(self, file_id: str):
+        return self._inner.file_delete(file_id)  # raises UnsupportedFeatureError
+
+    def file_download(self, file_id: str):
+        return self._inner.file_download(file_id)  # raises UnsupportedFeatureError
 
     # Batch is an API-key surface; the subscription credential does not
     # carry it. Block every inherited async driver, not just submit.
@@ -550,8 +605,22 @@ class AsyncOpenAICodexLM(AsyncBaseProviderLM):
     def live(self, config: LiveConfig):
         return self._inner.live(config)  # raises UnsupportedFeatureError
 
+    # Files are an API-key surface; the subscription credential does not
+    # carry them. Block every inherited async driver, not just upload.
     def file_upload(self, request: FileUploadRequest):
         return self._inner.file_upload(request)  # raises UnsupportedFeatureError
+
+    def file_get(self, file_id: str):
+        return self._inner.file_get(file_id)  # raises UnsupportedFeatureError
+
+    def file_list(self, limit: int = 20, cursor: str | None = None):
+        return self._inner.file_list(limit, cursor)  # raises UnsupportedFeatureError
+
+    def file_delete(self, file_id: str):
+        return self._inner.file_delete(file_id)  # raises UnsupportedFeatureError
+
+    def file_download(self, file_id: str):
+        return self._inner.file_download(file_id)  # raises UnsupportedFeatureError
 
     # Batch is an API-key surface; the subscription credential does not
     # carry it. Block every inherited async driver, not just submit.

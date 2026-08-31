@@ -23,8 +23,8 @@ from lm15.types import (  # noqa: E402
     AudioGenerationResponse,
     BatchRequest,
     BatchJobInfo,
+    FileInfo,
     FileUploadRequest,
-    FileUploadResponse,
     FunctionTool,
     ImageGenerationRequest,
     ImageGenerationResponse,
@@ -120,7 +120,12 @@ def run_case(case_id: str, fn: Callable[[], None]) -> EndpointResult:
 
 
 def openai_file_upload() -> None:
-    transport = FakeTransport([json_response({"id": "file_1"})])
+    # Body shape captured live 2026-08-31 (curl-fixtures/files-2026-08-31/).
+    transport = FakeTransport([json_response({
+        "object": "file", "id": "file_1", "purpose": "user_data",
+        "filename": "hello.txt", "bytes": 5, "created_at": 1788215944,
+        "expires_at": None, "status": "processed", "status_details": None,
+    })])
     lm = OpenAILM(api_key="test", transport=transport)
     out = lm.file_upload(FileUploadRequest(filename="hello.txt", bytes_data=b"hello", media_type="text/plain"))
     req = transport.requests[0]
@@ -128,8 +133,11 @@ def openai_file_upload() -> None:
     assert req.url == "https://api.openai.com/v1/files"
     assert_header(req, "Content-Type")
     assert b"hello.txt" in req.body
-    assert isinstance(out, FileUploadResponse)
+    assert b"user_data" in req.body  # default purpose per current OpenAI guidance
+    assert isinstance(out, FileInfo)
     assert out.id == "file_1"
+    assert out.readiness == "ready"
+    assert out.size_bytes == 5
 
 
 def openai_batch_submit() -> None:
@@ -187,14 +195,24 @@ def openai_live_url_and_headers() -> None:
 
 
 def anthropic_file_upload() -> None:
-    transport = FakeTransport([json_response({"id": "file_anth_1"})])
+    # Body shape captured live 2026-08-31 (curl-fixtures/files-2026-08-31/).
+    transport = FakeTransport([json_response({
+        "type": "file", "id": "file_anth_1", "size_bytes": 5,
+        "created_at": "2026-08-31T22:39:04.248542Z", "expires_at": None,
+        "filename": "hello.txt", "mime_type": "text/plain", "downloadable": False,
+    })])
     lm = AnthropicLM(api_key="test", transport=transport)
     out = lm.file_upload(FileUploadRequest(filename="hello.txt", bytes_data=b"hello", media_type="text/plain"))
     req = transport.requests[0]
     assert req.method == "POST"
     assert "/v1/files" in req.url
-    assert isinstance(out, FileUploadResponse)
+    assert_header(req, "Content-Type")  # multipart/form-data (GA wire)
+    assert b"hello.txt" in req.body
+    assert isinstance(out, FileInfo)
     assert out.id == "file_anth_1"
+    assert out.media_type == "text/plain"
+    assert out.downloadable is False
+    assert out.created_at == "2026-08-31T22:39:04Z"
 
 
 def anthropic_batch_submit() -> None:
@@ -209,13 +227,26 @@ def anthropic_batch_submit() -> None:
 
 
 def gemini_file_upload() -> None:
-    transport = FakeTransport([json_response({"file": {"name": "files/abc"}})])
+    # Body shape captured live 2026-08-31 (curl-fixtures/files-2026-08-31/):
+    # upload wraps the file object; the canonical id is the URI (model
+    # requests address files by URI, not resource name).
+    transport = FakeTransport([json_response({"file": {
+        "name": "files/abc", "displayName": "hello.txt", "mimeType": "text/plain",
+        "sizeBytes": "5", "createTime": "2026-08-31T22:39:04.789662Z",
+        "expirationTime": "2026-09-02T22:39:04.608592208Z",
+        "uri": "https://generativelanguage.googleapis.com/v1beta/files/abc",
+        "state": "ACTIVE", "source": "UPLOADED",
+    }})])
     lm = GeminiLM(api_key="test", transport=transport)
     out = lm.file_upload(FileUploadRequest(filename="hello.txt", bytes_data=b"hello", media_type="text/plain"))
     req = transport.requests[0]
     assert "/upload/v1beta/files" in req.url
-    assert isinstance(out, FileUploadResponse)
-    assert out.id == "files/abc"
+    assert isinstance(out, FileInfo)
+    assert out.id == "https://generativelanguage.googleapis.com/v1beta/files/abc"
+    assert out.filename == "hello.txt"
+    assert out.size_bytes == 5
+    assert out.expires_at == "2026-09-02T22:39:04Z"
+    assert out.downloadable is False
 
 
 def gemini_image_generate() -> None:

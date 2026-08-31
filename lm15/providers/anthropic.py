@@ -34,8 +34,9 @@ from ..types import (
     CitationPart,
     DocumentPart,
     ErrorDetail,
+    FileInfo,
+    FilePage,
     FileUploadRequest,
-    FileUploadResponse,
     FunctionTool,
     ImagePart,
     Message,
@@ -66,7 +67,7 @@ from .base import (
     default_transport,
     resolve_credential,
 )
-from .common import anthropic_source, iso_utc, make_json_request, model_infos_from_entries, parts_to_text
+from .common import anthropic_source, iso_utc, make_json_request, model_infos_from_entries, multipart_form_body, parts_to_text
 
 # Canonical builtin tool name → Anthropic tool format
 _ANTHROPIC_BUILTIN_MAP: dict[str, str] = {
@@ -727,25 +728,83 @@ class AnthropicLM(BaseProviderLM):
             id_of=lambda entry: entry.get("id"),
         )
 
-    def file_upload(self, request: FileUploadRequest) -> FileUploadResponse:
-        req = TransportRequest(
+    # ─── File hooks (Files API, GA) ──────────────────────────────
+    #
+    # Wire shapes verified live 2026-08-31 (curl-fixtures/files-2026-08-31/):
+    # multipart/form-data upload with NO beta header (GA), file objects
+    # carry mime_type / size_bytes / downloadable verbatim, list paginates
+    # with an opaque `next_page` token passed back as `?page=`, download
+    # is refused for non-tool-generated files (400, forwarded typed).
+
+    def _file_upload_request(self, request: FileUploadRequest) -> TransportRequest:
+        content_type, body = multipart_form_body(
+            fields=[(k, str(v)) for k, v in (request.extensions or {}).items()],
+            files=[("file", request.filename, request.media_type, request.bytes)],
+        )
+        headers = self._headers()
+        headers["content-type"] = content_type
+        return TransportRequest(
             method="POST",
             url=f"{self.base_url.rstrip('/')}/files",
-            headers=[
-                ("x-api-key", resolve_credential(self.api_key)),
-                ("anthropic-version", self.api_version),
-                ("content-type", request.media_type),
-                ("x-filename", request.filename),
-            ],
-            body=request.bytes,
-            read_timeout=120.0,
+            headers=list(headers.items()),
+            body=body,
+            read_timeout=300.0,
         )
-        resp = self._send(req)
-        if resp.status >= 400:
-            raise self.normalize_error(resp.status, resp.text())
-        data = resp.json()
-        file_id = data.get("id") or (data.get("file") or {}).get("id") or ""
-        return FileUploadResponse(id=str(file_id), provider_data=data)
+
+    def _file_info_from_body(self, body: str) -> FileInfo:
+        return self._file_info(json.loads(body))
+
+    def _file_info(self, data: dict[str, Any]) -> FileInfo:
+        file_id = data.get("id")
+        if not isinstance(file_id, str) or not file_id:
+            raise ProviderError("anthropic: file object carries no id", provider=self.provider)
+        filename = data.get("filename")
+        mime = data.get("mime_type")
+        return FileInfo(
+            id=file_id,
+            filename=filename if isinstance(filename, str) and filename else None,
+            media_type=mime if isinstance(mime, str) and mime else None,
+            size_bytes=data.get("size_bytes") if isinstance(data.get("size_bytes"), int) else None,
+            created_at=iso_utc(data.get("created_at")),
+            expires_at=iso_utc(data.get("expires_at")),
+            readiness="ready",  # Anthropic files have no processing state
+            downloadable=data.get("downloadable") if isinstance(data.get("downloadable"), bool) else None,
+            provider_data=data,
+        )
+
+    def _file_get_request(self, file_id: str) -> TransportRequest:
+        return make_json_request(
+            method="GET", url=f"{self.base_url.rstrip('/')}/files/{file_id}",
+            headers=self._headers(), read_timeout=60.0,
+        )
+
+    def _file_list_request(self, limit: int, cursor: str | None) -> TransportRequest:
+        params: dict[str, Any] = {"limit": limit}
+        if cursor is not None:
+            params["page"] = cursor
+        return make_json_request(
+            method="GET", url=f"{self.base_url.rstrip('/')}/files",
+            params=params, headers=self._headers(), read_timeout=60.0,
+        )
+
+    def _file_page_from_list_body(self, body: str) -> FilePage:
+        data = json.loads(body)
+        entries = data.get("data") if isinstance(data.get("data"), list) else []
+        items = tuple(self._file_info(entry) for entry in entries if isinstance(entry, dict))
+        cursor = data.get("next_page")
+        return FilePage(items=items, next_cursor=cursor if isinstance(cursor, str) and cursor else None)
+
+    def _file_delete_request(self, file_id: str) -> TransportRequest:
+        return make_json_request(
+            method="DELETE", url=f"{self.base_url.rstrip('/')}/files/{file_id}",
+            headers=self._headers(), read_timeout=60.0,
+        )
+
+    def _file_download_request(self, file_id: str) -> TransportRequest:
+        return make_json_request(
+            method="GET", url=f"{self.base_url.rstrip('/')}/files/{file_id}/content",
+            headers=self._headers(), read_timeout=300.0,
+        )
 
     # ─── Batch hooks (Message Batches API) ────────────────────────
 

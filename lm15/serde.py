@@ -34,6 +34,9 @@ from .types import (
     Delta,
     DocumentPart,
     ErrorDetail,
+    FileInfo,
+    FilePage,
+    FileUploadRequest,
     FunctionTool,
     ImageDelta,
     ImagePart,
@@ -725,6 +728,79 @@ def batch_entry_from_dict(d: dict[str, Any]) -> BatchEntry:
         outcome=d["outcome"],
         response=response_from_dict(d["response"]) if isinstance(d.get("response"), dict) else None,
         error=error_detail_from_dict(d["error"]) if isinstance(d.get("error"), dict) else None,
+    )
+
+
+# ─── Files ─────────────────────────────────────────────────────────
+
+def file_upload_request_to_dict(r: FileUploadRequest) -> dict[str, Any]:
+    """Bytes travel as base64 (the media-part precedent); a path-backed
+    request serializes its path as a plain string, exactly like
+    path-addressed media Parts — meaningful only where the filesystem is
+    shared, which is the same caveat Parts already carry."""
+    import base64
+
+    return _clean_mapping({
+        "filename": r.filename,
+        "bytes_data": base64.b64encode(r.bytes_data).decode("ascii") if r.bytes_data is not None else None,
+        "media_type": r.media_type,
+        "extensions": r.extensions,
+        "path": str(r.path) if r.path is not None else None,
+    })
+
+
+def file_upload_request_from_dict(d: dict[str, Any]) -> FileUploadRequest:
+    import base64
+
+    raw = d.get("bytes_data")
+    return FileUploadRequest(
+        filename=d["filename"],
+        bytes_data=base64.b64decode(raw) if isinstance(raw, str) else None,
+        media_type=d.get("media_type", "application/octet-stream"),
+        extensions=d.get("extensions"),
+        path=d.get("path"),
+    )
+
+
+def file_info_to_dict(f: FileInfo) -> dict[str, Any]:
+    return _clean_mapping({
+        "id": f.id,
+        "filename": f.filename,
+        "media_type": f.media_type,
+        "size_bytes": f.size_bytes,
+        "created_at": f.created_at,
+        "expires_at": f.expires_at,
+        "readiness": f.readiness,
+        "downloadable": f.downloadable,
+        "provider_data": f.provider_data,
+    })
+
+
+def file_info_from_dict(d: dict[str, Any]) -> FileInfo:
+    return FileInfo(
+        id=d["id"],
+        filename=d.get("filename"),
+        media_type=d.get("media_type"),
+        size_bytes=d.get("size_bytes"),
+        created_at=d.get("created_at"),
+        expires_at=d.get("expires_at"),
+        readiness=d.get("readiness", "ready"),
+        downloadable=d.get("downloadable"),
+        provider_data=d.get("provider_data"),
+    )
+
+
+def file_page_to_dict(p: FilePage) -> dict[str, Any]:
+    return _clean_mapping({
+        "items": [file_info_to_dict(f) for f in p.items],
+        "next_cursor": p.next_cursor,
+    })
+
+
+def file_page_from_dict(d: dict[str, Any]) -> FilePage:
+    return FilePage(
+        items=tuple(file_info_from_dict(f) for f in d.get("items", [])),
+        next_cursor=d.get("next_cursor"),
     )
 
 

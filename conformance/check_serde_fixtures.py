@@ -57,6 +57,9 @@ KIND_SERDE: dict[str, tuple[JsonToObj, ObjToJson]] = {
     "batch_request": (serde.batch_request_from_dict, serde.batch_request_to_dict),
     "batch_job": (serde.batch_job_from_dict, serde.batch_job_to_dict),
     "batch_entry": (serde.batch_entry_from_dict, serde.batch_entry_to_dict),
+    "file_upload_request": (serde.file_upload_request_from_dict, serde.file_upload_request_to_dict),
+    "file_info": (serde.file_info_from_dict, serde.file_info_to_dict),
+    "file_page": (serde.file_page_from_dict, serde.file_page_to_dict),
 }
 
 

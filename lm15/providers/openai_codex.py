@@ -26,8 +26,9 @@ from ..types import (
     BatchEntry,
     BatchJobInfo,
     BatchRequest,
+    FileInfo,
+    FilePage,
     FileUploadRequest,
-    FileUploadResponse,
     ImageGenerationRequest,
     ImageGenerationResponse,
     LiveConfig,
@@ -210,8 +211,22 @@ class OpenAICodexLM(OpenAILM):
     def live(self, config: LiveConfig) -> LiveSession:
         raise UnsupportedFeatureError("openai-codex: live is not supported", provider=self.provider)
 
-    def file_upload(self, request: FileUploadRequest) -> FileUploadResponse:
-        raise UnsupportedFeatureError("openai-codex: file upload is not supported", provider=self.provider)
+    # Files are an API-key surface; the subscription credential does not
+    # carry them. Block every inherited driver, not just upload.
+    def file_upload(self, request: FileUploadRequest) -> FileInfo:
+        raise UnsupportedFeatureError("openai-codex: files are not supported", provider=self.provider)
+
+    def file_get(self, file_id: str) -> FileInfo:
+        raise UnsupportedFeatureError("openai-codex: files are not supported", provider=self.provider)
+
+    def file_list(self, limit: int = 20, cursor: str | None = None) -> FilePage:
+        raise UnsupportedFeatureError("openai-codex: files are not supported", provider=self.provider)
+
+    def file_delete(self, file_id: str) -> None:
+        raise UnsupportedFeatureError("openai-codex: files are not supported", provider=self.provider)
+
+    def file_download(self, file_id: str) -> bytes:
+        raise UnsupportedFeatureError("openai-codex: files are not supported", provider=self.provider)
 
     # Batch is an API-key surface; the subscription credential does not
     # carry it. Block every inherited driver, not just submit.
