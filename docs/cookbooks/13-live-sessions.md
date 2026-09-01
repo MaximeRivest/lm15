@@ -129,6 +129,58 @@ LiveServerToolCallEvent(id='fc_7965…', name='get_weather', input={'city': 'Mon
 answer: '21°C and sunny in Montreal.'
 ```
 
+## Turns as values
+
+The loops above end every turn by hand (`break` on `turn_end`).
+`session.turn()` is the same iteration with the stream idiom: it ends
+itself after the terminal event, and `.result()` materializes the whole
+turn — joined text, decoded audio bytes, tool calls, usage:
+
+```python
+with lm.live(LiveConfig(model=MODEL, system="Be concise.")) as session:
+    session.send_text("Reply with exactly: live hello")
+    turn = session.turn().result()
+    print(repr(turn.text), "| ended_by:", turn.ended_by,
+          "| audio bytes:", len(turn.audio), "| tokens:", turn.usage.total_tokens)
+```
+```output
+'live hello' | ended_by: turn_end | audio bytes: 53762 | tokens: 188
+```
+
+Two caveats, on the box. A live session is full-duplex: with voice
+activity detection the model can speak spontaneously and turns can
+overlap after interruptions — `turn()` serves the half-duplex idiom
+(send, then listen), which is what scripted and turn-based apps do;
+for a continuously listening voice agent, iterate the session itself.
+And `.result()` buffers text and audio in memory until the turn ends —
+for latency-sensitive playback, iterate events instead.
+
+When the model asks for a tool, `.result()` cannot answer for you — it
+hands control back with `ended_by="tool_call"`, exactly like
+`finish_reason="tool_call"` on `complete()`. Answer and materialize the
+continuation:
+
+```python
+cfg = LiveConfig(model=MODEL, system="Use tools when asked. Be concise.", tools=(weather,))
+with lm.live(cfg) as session:
+    session.send_text("Weather in Montreal? Use the tool.")
+    turn = session.turn().result()
+    print("ended_by:", turn.ended_by, "| calls:", [(c.name, c.input) for c in turn.tool_calls])
+    if turn.ended_by == "tool_call":
+        session.send_tool_result({c.id: get_weather(**c.input) for c in turn.tool_calls})
+        turn = session.turn().result()
+        print("continuation:", repr(turn.text.strip()))
+```
+```output
+ended_by: tool_call | calls: [('get_weather', {'city': 'Montreal'})]
+continuation: '21°C and sunny in Montreal.'
+```
+
+Inside a `for event in session.turn():` loop you DO hold the session,
+so there you answer `tool_call` events inline and the iteration
+continues to `turn_end` — the dispatch loop from the recipe above,
+minus the manual `break`.
+
 Interruption is the point of realtime. `session.interrupt()` (barge-in)
 stops the current response; the server acknowledges with an
 `interrupted` event instead of `turn_end`:
@@ -205,10 +257,22 @@ in `LiveConfig`.
   call `end_audio()` (deterministic). Re-enable VAD through
   `extensions` when you want the server to segment speech; Gemini
   always segments server-side.
-- **Async.** `AsyncGeminiLM.live()` raises `UnsupportedFeatureError`
-  ("use the sync adapter") — async live is planned, not shipped. The
-  sync session blocks on `recv()`; put it on a thread if you need an
-  event loop alongside it.
+- **Async.** `await lm.live(config)` on `AsyncOpenAILM` /
+  `AsyncGeminiLM` returns a native async session — a real awaitable
+  websocket, not a thread wrapper, so cancelling the task cancels the
+  read (barge-in and hangups stay cancellable). Same verbs with
+  `await`, `async for event in session.turn()`, `await
+  session.turn().result()`:
+
+  ```python
+  async with await lm.live(LiveConfig(model=MODEL, system="Be concise.")) as session:
+      await session.send_text("Reply with exactly: async live hello")
+      turn = await session.turn().result()
+      print(repr(turn.text), "| ended_by:", turn.ended_by)
+  ```
+  ```output
+  'async live hello' | ended_by: turn_end
+  ```
 - **Knobs.** `LiveConfig` also takes `voice`, `input_format`/
   `output_format` (`AudioFormat`), and provider-specific `extensions`.
   Usage arrives once per turn on the `turn_end` event, not per chunk.

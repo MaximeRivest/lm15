@@ -346,6 +346,25 @@ class AsyncOpenAILM(AsyncBaseProviderLM):
     base_url: str = "https://api.openai.com/v1"
     profile: Any | None = None
 
+    async def live(self, config: LiveConfig):
+        # Native async websocket (websockets.asyncio) — not a thread
+        # wrapper: a blocked sync recv in a worker thread cannot be
+        # cancelled from the event loop, and cancellation is the heart
+        # of realtime. Codecs are the inner adapter's pure functions.
+        import json as _json
+
+        from ..live import AsyncWebSocketLiveSession, require_websocket_async_connect
+
+        connect = require_websocket_async_connect()
+        inner = self._inner
+        ws = await connect(inner._live_url(config.model), additional_headers=inner._live_headers())
+        await ws.send(_json.dumps(inner._live_session_update_payload(config)))
+        return AsyncWebSocketLiveSession(
+            ws=ws,
+            encode_event=inner._encode_live_client_event,
+            decode_event=inner._decode_live_server_event,
+        )
+
     provider: str = "openai"
     capabilities: Capabilities = _mirror_default(OpenAILM, "capabilities")
     supports: ClassVar[EndpointSupport] = OpenAILM.supports
@@ -460,6 +479,25 @@ class AsyncGeminiLM(AsyncBaseProviderLM):
         await self.resolve_prompt_cache(request)
         async for event in AsyncBaseProviderLM.stream(self, request):
             yield event
+
+    async def live(self, config: LiveConfig):
+        # Native async twin of GeminiLM.live: same pure setup frame,
+        # encoder, and setup-status classifier; only the socket awaits.
+        import json as _json
+
+        from ..live import AsyncWebSocketLiveSession, require_websocket_async_connect
+
+        connect = require_websocket_async_connect()
+        inner = self._inner
+        ws = await connect(inner._live_url())
+        await ws.send(_json.dumps(inner._live_setup_frame(config)))
+        while not inner._live_setup_status(await ws.recv()):
+            pass
+        return AsyncWebSocketLiveSession(
+            ws=ws,
+            encode_event=inner._live_encoder(config),
+            decode_event=inner._decode_live_server_event,
+        )
 
 
 @dataclass(slots=True)

@@ -1137,11 +1137,27 @@ class GeminiLM(BaseProviderLM):
 
     def live(self, config: LiveConfig):
         ws = self._live_connect(self._live_url())
+        ws.send(json.dumps(self._live_setup_frame(config)))
+        self._wait_for_setup_complete(ws)
+        return WebSocketLiveSession(
+            ws=ws,
+            encode_event=self._live_encoder(config),
+            decode_event=self._decode_live_server_event,
+        )
+
+    def _live_connect(self, url: str):
+        connect = require_websocket_sync_connect()
+        return connect(url)
+
+    # Pure pieces shared by the sync session and the native async twin.
+
+    def _live_setup_frame(self, config: LiveConfig) -> dict[str, Any]:
         payload = self._live_setup_payload(config)
         if self._is_audio_native_live_model(config.model):
             payload.setdefault("setup", {})["outputAudioTranscription"] = {}
-        ws.send(json.dumps(payload))
-        self._wait_for_setup_complete(ws)
+        return payload
+
+    def _live_encoder(self, config: LiveConfig):
         audio_native = self._is_audio_native_live_model(config.model)
 
         def encode_event(event: LiveClientEvent) -> list[dict[str, Any]]:
@@ -1149,30 +1165,30 @@ class GeminiLM(BaseProviderLM):
                 return [{"realtimeInput": {"text": event.text}}]
             return self._encode_live_client_event(event)
 
-        return WebSocketLiveSession(ws=ws, encode_event=encode_event, decode_event=self._decode_live_server_event)
+        return encode_event
 
-    def _live_connect(self, url: str):
-        connect = require_websocket_sync_connect()
-        return connect(url)
+    def _live_setup_status(self, raw: str | bytes) -> bool:
+        """True = setupComplete, False = keep waiting; raises typed on error."""
+        try:
+            payload = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+        except Exception:
+            return False
+        if isinstance(payload, dict) and "setupComplete" in payload:
+            return True
+        if isinstance(payload, dict) and "error" in payload:
+            err = payload["error"]
+            msg = err.get("message", "") if isinstance(err, dict) else str(err)
+            provider_code = str(err.get("status") or "live_setup") if isinstance(err, dict) else "live_setup"
+            raise self._provider_error(
+                InvalidRequestError,
+                f"Live setup failed: {msg}",
+                provider_code=provider_code,
+            )
+        return False
 
     def _wait_for_setup_complete(self, ws: Any) -> None:
-        while True:
-            raw = ws.recv()
-            try:
-                payload = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
-            except Exception:
-                continue
-            if isinstance(payload, dict) and "setupComplete" in payload:
-                return
-            if isinstance(payload, dict) and "error" in payload:
-                err = payload["error"]
-                msg = err.get("message", "") if isinstance(err, dict) else str(err)
-                provider_code = str(err.get("status") or "live_setup") if isinstance(err, dict) else "live_setup"
-                raise self._provider_error(
-                    InvalidRequestError,
-                    f"Live setup failed: {msg}",
-                    provider_code=provider_code,
-                )
+        while not self._live_setup_status(ws.recv()):
+            pass
 
     def _live_url(self) -> str:
         parsed = urllib.parse.urlparse(self.base_url)

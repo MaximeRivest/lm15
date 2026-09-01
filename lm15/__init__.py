@@ -49,6 +49,7 @@ except PackageNotFoundError:  # running from a source checkout
 
 # ── Canonical types ──────────────────────────────────────────────────
 from .batch import AsyncBatchJob, BatchJob
+from .live import Turn
 from .types import (
     # request/response core
     Request,
@@ -214,7 +215,7 @@ __all__ = [
     "BatchJob", "AsyncBatchJob",
     "ImageGenerationRequest", "ImageGenerationResponse",
     "AudioGenerationRequest", "AudioGenerationResponse", "AudioFormat",
-    "LiveConfig",
+    "LiveConfig", "Turn",
     # vocabularies
     "Role", "PartType", "FinishReason", "ReasoningEffort", "ErrorCode",
     "StreamEventType", "ROLE_VALUES", "FINISH_REASONS", "ERROR_CODES",
