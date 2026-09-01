@@ -20,12 +20,13 @@ from ..compat import (
     ResolvedOpenAIChatCompat,
     resolve_openai_chat_compat,
 )
-from ..errors import ProviderError
+from ..errors import ProviderError, UnsupportedFeatureError
 from ..features import EndpointSupport, ProviderManifest
 from ..protocols import Capabilities
 from ..sse import SSEEvent
 from ..transports import TransportRequest
 from ..types import (
+    BuiltinTool,
     FunctionTool,
     Message,
     RefusalPart,
@@ -49,6 +50,7 @@ from .common import (
     make_json_request,
     media_data_uri,
     model_infos_from_entries,
+    openai_token_logprobs,
     parse_json_object,
     parts_to_text,
 )
@@ -281,8 +283,30 @@ class OpenAIChatLM(BaseProviderLM):
             return None
         if tc.mode == "none":
             return "none"
-        if tc.allowed and len(tc.allowed) == 1:
-            return {"type": "function", "function": {"name": tc.allowed[0]}}
+        if tc.allowed:
+            by_name = {t.name: t for t in request.tools}
+            entries = [by_name[name] for name in tc.allowed]
+            builtins = [t.name for t in entries if isinstance(t, BuiltinTool)]
+            if builtins:
+                raise UnsupportedFeatureError(
+                    f"{self.provider}: cannot force builtin tools {builtins} — the "
+                    "Chat Completions wire has no hosted-tool tool_choice form "
+                    "(OpenAI Responses and Anthropic carry it)",
+                    provider=self.provider,
+                )
+            if len(entries) == 1 and tc.mode == "required":
+                return {"type": "function", "function": {"name": entries[0].name}}
+            # mode="auto" restriction or multi-tool subset: the dialect's
+            # allowed_tools form (nested spelling, function tools only).
+            return {
+                "type": "allowed_tools",
+                "allowed_tools": {
+                    "mode": tc.mode,
+                    "tools": [
+                        {"type": "function", "function": {"name": t.name}} for t in entries
+                    ],
+                },
+            }
         if tc.mode == "required":
             return "required"
         return "auto"
@@ -305,6 +329,12 @@ class OpenAIChatLM(BaseProviderLM):
             payload["top_p"] = request.config.top_p
         if request.config.stop:
             payload["stop"] = list(request.config.stop)
+        if request.config.logprobs is not None:
+            # Verified live 2026-09-01: logprobs=true alone returns chosen
+            # tokens only; top_logprobs adds the alternatives.
+            payload["logprobs"] = True
+            if request.config.logprobs > 0:
+                payload["top_logprobs"] = request.config.logprobs
         if request.tools:
             tools_wire: list[dict[str, Any]] = []
             for tool in request.tools:
@@ -475,12 +505,18 @@ class OpenAIChatLM(BaseProviderLM):
 
         has_tool = any(isinstance(part, ToolCallPart) for part in parts)
         usage = _usage_from_chat(data.get("usage") or {})
+        # choices[0].logprobs.content is the message-level token sequence.
+        # Refusal logprobs (choices[0].logprobs.refusal) stay in
+        # provider_data — no canonical refusal-token concept.
+        logprobs_payload = choice.get("logprobs") if isinstance(choice.get("logprobs"), dict) else {}
+        logprob_seq = openai_token_logprobs(logprobs_payload.get("content"))
         return Response(
             id=str(data.get("id")) if data.get("id") else None,
             model=str(data.get("model") or request.model),
             message=Message(role="assistant", parts=tuple(parts)),
             finish_reason=self._finish_reason(choice.get("finish_reason"), has_tool_call=has_tool, unmapped=unmapped),
             usage=usage,
+            logprobs=logprob_seq or None,
             provider_data=_attach_unmapped(data, unmapped),
         )
 
@@ -512,7 +548,13 @@ class OpenAIChatLM(BaseProviderLM):
 
         content = delta.get("content")
         if isinstance(content, str) and content:
-            yield StreamDeltaEvent(delta=TextDelta(text=content))
+            logprobs_payload = choice.get("logprobs") if isinstance(choice.get("logprobs"), dict) else {}
+            yield StreamDeltaEvent(
+                delta=TextDelta(
+                    text=content,
+                    logprobs=openai_token_logprobs(logprobs_payload.get("content")),
+                )
+            )
 
         for call in delta.get("tool_calls") or []:
             if not isinstance(call, dict):

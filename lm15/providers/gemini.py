@@ -84,9 +84,11 @@ from ..types import (
     TextPart,
     ThinkingDelta,
     ThinkingPart,
+    TokenLogprob,
     ToolCallDelta,
     ToolCallPart,
     ToolResultPart,
+    TopLogprob,
     continuation_data,
     Usage,
     VideoPart,
@@ -141,6 +143,47 @@ def _record_unmapped(unmapped: list[dict[str, str]], path: str, typ: Any) -> Non
 
 def _builtin_to_gemini(tool: BuiltinTool) -> dict[str, Any]:
     return {_GEMINI_BUILTIN_MAP.get(tool.name, tool.name): tool.config or {}}
+
+
+def _gemini_token_logprobs(logprobs_result: Any) -> tuple[TokenLogprob, ...]:
+    """Map Gemini logprobsResult to canonical TokenLogprob tuples.
+
+    Doc-based mapping (generate-content reference — LogprobsResult /
+    TopCandidates / Candidate): chosenCandidates[i] pairs with
+    topCandidates[i] per decoding step. No live capture exists because
+    every currently served model rejects responseLogprobs (2026-09-01).
+    Derived aggregates (logProbabilitySum, avgLogprobs) stay in
+    provider_data — they are computable from the per-token values.
+    """
+    if not isinstance(logprobs_result, dict):
+        return ()
+    chosen = logprobs_result.get("chosenCandidates") or []
+    top_steps = logprobs_result.get("topCandidates") or []
+    out: list[TokenLogprob] = []
+    for i, cand in enumerate(chosen):
+        if not isinstance(cand, dict):
+            continue
+        top: list[TopLogprob] = []
+        step = top_steps[i] if i < len(top_steps) and isinstance(top_steps[i], dict) else {}
+        for alt in step.get("candidates") or []:
+            if not isinstance(alt, dict):
+                continue
+            top.append(
+                TopLogprob(
+                    token=str(alt.get("token") or ""),
+                    logprob=float(alt.get("logProbability", 0.0) or 0.0),
+                    token_id=alt.get("tokenId"),
+                )
+            )
+        out.append(
+            TokenLogprob(
+                token=str(cand.get("token") or ""),
+                logprob=float(cand.get("logProbability", 0.0) or 0.0),
+                token_id=cand.get("tokenId"),
+                top=tuple(top),
+            )
+        )
+    return tuple(out)
 
 
 def _gemini_schema_field(schema: dict[str, Any]) -> str:
@@ -550,7 +593,22 @@ class GeminiLM(BaseProviderLM):
         mode = {"none": "NONE", "required": "ANY", "auto": "AUTO"}[tc.mode]
         cfg: dict[str, Any] = {"mode": mode}
         if tc.allowed:
+            by_name = {t.name: t for t in request.tools}
+            builtins = [name for name in tc.allowed if isinstance(by_name.get(name), BuiltinTool)]
+            if builtins:
+                raise UnsupportedFeatureError(
+                    f"gemini: cannot force builtin tools {builtins} — "
+                    "functionCallingConfig addresses function declarations only; "
+                    "googleSearch/codeExecution have no tool_choice form "
+                    "(OpenAI Responses and Anthropic carry builtin forcing)",
+                    provider=self.provider,
+                )
             cfg["allowedFunctionNames"] = list(tc.allowed)
+            if tc.mode == "auto":
+                # allowedFunctionNames is only legal with ANY or VALIDATED.
+                # VALIDATED = "function call or text, restricted to the
+                # allowlist" — exactly canonical mode=auto + allowed.
+                cfg["mode"] = "VALIDATED"
         return {"functionCallingConfig": cfg}
 
     def _payload(self, request: Request, *, apply_cache: bool = True) -> dict[str, Any]:
@@ -574,6 +632,14 @@ class GeminiLM(BaseProviderLM):
             generation_config["topK"] = request.config.top_k
         if request.config.stop:
             generation_config["stopSequences"] = list(request.config.stop)
+        if request.config.logprobs is not None:
+            # Documented wire knobs (generate-content reference). Live note
+            # 2026-09-01: every currently served Gemini model rejects this
+            # with "Logprobs is not enabled" — the mapping is doc-based and
+            # the rejection surfaces as the provider's InvalidRequestError.
+            generation_config["responseLogprobs"] = True
+            if request.config.logprobs > 0:
+                generation_config["logprobs"] = request.config.logprobs
         if request.config.response_format:
             generation_config.update(_response_format_to_gemini_config(request.config.response_format))
         if request.config.reasoning is not None:
@@ -865,12 +931,14 @@ class GeminiLM(BaseProviderLM):
                     data={"id": str(data.get("responseId"))},
                 ),
             )
+        logprob_seq = _gemini_token_logprobs(candidate.get("logprobsResult"))
         return Response(
             id=str(data.get("responseId")) if data.get("responseId") else None,
             model=request.model,
             message=Message(role="assistant", parts=tuple(parts), continuation=message_continuation),
             finish_reason=_finish_reason(candidate.get("finishReason"), has_tool_call=has_tool),
             usage=usage,
+            logprobs=logprob_seq or None,
             provider_data=_attach_unmapped(data, unmapped),
         )
 
@@ -899,6 +967,9 @@ class GeminiLM(BaseProviderLM):
         finish = None
         if candidate is not None:
             content = candidate.get("content", {}) if isinstance(candidate.get("content"), dict) else {}
+            # Chunk-level decoding telemetry rides the chunk's first text
+            # delta (doc-based; no model currently serves logprobs live).
+            chunk_logprobs = _gemini_token_logprobs(candidate.get("logprobsResult"))
             for idx, part in enumerate(content.get("parts", []) or []):
                 if not isinstance(part, dict):
                     continue
@@ -916,7 +987,8 @@ class GeminiLM(BaseProviderLM):
                         )
                 elif "text" in part:
                     yielded_delta = True
-                    yield StreamDeltaEvent(delta=TextDelta(text=str(part.get("text") or ""), part_index=idx))
+                    yield StreamDeltaEvent(delta=TextDelta(text=str(part.get("text") or ""), part_index=idx, logprobs=chunk_logprobs))
+                    chunk_logprobs = ()
                 elif "functionCall" in part and isinstance(part["functionCall"], dict):
                     fc = part["functionCall"]
                     saw_tool = True

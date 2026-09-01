@@ -100,6 +100,7 @@ from .common import (
     make_json_request,
     model_infos_from_entries,
     multipart_form_body,
+    openai_token_logprobs,
     parse_json_object,
     part_to_openai_input,
     parts_to_text,
@@ -507,11 +508,27 @@ class OpenAILM(BaseProviderLM):
         if tc.mode == "none":
             return "none"
         if tc.allowed:
-            if len(tc.allowed) == 1:
-                return {"type": "function", "name": tc.allowed[0]}
-            # OpenAI has no portable multi-tool allowlist in Responses.  Keep
-            # normal auto/required behavior and pass the allowlist through a
-            # provider extension if the caller needs a preview feature.
+            # Resolve names against Request.tools (INV-031 guarantees
+            # presence) and emit the kind-correct wire form.  Verified live
+            # 2026-09-01: {"type": "web_search_preview"} forcing and mixed
+            # allowed_tools both accepted.
+            by_name = {t.name: t for t in request.tools}
+            entries = [by_name[name] for name in tc.allowed]
+            if len(entries) == 1 and tc.mode == "required":
+                tool = entries[0]
+                if isinstance(tool, BuiltinTool):
+                    return {"type": _OPENAI_BUILTIN_MAP.get(tool.name, tool.name)}
+                return {"type": "function", "name": tool.name}
+            # mode="auto" restriction or multi-tool subset: allowed_tools
+            # keeps auto semantics honest — the old single-name mapping
+            # forced a call even when the caller said mode="auto".
+            wire_tools: list[dict[str, Any]] = []
+            for tool in entries:
+                if isinstance(tool, BuiltinTool):
+                    wire_tools.append({"type": _OPENAI_BUILTIN_MAP.get(tool.name, tool.name)})
+                else:
+                    wire_tools.append({"type": "function", "name": tool.name})
+            return {"type": "allowed_tools", "mode": tc.mode, "tools": wire_tools}
         if tc.mode == "required":
             return "required"
         return "auto"
@@ -531,6 +548,11 @@ class OpenAILM(BaseProviderLM):
             payload["temperature"] = request.config.temperature
         if request.config.top_p is not None:
             payload["top_p"] = request.config.top_p
+        if request.config.logprobs is not None:
+            # Verified live 2026-09-01: include triggers per-token logprobs;
+            # top_logprobs (0–20) controls the alternatives count.
+            payload["top_logprobs"] = request.config.logprobs
+            payload["include"] = ["message.output_text.logprobs"]
         if request.tools:
             tools_wire: list[dict[str, Any]] = []
             for tool in request.tools:
@@ -643,6 +665,7 @@ class OpenAILM(BaseProviderLM):
 
         parts: list[Any] = []
         unmapped: list[dict[str, str]] = []
+        logprob_seq: list[Any] = []
         for item_index, item in enumerate(data.get("output", []) or []):
             if not isinstance(item, dict):
                 _record_unmapped(unmapped, f"output[{item_index}]", type(item).__name__)
@@ -657,6 +680,9 @@ class OpenAILM(BaseProviderLM):
                     if ctype in ("output_text", "text"):
                         text = str(content.get("text") or "")
                         parts.append(TextPart(text=text))
+                        # Per-block wire lists concatenate in document order
+                        # into the message-level canonical sequence.
+                        logprob_seq.extend(openai_token_logprobs(content.get("logprobs")))
                         for annotation in content.get("annotations", []) or []:
                             if not isinstance(annotation, dict):
                                 continue
@@ -730,6 +756,7 @@ class OpenAILM(BaseProviderLM):
             message=Message(role="assistant", parts=tuple(parts), continuation=message_continuation),
             finish_reason=_finish_from_status(data, has_tool_call=has_tool),
             usage=usage,
+            logprobs=tuple(logprob_seq) if logprob_seq else None,
             provider_data=_attach_unmapped(data, unmapped),
         )
 
@@ -758,6 +785,9 @@ class OpenAILM(BaseProviderLM):
                 delta=TextDelta(
                     text=str(payload.get("delta") or ""),
                     part_index=int(payload.get("output_index", 0) or 0),
+                    # Verified live 2026-09-01: each output_text.delta event
+                    # carries the logprobs for exactly its own tokens.
+                    logprobs=openai_token_logprobs(payload.get("logprobs")),
                 )
             )
 

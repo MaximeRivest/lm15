@@ -1237,16 +1237,25 @@ DeltaType = Literal["text", "thinking", "audio", "image", "tool_call", "citation
 
 @dataclass(frozen=True, slots=True)
 class TextDelta:
-    """A text fragment arriving during streaming."""
+    """A text fragment arriving during streaming.
+
+    ``logprobs`` carries the token logprobs for exactly the tokens in this
+    fragment, when the request asked for them (``Config.logprobs``) and the
+    provider streams them per chunk (verified live for OpenAI Responses,
+    2026-09-01).  Materialization concatenates fragment logprobs in arrival
+    order into ``Response.logprobs``.
+    """
 
     text: str
     part_index: int = 0
+    logprobs: tuple[TokenLogprob, ...] = ()
     type: Literal["text"] = field(default="text", init=False)
 
     def __post_init__(self) -> None:
         _coerce_int_field(self, "part_index")
         _validate_part_index(self.part_index)
         _validate_text(self.text, field_name="TextDelta.text")
+        _validate_logprobs_field(self, "logprobs", allow_none=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1745,6 +1754,13 @@ class Config:
     service_tier: str | None = None
     user_id: str | None = None
     store: bool | None = None
+    # logprobs: request token log probabilities. None = do not request;
+    # 0 = chosen tokens only; n > 0 = also the top-n alternatives per
+    # position. Provider caps (currently 0–20) are provider-owned — lm15
+    # does not hard-code them; an over-cap value maps to the provider's
+    # own InvalidRequestError. Providers without logprobs (Anthropic)
+    # RAISE — never silently drop.
+    logprobs: int | None = None
     extensions: Extensions | None = None
 
     def __post_init__(self) -> None:
@@ -1777,6 +1793,8 @@ class Config:
         _validate_optional_text(self.user_id, field_name="Config.user_id", allow_empty=False)
         if self.store is not None and not isinstance(self.store, bool):
             raise TypeError("Config.store must be a bool or None")
+        _coerce_int_field(self, "logprobs")
+        _validate_non_negative(self.logprobs, field_name="logprobs")
         _validate_json_field(self, "response_format")
         _validate_extensions_field(self)
 
@@ -1835,6 +1853,93 @@ class Request(_ModelRequest):
                 raise ValueError(
                     f"ToolChoice.allowed contains tools not present in Request.tools: {sorted(missing)}"
                 )
+
+
+# ─── Logprobs ────────────────────────────────────────────────────────
+#
+# Decoding telemetry: for each generated token, the chosen token's log
+# probability plus a ranked list of top alternative candidates.  Two flat
+# types instead of one recursive type — the wire never nests alternatives
+# inside alternatives, and the type system should say so.
+
+
+@dataclass(frozen=True, slots=True)
+class TopLogprob:
+    """One scored alternative token at a decoding step.
+
+    ``bytes`` is the token's UTF-8 byte sequence when the provider reports
+    it (OpenAI); ``token_id`` is the vocabulary id when the provider
+    reports it (Gemini).  Absence means "not reported", never zero.
+    """
+
+    token: str
+    logprob: float
+    bytes: tuple[int, ...] | None = None
+    token_id: int | None = None
+
+    def __post_init__(self) -> None:
+        _validate_text(self.token, field_name="token")
+        _coerce_float_field(self, "logprob")
+        if not isinstance(self.logprob, float):
+            raise TypeError("logprob must be a float")
+        _validate_logprob_bytes(self)
+        _coerce_int_field(self, "token_id")
+        _validate_int(self.token_id, field_name="token_id")
+
+
+@dataclass(frozen=True, slots=True)
+class TokenLogprob:
+    """The chosen token at one decoding step, with ranked alternatives.
+
+    ``top`` is the provider-reported ranked candidate list (descending
+    logprob).  Providers differ on whether the chosen token appears in
+    ``top`` — no guarantee either way, and providers also differ on
+    whether the requested alternative count includes the chosen token
+    (Gemini documents that it does; OpenAI counts alternatives only).
+    lm15 preserves the provider-reported list as-is.
+    """
+
+    token: str
+    logprob: float
+    bytes: tuple[int, ...] | None = None
+    token_id: int | None = None
+    top: tuple[TopLogprob, ...] = ()
+
+    def __post_init__(self) -> None:
+        _validate_text(self.token, field_name="token")
+        _coerce_float_field(self, "logprob")
+        if not isinstance(self.logprob, float):
+            raise TypeError("logprob must be a float")
+        _validate_logprob_bytes(self)
+        _coerce_int_field(self, "token_id")
+        _validate_int(self.token_id, field_name="token_id")
+        top = (self.top,) if isinstance(self.top, TopLogprob) else tuple(self.top)
+        object.__setattr__(self, "top", top)
+        if not all(isinstance(t, TopLogprob) for t in self.top):
+            raise TypeError("TokenLogprob.top must contain TopLogprob objects")
+
+
+def _validate_logprob_bytes(obj: object) -> None:
+    value = getattr(obj, "bytes")
+    if value is None:
+        return
+    coerced = tuple(value)
+    for b in coerced:
+        if isinstance(b, bool) or not isinstance(b, int) or b < 0:
+            raise TypeError("bytes must contain non-negative ints")
+    object.__setattr__(obj, "bytes", coerced)
+
+
+def _validate_logprobs_field(obj: object, field_name: str, *, allow_none: bool) -> None:
+    value = getattr(obj, field_name)
+    if value is None:
+        if allow_none:
+            return
+        raise TypeError(f"{type(obj).__name__}.{field_name} must be a tuple, not None")
+    coerced = (value,) if isinstance(value, TokenLogprob) else tuple(value)
+    object.__setattr__(obj, field_name, coerced)
+    if not all(isinstance(t, TokenLogprob) for t in coerced):
+        raise TypeError(f"{type(obj).__name__}.{field_name} must contain TokenLogprob objects")
 
 
 # ─── Usage ───────────────────────────────────────────────────────────
@@ -1916,6 +2021,12 @@ class Response:
     message: Message
     finish_reason: FinishReason
     usage: Usage
+    # Decoding telemetry, same category as usage/finish_reason. None =
+    # provider did not report logprobs (the Usage convention). When a
+    # response holds several text blocks, per-block lists concatenate in
+    # document order — the block boundary survives in the stream
+    # (TextDelta.part_index) and in provider_data, not here.
+    logprobs: tuple[TokenLogprob, ...] | None = None
     provider_data: ProviderData | None = None
 
     def __post_init__(self) -> None:
@@ -1929,6 +2040,7 @@ class Response:
             raise ValueError(f"unsupported finish reason: {self.finish_reason}")
         if not isinstance(self.usage, Usage):
             raise TypeError("Response.usage must be a Usage")
+        _validate_logprobs_field(self, "logprobs", allow_none=True)
         _validate_json_field(self, "provider_data")
 
     def __repr__(self) -> str:
@@ -1943,6 +2055,8 @@ class Response:
         ]
         if citations:
             fields.append(("citations", repr(citations)))
+        if self.logprobs is not None:
+            fields.append(("logprobs", f"<{len(self.logprobs)} tokens>"))
         if self.id is not None:
             fields.append(("id", repr(self.id)))
         if self.provider_data is not None:

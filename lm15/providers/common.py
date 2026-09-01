@@ -17,7 +17,9 @@ from ..types import (
     Part,
     TextPart,
     ThinkingPart,
+    TokenLogprob,
     ToolResultPart,
+    TopLogprob,
     VideoPart,
 )
 
@@ -209,6 +211,43 @@ def anthropic_source(part: ImagePart | DocumentPart | BinaryPart) -> dict[str, A
         data = base64.b64encode(part.path.read_bytes()).decode("ascii")
         return {"type": "base64", "media_type": part.media_type, "data": data}
     raise ValueError(f"{part.type} part has no usable source")
+
+
+def openai_token_logprobs(entries: Any) -> tuple[TokenLogprob, ...]:
+    """Map OpenAI-style logprob entries to canonical TokenLogprob tuples.
+
+    Both OpenAI wire dialects share the entry shape (verified live
+    2026-09-01): ``{token, logprob, bytes, top_logprobs: [{token, logprob,
+    bytes}]}``.  Non-list input and malformed entries yield ().
+    """
+    if not isinstance(entries, list):
+        return ()
+    out: list[TokenLogprob] = []
+    for entry in entries:
+        if not isinstance(entry, dict) or "token" not in entry or "logprob" not in entry:
+            continue
+        top: list[TopLogprob] = []
+        for alt in entry.get("top_logprobs") or []:
+            if not isinstance(alt, dict) or "token" not in alt or "logprob" not in alt:
+                continue
+            alt_bytes = alt.get("bytes")
+            top.append(
+                TopLogprob(
+                    token=str(alt["token"]),
+                    logprob=float(alt["logprob"]),
+                    bytes=tuple(alt_bytes) if isinstance(alt_bytes, list) else None,
+                )
+            )
+        entry_bytes = entry.get("bytes")
+        out.append(
+            TokenLogprob(
+                token=str(entry["token"]),
+                logprob=float(entry["logprob"]),
+                bytes=tuple(entry_bytes) if isinstance(entry_bytes, list) else None,
+                top=tuple(top),
+            )
+        )
+    return tuple(out)
 
 
 def parse_json_object(value: Any) -> dict[str, Any]:

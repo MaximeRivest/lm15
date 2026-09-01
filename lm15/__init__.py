@@ -79,6 +79,9 @@ from .types import (
     FunctionTool,
     BuiltinTool,
     ToolCallInfo,
+    # logprobs
+    TokenLogprob,
+    TopLogprob,
     # streaming
     StreamStartEvent,
     StreamDeltaEvent,
@@ -208,6 +211,8 @@ __all__ = [
     "ToolResultPart",
     # tools
     "FunctionTool", "BuiltinTool", "ToolCallInfo", "tool_result",
+    # logprobs
+    "TokenLogprob", "TopLogprob",
     # streaming
     "StreamStartEvent", "StreamDeltaEvent", "StreamEndEvent",
     "StreamErrorEvent", "TextDelta", "ThinkingDelta", "AudioDelta",

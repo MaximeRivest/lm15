@@ -75,6 +75,8 @@ from .types import (
     StreamEvent,
     StreamStartEvent,
     TextDelta,
+    TokenLogprob,
+    TopLogprob,
     TextPart,
     ThinkingDelta,
     ThinkingPart,
@@ -419,6 +421,7 @@ def config_to_dict(c: Config) -> dict[str, Any]:
         "service_tier": c.service_tier,
         "user_id": c.user_id,
         "store": c.store,  # False is data (opt-out), not emptiness — emitted
+        "logprobs": c.logprobs,  # 0 is data (chosen-only), not emptiness — emitted
         "extensions": c.extensions,
     })
 
@@ -454,8 +457,59 @@ def config_from_dict(d: dict[str, Any]) -> Config:
         service_tier=d.get("service_tier"),
         user_id=d.get("user_id"),
         store=d.get("store"),
+        logprobs=d.get("logprobs"),
         extensions=d.get("extensions"),
     )
+
+
+# ─── Logprobs ────────────────────────────────────────────────────────
+
+def _top_logprob_to_dict(t: TopLogprob) -> dict[str, Any]:
+    # token and logprob are required — "" and 0.0 are data, not emptiness,
+    # so they bypass the omission rule.
+    out: dict[str, Any] = {"token": t.token, "logprob": t.logprob}
+    if t.bytes is not None:
+        out["bytes"] = list(t.bytes)
+    if t.token_id is not None:
+        out["token_id"] = t.token_id
+    return out
+
+
+def token_logprob_to_dict(t: TokenLogprob) -> dict[str, Any]:
+    out = _top_logprob_to_dict(TopLogprob(token=t.token, logprob=t.logprob, bytes=t.bytes, token_id=t.token_id))
+    if t.top:
+        out["top"] = [_top_logprob_to_dict(x) for x in t.top]
+    return out
+
+
+def token_logprob_from_dict(d: dict[str, Any]) -> TokenLogprob:
+    return TokenLogprob(
+        token=d["token"],
+        logprob=d["logprob"],
+        bytes=tuple(d["bytes"]) if d.get("bytes") is not None else None,
+        token_id=d.get("token_id"),
+        top=tuple(
+            TopLogprob(
+                token=x["token"],
+                logprob=x["logprob"],
+                bytes=tuple(x["bytes"]) if x.get("bytes") is not None else None,
+                token_id=x.get("token_id"),
+            )
+            for x in d.get("top", [])
+        ),
+    )
+
+
+def _logprobs_to_json(logprobs: tuple[TokenLogprob, ...] | None) -> list[dict[str, Any]] | None:
+    if not logprobs:
+        return None
+    return [token_logprob_to_dict(t) for t in logprobs]
+
+
+def _logprobs_from_json(value: Any) -> tuple[TokenLogprob, ...] | None:
+    if value is None:
+        return None
+    return tuple(token_logprob_from_dict(x) for x in value)
 
 
 # ─── ErrorDetail ─────────────────────────────────────────────────────
@@ -484,7 +538,11 @@ def delta_to_dict(d: Delta) -> dict[str, Any]:
         "part_index": d.part_index,
     }
 
-    if isinstance(d, (TextDelta, ThinkingDelta)):
+    if isinstance(d, TextDelta):
+        out["text"] = d.text
+        if d.logprobs:
+            out["logprobs"] = _logprobs_to_json(d.logprobs)
+    elif isinstance(d, ThinkingDelta):
         out["text"] = d.text
     elif isinstance(d, AudioDelta):
         out["data"] = d.data
@@ -520,7 +578,11 @@ def delta_from_dict(d: dict[str, Any]) -> Delta:
     part_index = d.get("part_index", 0)
 
     if t == "text":
-        return TextDelta(text=d.get("text", ""), part_index=part_index)
+        return TextDelta(
+            text=d.get("text", ""),
+            part_index=part_index,
+            logprobs=_logprobs_from_json(d.get("logprobs")) or (),
+        )
     if t == "thinking":
         return ThinkingDelta(text=d.get("text", ""), part_index=part_index)
     if t == "audio":
@@ -668,6 +730,7 @@ def response_to_dict(r: Response, *, include_provider_data: bool = False) -> dic
         "message": message_to_dict(r.message),
         "finish_reason": r.finish_reason,
         "usage": usage_to_dict(r.usage),
+        "logprobs": _logprobs_to_json(r.logprobs),
     }
     if include_provider_data and r.provider_data is not None:
         out["provider_data"] = r.provider_data
@@ -681,6 +744,7 @@ def response_from_dict(d: dict[str, Any]) -> Response:
         message=message_from_dict(d["message"]),
         finish_reason=d["finish_reason"],
         usage=usage_from_dict(d.get("usage", {})),
+        logprobs=_logprobs_from_json(d.get("logprobs")),
         provider_data=d.get("provider_data"),
     )
 

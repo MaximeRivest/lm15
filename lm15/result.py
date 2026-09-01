@@ -48,6 +48,7 @@ from .types import (
     TextPart,
     ThinkingDelta,
     ThinkingPart,
+    TokenLogprob,
     ToolCallDelta,
     ToolCallPart,
     Usage,
@@ -98,6 +99,7 @@ class StreamAccumulator:
     tool_call_meta: dict[int, dict[str, Any]] = field(default_factory=dict)
     message_continuation: list[ContinuationState] = field(default_factory=list)
     part_continuation: dict[int, list[ContinuationState]] = field(default_factory=dict)
+    logprob_seq: list[TokenLogprob] = field(default_factory=list)
     provider_data: dict[str, Any] | None = None
 
     def push(self, event: StreamEvent) -> None:
@@ -121,6 +123,8 @@ class StreamAccumulator:
 
         if delta.type == "text":
             self.text_parts.setdefault(delta.part_index, []).append(delta.text or "")
+            if delta.logprobs:
+                self.logprob_seq.extend(delta.logprobs)
 
         elif delta.type == "thinking":
             self.thinking_parts.setdefault(delta.part_index, []).append(delta.text or "")
@@ -237,6 +241,7 @@ class StreamAccumulator:
             message=Message(role="assistant", parts=tuple(parts), continuation=tuple(self.message_continuation)),
             finish_reason=finish,
             usage=self.usage or Usage(),
+            logprobs=tuple(self.logprob_seq) if self.logprob_seq else None,
             provider_data=self.provider_data,
         )
 
@@ -437,9 +442,14 @@ def response_to_events(response: Response) -> Iterator[StreamEvent]:
     function raises instead of silently dropping content.
     """
     yield StreamStartEvent(id=response.id, model=response.model)
+    # Response.logprobs is message-level; the delta vocabulary carries
+    # logprobs on text deltas.  Emitting the whole sequence on the first
+    # text delta makes Response -> events -> Response lossless.
+    pending_logprobs = response.logprobs or ()
     for idx, part in enumerate(response.message.parts):
         if isinstance(part, TextPart):
-            yield StreamDeltaEvent(delta=TextDelta(text=part.text, part_index=idx))
+            yield StreamDeltaEvent(delta=TextDelta(text=part.text, part_index=idx, logprobs=pending_logprobs))
+            pending_logprobs = ()
         elif isinstance(part, ThinkingPart):
             yield StreamDeltaEvent(delta=ThinkingDelta(text=part.text, part_index=idx))
         elif isinstance(part, ToolCallPart):

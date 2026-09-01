@@ -1,1271 +1,1364 @@
 {
- "cases": [
-  {
-   "id": "part.text",
-   "kind": "part",
-   "value": {
-    "type": "text",
-    "text": "hello"
-   }
-  },
-  {
-   "id": "part.text_with_continuation",
-   "kind": "part",
-   "value": {
-    "type": "text",
-    "text": "hello",
-    "continuation": [
-     {
-      "provider": "openai",
-      "kind": "response_item_id",
-      "data": {
-       "id": "item_1"
-      }
-     }
-    ]
-   }
-  },
-  {
-   "id": "part.image_url",
-   "kind": "part",
-   "value": {
-    "type": "image",
-    "media_type": "image/png",
-    "url": "https://example.com/cat.png",
-    "detail": "low"
-   }
-  },
-  {
-   "id": "part.audio_data",
-   "kind": "part",
-   "value": {
-    "type": "audio",
-    "media_type": "audio/wav",
-    "data": "aGk="
-   }
-  },
-  {
-   "id": "part.video_file",
-   "kind": "part",
-   "value": {
-    "type": "video",
-    "media_type": "video/mp4",
-    "file_id": "file_video"
-   }
-  },
-  {
-   "id": "part.document_url",
-   "kind": "part",
-   "value": {
-    "type": "document",
-    "media_type": "application/pdf",
-    "url": "https://example.com/doc.pdf"
-   }
-  },
-  {
-   "id": "part.tool_call",
-   "kind": "part",
-   "value": {
-    "type": "tool_call",
-    "id": "call_1",
-    "name": "lookup",
-    "input": {
-     "query": "weather"
-    }
-   }
-  },
-  {
-   "id": "part.tool_result",
-   "kind": "part",
-   "value": {
-    "type": "tool_result",
-    "id": "call_1",
-    "name": "lookup",
-    "content": [
-     {
-      "type": "text",
-      "text": "sunny"
-     }
-    ],
-    "is_error": true
-   }
-  },
-  {
-   "id": "part.thinking",
-   "kind": "part",
-   "value": {
-    "type": "thinking",
-    "text": "reasoning",
-    "redacted": true
-   }
-  },
-  {
-   "id": "part.refusal",
-   "kind": "part",
-   "value": {
-    "type": "refusal",
-    "text": "no"
-   }
-  },
-  {
-   "id": "part.citation",
-   "kind": "part",
-   "value": {
-    "type": "citation",
-    "text": "Example",
-    "url": "https://example.com",
-    "title": "Example title"
-   }
-  },
-  {
-   "id": "message.user_multimodal",
-   "kind": "message",
-   "value": {
-    "role": "user",
-    "parts": [
-     {
-      "type": "text",
-      "text": "describe"
-     },
-     {
-      "type": "image",
-      "media_type": "image/png",
-      "url": "https://example.com/cat.png"
-     }
-    ]
-   }
-  },
-  {
-   "id": "message.assistant_tool_call",
-   "kind": "message",
-   "value": {
-    "role": "assistant",
-    "parts": [
-     {
-      "type": "tool_call",
-      "id": "call_1",
-      "name": "lookup",
-      "input": {
-       "query": "weather"
-      }
-     }
-    ]
-   }
-  },
-  {
-   "id": "message.assistant_with_continuation",
-   "kind": "message",
-   "value": {
-    "role": "assistant",
-    "parts": [
-     {
-      "type": "text",
-      "text": "hello"
-     }
-    ],
-    "continuation": [
-     {
-      "provider": "openai",
-      "kind": "response_id",
-      "data": {
-       "id": "resp_1"
-      }
-     }
-    ]
-   }
-  },
-  {
-   "id": "tool.function",
-   "kind": "tool",
-   "value": {
-    "type": "function",
-    "name": "lookup",
-    "description": "Look up data",
-    "parameters": {
-     "type": "object",
-     "properties": {
-      "query": {
-       "type": "string"
-      }
-     },
-     "required": [
-      "query"
-     ]
-    }
-   }
-  },
-  {
-   "id": "tool.builtin",
-   "kind": "tool",
-   "value": {
-    "type": "builtin",
-    "name": "web_search",
-    "config": {
-     "context_size": "low"
-    }
-   }
-  },
-  {
-   "id": "tool.function.empty_parameters",
-   "kind": "tool",
-   "value": {
-    "type": "function",
-    "name": "noop",
-    "parameters": {}
-   }
-  },
-  {
-   "id": "tool_choice.required",
-   "kind": "tool_choice",
-   "value": {
-    "mode": "required",
-    "allowed": [
-     "lookup"
-    ],
-    "parallel": false
-   }
-  },
-  {
-   "id": "reasoning.medium",
-   "kind": "reasoning",
-   "value": {
-    "effort": "medium",
-    "thinking_budget": 128,
-    "total_budget": 256
-   }
-  },
-  {
-   "id": "config.full",
-   "kind": "config",
-   "value": {
-    "max_tokens": 64,
-    "temperature": 0.2,
-    "top_p": 0.9,
-    "top_k": 20,
-    "stop": [
-     "END"
-    ],
-    "response_format": {
-     "type": "json_object"
-    },
-    "tool_choice": {
-     "mode": "required",
-     "allowed": [
-      "lookup"
-     ]
-    },
-    "reasoning": {
-     "effort": "low"
-    },
-    "extensions": {
-     "store": false
-    }
-   }
-  },
-  {
-   "id": "error_detail.unsupported_model",
-   "kind": "error_detail",
-   "value": {
-    "code": "unsupported_model",
-    "message": "missing model",
-    "provider_code": "model_not_found"
-   }
-  },
-  {
-   "id": "delta.text",
-   "kind": "delta",
-   "value": {
-    "type": "text",
-    "text": "hi",
-    "part_index": 0
-   }
-  },
-  {
-   "id": "delta.thinking",
-   "kind": "delta",
-   "value": {
-    "type": "thinking",
-    "text": "hmm",
-    "part_index": 1
-   }
-  },
-  {
-   "id": "delta.audio",
-   "kind": "delta",
-   "value": {
-    "type": "audio",
-    "data": "aGk=",
-    "media_type": "audio/wav",
-    "part_index": 0
-   }
-  },
-  {
-   "id": "delta.image",
-   "kind": "delta",
-   "value": {
-    "type": "image",
-    "url": "https://example.com/image.png",
-    "media_type": "image/png",
-    "part_index": 0
-   }
-  },
-  {
-   "id": "delta.tool_call",
-   "kind": "delta",
-   "value": {
-    "type": "tool_call",
-    "input": "{\"query\":",
-    "id": "call_1",
-    "name": "lookup",
-    "part_index": 0
-   }
-  },
-  {
-   "id": "delta.citation",
-   "kind": "delta",
-   "value": {
-    "type": "citation",
-    "text": "Example",
-    "url": "https://example.com",
-    "title": "Example",
-    "part_index": 2
-   }
-  },
-  {
-   "id": "delta.continuation",
-   "kind": "delta",
-   "value": {
-    "type": "continuation",
-    "provider": "anthropic",
-    "kind": "thinking_signature",
-    "data": {
-     "signature": "abc"
-    },
-    "part_index": 1
-   }
-  },
-  {
-   "id": "usage.full",
-   "kind": "usage",
-   "value": {
-    "input_tokens": 10,
-    "output_tokens": 5,
-    "total_tokens": 15,
-    "cache_read_tokens": 1,
-    "cache_write_tokens": 2,
-    "reasoning_tokens": 3,
-    "input_audio_tokens": 4,
-    "output_audio_tokens": 5
-   }
-  },
-  {
-   "id": "stream.start",
-   "kind": "stream_event",
-   "value": {
-    "type": "start",
-    "id": "resp_1",
-    "model": "m"
-   }
-  },
-  {
-   "id": "stream.delta",
-   "kind": "stream_event",
-   "value": {
-    "type": "delta",
-    "delta": {
-     "type": "text",
-     "text": "hi",
-     "part_index": 0
-    }
-   }
-  },
-  {
-   "id": "stream.end",
-   "kind": "stream_event",
-   "value": {
-    "type": "end",
-    "finish_reason": "stop",
-    "usage": {
-     "input_tokens": 1,
-     "output_tokens": 1,
-     "total_tokens": 2
-    },
-    "provider_data": {
-     "provider": "test"
-    }
-   }
-  },
-  {
-   "id": "stream.error",
-   "kind": "stream_event",
-   "value": {
-    "type": "error",
-    "error": {
-     "code": "transport",
-     "message": "socket closed"
-    }
-   }
-  },
-  {
-   "id": "request.with_tools",
-   "kind": "request",
-   "value": {
-    "model": "m",
-    "messages": [
-     {
-      "role": "user",
-      "parts": [
-       {
+  "cases": [
+    {
+      "id": "part.text",
+      "kind": "part",
+      "value": {
         "type": "text",
         "text": "hello"
-       }
-      ]
-     }
-    ],
-    "system": "be terse",
-    "tools": [
-     {
-      "type": "function",
-      "name": "lookup",
-      "parameters": {
-       "type": "object",
-       "properties": {}
       }
-     }
-    ],
-    "config": {
-     "max_tokens": 32
-    }
-   }
-  },
-  {
-   "id": "response.with_citation",
-   "kind": "response",
-   "value": {
-    "id": "resp_1",
-    "model": "m",
-    "message": {
-     "role": "assistant",
-     "parts": [
-      {
-       "type": "text",
-       "text": "hello"
-      },
-      {
-       "type": "citation",
-       "url": "https://example.com",
-       "title": "Example"
-      }
-     ]
     },
-    "finish_reason": "stop",
-    "usage": {
-     "input_tokens": 1,
-     "output_tokens": 1,
-     "total_tokens": 2
-    }
-   }
-  },
-  {
-   "id": "audio_format.pcm16",
-   "kind": "audio_format",
-   "value": {
-    "encoding": "pcm16",
-    "sample_rate": 24000,
-    "channels": 1
-   }
-  },
-  {
-   "id": "live_config.full",
-   "kind": "live_config",
-   "value": {
-    "model": "m",
-    "system": "be helpful",
-    "tools": [
-     {
-      "type": "function",
-      "name": "lookup",
-      "parameters": {
-       "type": "object",
-       "properties": {}
-      }
-     }
-    ],
-    "voice": "alloy",
-    "input_format": {
-     "encoding": "pcm16",
-     "sample_rate": 24000,
-     "channels": 1
-    },
-    "output_format": {
-     "encoding": "opus",
-     "sample_rate": 24000,
-     "channels": 1
-    },
-    "extensions": {
-     "turn_detection": false
-    }
-   }
-  },
-  {
-   "id": "live_client.turn",
-   "kind": "live_client_event",
-   "value": {
-    "type": "turn",
-    "parts": [
-     {
-      "type": "text",
-      "text": "hello"
-     }
-    ],
-    "turn_complete": true
-   }
-  },
-  {
-   "id": "live_client.audio",
-   "kind": "live_client_event",
-   "value": {
-    "type": "audio",
-    "data": "aGk=",
-    "media_type": "audio/pcm;rate=16000"
-   }
-  },
-  {
-   "id": "live_client.image",
-   "kind": "live_client_event",
-   "value": {
-    "type": "image",
-    "data": "aGk=",
-    "media_type": "image/jpeg"
-   }
-  },
-  {
-   "id": "live_client.text",
-   "kind": "live_client_event",
-   "value": {
-    "type": "text",
-    "text": "hello"
-   }
-  },
-  {
-   "id": "live_client.tool_result",
-   "kind": "live_client_event",
-   "value": {
-    "type": "tool_result",
-    "id": "call_1",
-    "content": [
-     {
-      "type": "text",
-      "text": "ok"
-     }
-    ]
-   }
-  },
-  {
-   "id": "live_client.interrupt",
-   "kind": "live_client_event",
-   "value": {
-    "type": "interrupt"
-   }
-  },
-  {
-   "id": "live_client.end_audio",
-   "kind": "live_client_event",
-   "value": {
-    "type": "end_audio"
-   }
-  },
-  {
-   "id": "live_server.audio",
-   "kind": "live_server_event",
-   "value": {
-    "type": "audio",
-    "data": "aGk=",
-    "media_type": "audio/pcm;rate=24000"
-   }
-  },
-  {
-   "id": "live_server.text",
-   "kind": "live_server_event",
-   "value": {
-    "type": "text",
-    "text": "hello"
-   }
-  },
-  {
-   "id": "live_server.tool_call",
-   "kind": "live_server_event",
-   "value": {
-    "type": "tool_call",
-    "id": "call_1",
-    "name": "lookup",
-    "input": {
-     "query": "weather"
-    }
-   }
-  },
-  {
-   "id": "live_server.tool_call_delta",
-   "kind": "live_server_event",
-   "value": {
-    "type": "tool_call_delta",
-    "id": "call_1",
-    "name": "lookup",
-    "input_delta": "{\"query\""
-   }
-  },
-  {
-   "id": "live_server.interrupted",
-   "kind": "live_server_event",
-   "value": {
-    "type": "interrupted"
-   }
-  },
-  {
-   "id": "live_server.turn_end",
-   "kind": "live_server_event",
-   "value": {
-    "type": "turn_end",
-    "usage": {
-     "input_tokens": 1,
-     "output_tokens": 2,
-     "total_tokens": 3
-    }
-   }
-  },
-  {
-   "id": "live_server.error",
-   "kind": "live_server_event",
-   "value": {
-    "type": "error",
-    "error": {
-     "code": "provider",
-     "message": "bad"
-    }
-   }
-  },
-  {
-   "id": "model_info.full",
-   "kind": "model_info",
-   "value": {
-    "id": "omega-4",
-    "provider": "exampleai",
-    "api_family": "openai-chat",
-    "aliases": [
-     "omega-4-latest"
-    ],
-    "origin": {
-     "type": "fine-tune",
-     "id": "ft-123",
-     "base_model": "omega-3"
-    },
-    "inference": {
-     "input_modalities": [
-      "text",
-      "image"
-     ],
-     "output_modalities": [
-      "text"
-     ],
-     "context_window": 200000,
-     "max_output_tokens": 8192,
-     "supports_reasoning": true,
-     "reasoning_efforts": [
-      "low",
-      "medium",
-      "high"
-     ],
-     "pricing": {
-      "input_per_million": 3.0,
-      "output_per_million": 15.0,
-      "currency": "USD"
-     }
-    }
-   }
-  },
-  {
-   "id": "model_info.minimal",
-   "kind": "model_info",
-   "value": {
-    "id": "tiny-1",
-    "provider": "exampleai",
-    "api_family": "openai-chat"
-   }
-  },
-  {
-   "id": "model_info.pricing-cache",
-   "kind": "model_info",
-   "value": {
-    "id": "cachey-2",
-    "provider": "exampleai",
-    "api_family": "anthropic-messages",
-    "inference": {
-     "input_modalities": [
-      "text"
-     ],
-     "output_modalities": [
-      "text"
-     ],
-     "context_window": 1000000,
-     "pricing": {
-      "input_per_million": 1.25,
-      "output_per_million": 10.0,
-      "cache_read_per_million": 0.125,
-      "cache_write_per_million": 1.5625,
-      "currency": "USD"
-     }
-    }
-   }
-  },
-  {
-   "id": "model_info.extensions-empty-object",
-   "kind": "model_info",
-   "value": {
-    "id": "opaque-1",
-    "provider": "exampleai",
-    "api_family": "openai-responses",
-    "extensions": {
-     "vendor_defaults": {}
-    }
-   }
-  },
-  {
-   "id": "model_info.origin-provider-data",
-   "kind": "model_info",
-   "value": {
-    "id": "distill-7",
-    "provider": "exampleai",
-    "api_family": "gemini",
-    "origin": {
-     "type": "distillation",
-     "base_model": "mega-7",
-     "provider_data": {
-      "job": "",
-      "steps": 0
-     }
-    },
-    "inference": {
-     "input_modalities": [
-      "text",
-      "audio"
-     ],
-     "output_modalities": [
-      "text",
-      "audio"
-     ],
-     "pricing": {
-      "input_per_million": 0.5,
-      "output_per_million": 2.0,
-      "currency": "EUR",
-      "dimensions": {
-       "audio_input_per_million": 4.0
-      }
-     }
-    }
-   }
-  },
-  {
-   "id": "config.cache-full",
-   "kind": "config",
-   "value": {
-    "max_tokens": 1024,
-    "temperature": 0.5,
-    "cache": {
-     "mode": "auto",
-     "retention": "long",
-     "key": "session-42",
-     "prefix_until_index": 3
-    }
-   }
-  },
-  {
-   "id": "config.cache-minimal",
-   "kind": "config",
-   "value": {
-    "cache": {
-     "mode": "off"
-    }
-   }
-  },
-  {
-   "id": "cache_config.full",
-   "kind": "cache_config",
-   "value": {
-    "mode": "auto",
-    "retention": "short",
-    "key": "tenant-a",
-    "prefix_until_index": 0
-   }
-  },
-  {
-   "id": "cache_config.minimal",
-   "kind": "cache_config",
-   "value": {
-    "mode": "auto"
-   }
-  },
-  {
-   "id": "continuation_state.response-id",
-   "kind": "continuation_state",
-   "value": {
-    "provider": "openai",
-    "kind": "response_id",
-    "data": {
-     "id": "resp_123"
-    }
-   }
-  },
-  {
-   "id": "continuation_state.opaque-data",
-   "kind": "continuation_state",
-   "value": {
-    "provider": "gemini",
-    "kind": "cached_content",
-    "data": {
-     "name": "cachedContents/xyz",
-     "ttl": "300s"
-    }
-   }
-  },
-  {
-   "id": "usage.nothing_reported",
-   "kind": "usage",
-   "value": {}
-  },
-  {
-   "id": "usage.reported_zeros",
-   "kind": "usage",
-   "value": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "total_tokens": 0
-   }
-  },
-  {
-   "id": "usage.partial_input_only",
-   "kind": "usage",
-   "value": {
-    "input_tokens": 7
-   }
-  },
-  {
-   "id": "config.number-float-fields-integral",
-   "kind": "config",
-   "value": {
-    "temperature": 1.0,
-    "top_p": 1.0
-   }
-  },
-  {
-   "id": "config.number-int-fields",
-   "kind": "config",
-   "value": {
-    "max_tokens": 64,
-    "top_k": 2
-   }
-  },
-  {
-   "id": "model_info.number-integral-pricing",
-   "kind": "model_info",
-   "value": {
-    "id": "flat-1",
-    "provider": "exampleai",
-    "api_family": "openai-chat",
-    "inference": {
-     "input_modalities": [
-      "text"
-     ],
-     "output_modalities": [
-      "text"
-     ],
-     "pricing": {
-      "input_per_million": 1.0,
-      "output_per_million": 2.0,
-      "currency": "USD"
-     }
-    }
-   }
-  },
-  {
-   "id": "batch_request.minimal",
-   "kind": "batch_request",
-   "value": {
-    "model": "omega-4",
-    "requests": [
-     {
-      "model": "omega-4",
-      "messages": [
-       {
-        "role": "user",
-        "parts": [
-         {
-          "type": "text",
-          "text": "Capital of France? One word."
-         }
-        ]
-       }
-      ]
-     }
-    ]
-   }
-  },
-  {
-   "id": "batch_request.full",
-   "kind": "batch_request",
-   "value": {
-    "model": "omega-4",
-    "requests": [
-     {
-      "model": "omega-4",
-      "messages": [
-       {
-        "role": "user",
-        "parts": [
-         {
-          "type": "text",
-          "text": "a"
-         }
-        ]
-       }
-      ]
-     },
-     {
-      "model": "omega-4-mini",
-      "messages": [
-       {
-        "role": "user",
-        "parts": [
-         {
-          "type": "text",
-          "text": "b"
-         }
-        ]
-       }
-      ]
-     }
-    ],
-    "label": "nightly-eval",
-    "extensions": {
-     "completion_window": "24h"
-    }
-   }
-  },
-  {
-   "id": "batch_job.minimal",
-   "kind": "batch_job",
-   "value": {
-    "id": "batch_abc",
-    "status": "queued"
-   }
-  },
-  {
-   "id": "batch_job.full",
-   "kind": "batch_job",
-   "value": {
-    "id": "msgbatch_abc",
-    "status": "completed",
-    "label": "nightly-eval",
-    "created_at": "2026-08-31T19:22:09Z",
-    "provider_data": {
-     "processing_status": "ended"
-    }
-   }
-  },
-  {
-   "id": "batch_entry.succeeded",
-   "kind": "batch_entry",
-   "value": {
-    "index": 0,
-    "outcome": "succeeded",
-    "response": {
-     "id": "msg_1",
-     "model": "omega-4",
-     "message": {
-      "role": "assistant",
-      "parts": [
-       {
+    {
+      "id": "part.text_with_continuation",
+      "kind": "part",
+      "value": {
         "type": "text",
-        "text": "Paris"
-       }
-      ]
-     },
-     "finish_reason": "stop",
-     "usage": {
-      "input_tokens": 8,
-      "output_tokens": 1,
-      "total_tokens": 9
-     }
-    }
-   }
-  },
-  {
-   "id": "batch_entry.errored",
-   "kind": "batch_entry",
-   "value": {
-    "index": 1,
-    "outcome": "errored",
-    "error": {
-     "code": "invalid_request",
-     "message": "model not found",
-     "provider_code": "invalid_request_error"
-    }
-   }
-  },
-  {
-   "id": "batch_entry.expired",
-   "kind": "batch_entry",
-   "value": {
-    "index": 2,
-    "outcome": "expired"
-   }
-  },
-  {
-   "id": "file_upload_request.bytes",
-   "kind": "file_upload_request",
-   "value": {
-    "filename": "notes.txt",
-    "bytes_data": "aGVsbG8=",
-    "media_type": "text/plain"
-   }
-  },
-  {
-   "id": "file_upload_request.path",
-   "kind": "file_upload_request",
-   "value": {
-    "filename": "clip.mp4",
-    "media_type": "video/mp4",
-    "extensions": {
-     "purpose": "vision"
+        "text": "hello",
+        "continuation": [
+          {
+            "provider": "openai",
+            "kind": "response_item_id",
+            "data": {
+              "id": "item_1"
+            }
+          }
+        ]
+      }
     },
-    "path": "/data/clip.mp4"
-   }
-  },
-  {
-   "id": "file_info.minimal",
-   "kind": "file_info",
-   "value": {
-    "id": "file_1",
-    "readiness": "ready"
-   }
-  },
-  {
-   "id": "file_info.full",
-   "kind": "file_info",
-   "value": {
-    "id": "file_abc",
-    "filename": "notes.txt",
-    "media_type": "text/plain",
-    "size_bytes": 76,
-    "created_at": "2026-08-31T22:39:04Z",
-    "expires_at": "2026-09-30T22:39:04Z",
-    "readiness": "ready",
-    "downloadable": false,
-    "provider_data": {
-     "type": "file"
-    }
-   }
-  },
-  {
-   "id": "file_info.pending",
-   "kind": "file_info",
-   "value": {
-    "id": "https://generativelanguage.googleapis.com/v1beta/files/abc",
-    "filename": "clip.mp4",
-    "media_type": "video/mp4",
-    "size_bytes": 1048576,
-    "readiness": "pending"
-   }
-  },
-  {
-   "id": "file_page.with_cursor",
-   "kind": "file_page",
-   "value": {
-    "items": [
-     {
-      "id": "file_1",
-      "filename": "a.txt",
-      "readiness": "ready"
-     }
-    ],
-    "next_cursor": "page_abc123"
-   }
-  },
-  {
-   "id": "file_page.last",
-   "kind": "file_page",
-   "value": {
-    "items": [
-     {
-      "id": "file_2",
-      "filename": "b.txt",
-      "readiness": "ready"
-     }
-    ]
-   }
-  },
-  {
-   "id": "image_generation_request.minimal",
-   "kind": "image_generation_request",
-   "value": {
-    "model": "gpt-image-1-mini",
-    "prompt": "A red circle"
-   }
-  },
-  {
-   "id": "image_generation_request.edit_full",
-   "kind": "image_generation_request",
-   "value": {
-    "model": "grok-imagine-image",
-    "prompt": "Add a blue square",
-    "size": "16:9",
-    "images": [
-     {
-      "type": "image",
-      "media_type": "image/png",
-      "data": "aGVsbG8="
-     },
-     {
-      "type": "image",
-      "media_type": "image/png",
-      "url": "https://example.com/in.png"
-     }
-    ],
-    "extensions": {
-     "quality": "low"
-    }
-   }
-  },
-  {
-   "id": "image_generation_response.minimal",
-   "kind": "image_generation_response",
-   "value": {
-    "images": [
-     {
-      "type": "image",
-      "media_type": "image/jpeg",
-      "data": "aGVsbG8="
-     }
-    ]
-   }
-  },
-  {
-   "id": "image_generation_response.full",
-   "kind": "image_generation_response",
-   "value": {
-    "images": [
-     {
-      "type": "image",
-      "media_type": "image/png",
-      "data": "aGVsbG8="
-     }
-    ],
-    "text": "Here's a red circle: ",
-    "id": "resp_1",
-    "model": "gemini-2.5-flash-image",
-    "usage": {
-     "input_tokens": 10,
-     "output_tokens": 1305,
-     "total_tokens": 1315
+    {
+      "id": "part.image_url",
+      "kind": "part",
+      "value": {
+        "type": "image",
+        "media_type": "image/png",
+        "url": "https://example.com/cat.png",
+        "detail": "low"
+      }
     },
-    "provider_data": {
-     "responseId": "resp_1"
-    }
-   }
-  },
-  {
-   "id": "speech_generation_request.minimal",
-   "kind": "speech_generation_request",
-   "value": {
-    "model": "gpt-4o-mini-tts",
-    "prompt": "Hello."
-   }
-  },
-  {
-   "id": "speech_generation_request.full",
-   "kind": "speech_generation_request",
-   "value": {
-    "model": "gemini-2.5-flash-preview-tts",
-    "prompt": "Hello.",
-    "voice": "Kore",
-    "format": "wav",
-    "extensions": {
-     "speed": 1
-    }
-   }
-  },
-  {
-   "id": "speech_generation_response.minimal",
-   "kind": "speech_generation_response",
-   "value": {
-    "audio": {
-     "type": "audio",
-     "media_type": "audio/mpeg",
-     "data": "aGVsbG8="
-    }
-   }
-  },
-  {
-   "id": "speech_generation_response.full",
-   "kind": "speech_generation_response",
-   "value": {
-    "audio": {
-     "type": "audio",
-     "media_type": "audio/L16;codec=pcm;rate=24000",
-     "data": "aGVsbG8="
+    {
+      "id": "part.audio_data",
+      "kind": "part",
+      "value": {
+        "type": "audio",
+        "media_type": "audio/wav",
+        "data": "aGk="
+      }
     },
-    "id": "resp_2",
-    "model": "gemini-2.5-flash-preview-tts",
-    "usage": {
-     "input_tokens": 6,
-     "output_tokens": 59,
-     "total_tokens": 65
+    {
+      "id": "part.video_file",
+      "kind": "part",
+      "value": {
+        "type": "video",
+        "media_type": "video/mp4",
+        "file_id": "file_video"
+      }
     },
-    "provider_data": {
-     "modelVersion": "gemini-2.5-flash-preview-tts"
+    {
+      "id": "part.document_url",
+      "kind": "part",
+      "value": {
+        "type": "document",
+        "media_type": "application/pdf",
+        "url": "https://example.com/doc.pdf"
+      }
+    },
+    {
+      "id": "part.tool_call",
+      "kind": "part",
+      "value": {
+        "type": "tool_call",
+        "id": "call_1",
+        "name": "lookup",
+        "input": {
+          "query": "weather"
+        }
+      }
+    },
+    {
+      "id": "part.tool_result",
+      "kind": "part",
+      "value": {
+        "type": "tool_result",
+        "id": "call_1",
+        "name": "lookup",
+        "content": [
+          {
+            "type": "text",
+            "text": "sunny"
+          }
+        ],
+        "is_error": true
+      }
+    },
+    {
+      "id": "part.thinking",
+      "kind": "part",
+      "value": {
+        "type": "thinking",
+        "text": "reasoning",
+        "redacted": true
+      }
+    },
+    {
+      "id": "part.refusal",
+      "kind": "part",
+      "value": {
+        "type": "refusal",
+        "text": "no"
+      }
+    },
+    {
+      "id": "part.citation",
+      "kind": "part",
+      "value": {
+        "type": "citation",
+        "text": "Example",
+        "url": "https://example.com",
+        "title": "Example title"
+      }
+    },
+    {
+      "id": "message.user_multimodal",
+      "kind": "message",
+      "value": {
+        "role": "user",
+        "parts": [
+          {
+            "type": "text",
+            "text": "describe"
+          },
+          {
+            "type": "image",
+            "media_type": "image/png",
+            "url": "https://example.com/cat.png"
+          }
+        ]
+      }
+    },
+    {
+      "id": "message.assistant_tool_call",
+      "kind": "message",
+      "value": {
+        "role": "assistant",
+        "parts": [
+          {
+            "type": "tool_call",
+            "id": "call_1",
+            "name": "lookup",
+            "input": {
+              "query": "weather"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "message.assistant_with_continuation",
+      "kind": "message",
+      "value": {
+        "role": "assistant",
+        "parts": [
+          {
+            "type": "text",
+            "text": "hello"
+          }
+        ],
+        "continuation": [
+          {
+            "provider": "openai",
+            "kind": "response_id",
+            "data": {
+              "id": "resp_1"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "tool.function",
+      "kind": "tool",
+      "value": {
+        "type": "function",
+        "name": "lookup",
+        "description": "Look up data",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "id": "tool.builtin",
+      "kind": "tool",
+      "value": {
+        "type": "builtin",
+        "name": "web_search",
+        "config": {
+          "context_size": "low"
+        }
+      }
+    },
+    {
+      "id": "tool.function.empty_parameters",
+      "kind": "tool",
+      "value": {
+        "type": "function",
+        "name": "noop",
+        "parameters": {}
+      }
+    },
+    {
+      "id": "tool_choice.required",
+      "kind": "tool_choice",
+      "value": {
+        "mode": "required",
+        "allowed": [
+          "lookup"
+        ],
+        "parallel": false
+      }
+    },
+    {
+      "id": "reasoning.medium",
+      "kind": "reasoning",
+      "value": {
+        "effort": "medium",
+        "thinking_budget": 128,
+        "total_budget": 256
+      }
+    },
+    {
+      "id": "config.full",
+      "kind": "config",
+      "value": {
+        "max_tokens": 64,
+        "temperature": 0.2,
+        "top_p": 0.9,
+        "top_k": 20,
+        "stop": [
+          "END"
+        ],
+        "response_format": {
+          "type": "json_object"
+        },
+        "tool_choice": {
+          "mode": "required",
+          "allowed": [
+            "lookup"
+          ]
+        },
+        "reasoning": {
+          "effort": "low"
+        },
+        "extensions": {
+          "store": false
+        }
+      }
+    },
+    {
+      "id": "error_detail.unsupported_model",
+      "kind": "error_detail",
+      "value": {
+        "code": "unsupported_model",
+        "message": "missing model",
+        "provider_code": "model_not_found"
+      }
+    },
+    {
+      "id": "delta.text",
+      "kind": "delta",
+      "value": {
+        "type": "text",
+        "text": "hi",
+        "part_index": 0
+      }
+    },
+    {
+      "id": "delta.thinking",
+      "kind": "delta",
+      "value": {
+        "type": "thinking",
+        "text": "hmm",
+        "part_index": 1
+      }
+    },
+    {
+      "id": "delta.audio",
+      "kind": "delta",
+      "value": {
+        "type": "audio",
+        "data": "aGk=",
+        "media_type": "audio/wav",
+        "part_index": 0
+      }
+    },
+    {
+      "id": "delta.image",
+      "kind": "delta",
+      "value": {
+        "type": "image",
+        "url": "https://example.com/image.png",
+        "media_type": "image/png",
+        "part_index": 0
+      }
+    },
+    {
+      "id": "delta.tool_call",
+      "kind": "delta",
+      "value": {
+        "type": "tool_call",
+        "input": "{\"query\":",
+        "id": "call_1",
+        "name": "lookup",
+        "part_index": 0
+      }
+    },
+    {
+      "id": "delta.citation",
+      "kind": "delta",
+      "value": {
+        "type": "citation",
+        "text": "Example",
+        "url": "https://example.com",
+        "title": "Example",
+        "part_index": 2
+      }
+    },
+    {
+      "id": "delta.continuation",
+      "kind": "delta",
+      "value": {
+        "type": "continuation",
+        "provider": "anthropic",
+        "kind": "thinking_signature",
+        "data": {
+          "signature": "abc"
+        },
+        "part_index": 1
+      }
+    },
+    {
+      "id": "usage.full",
+      "kind": "usage",
+      "value": {
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "total_tokens": 15,
+        "cache_read_tokens": 1,
+        "cache_write_tokens": 2,
+        "reasoning_tokens": 3,
+        "input_audio_tokens": 4,
+        "output_audio_tokens": 5
+      }
+    },
+    {
+      "id": "stream.start",
+      "kind": "stream_event",
+      "value": {
+        "type": "start",
+        "id": "resp_1",
+        "model": "m"
+      }
+    },
+    {
+      "id": "stream.delta",
+      "kind": "stream_event",
+      "value": {
+        "type": "delta",
+        "delta": {
+          "type": "text",
+          "text": "hi",
+          "part_index": 0
+        }
+      }
+    },
+    {
+      "id": "stream.end",
+      "kind": "stream_event",
+      "value": {
+        "type": "end",
+        "finish_reason": "stop",
+        "usage": {
+          "input_tokens": 1,
+          "output_tokens": 1,
+          "total_tokens": 2
+        },
+        "provider_data": {
+          "provider": "test"
+        }
+      }
+    },
+    {
+      "id": "stream.error",
+      "kind": "stream_event",
+      "value": {
+        "type": "error",
+        "error": {
+          "code": "transport",
+          "message": "socket closed"
+        }
+      }
+    },
+    {
+      "id": "request.with_tools",
+      "kind": "request",
+      "value": {
+        "model": "m",
+        "messages": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "type": "text",
+                "text": "hello"
+              }
+            ]
+          }
+        ],
+        "system": "be terse",
+        "tools": [
+          {
+            "type": "function",
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        ],
+        "config": {
+          "max_tokens": 32
+        }
+      }
+    },
+    {
+      "id": "response.with_citation",
+      "kind": "response",
+      "value": {
+        "id": "resp_1",
+        "model": "m",
+        "message": {
+          "role": "assistant",
+          "parts": [
+            {
+              "type": "text",
+              "text": "hello"
+            },
+            {
+              "type": "citation",
+              "url": "https://example.com",
+              "title": "Example"
+            }
+          ]
+        },
+        "finish_reason": "stop",
+        "usage": {
+          "input_tokens": 1,
+          "output_tokens": 1,
+          "total_tokens": 2
+        }
+      }
+    },
+    {
+      "id": "audio_format.pcm16",
+      "kind": "audio_format",
+      "value": {
+        "encoding": "pcm16",
+        "sample_rate": 24000,
+        "channels": 1
+      }
+    },
+    {
+      "id": "live_config.full",
+      "kind": "live_config",
+      "value": {
+        "model": "m",
+        "system": "be helpful",
+        "tools": [
+          {
+            "type": "function",
+            "name": "lookup",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        ],
+        "voice": "alloy",
+        "input_format": {
+          "encoding": "pcm16",
+          "sample_rate": 24000,
+          "channels": 1
+        },
+        "output_format": {
+          "encoding": "opus",
+          "sample_rate": 24000,
+          "channels": 1
+        },
+        "extensions": {
+          "turn_detection": false
+        }
+      }
+    },
+    {
+      "id": "live_client.turn",
+      "kind": "live_client_event",
+      "value": {
+        "type": "turn",
+        "parts": [
+          {
+            "type": "text",
+            "text": "hello"
+          }
+        ],
+        "turn_complete": true
+      }
+    },
+    {
+      "id": "live_client.audio",
+      "kind": "live_client_event",
+      "value": {
+        "type": "audio",
+        "data": "aGk=",
+        "media_type": "audio/pcm;rate=16000"
+      }
+    },
+    {
+      "id": "live_client.image",
+      "kind": "live_client_event",
+      "value": {
+        "type": "image",
+        "data": "aGk=",
+        "media_type": "image/jpeg"
+      }
+    },
+    {
+      "id": "live_client.text",
+      "kind": "live_client_event",
+      "value": {
+        "type": "text",
+        "text": "hello"
+      }
+    },
+    {
+      "id": "live_client.tool_result",
+      "kind": "live_client_event",
+      "value": {
+        "type": "tool_result",
+        "id": "call_1",
+        "content": [
+          {
+            "type": "text",
+            "text": "ok"
+          }
+        ]
+      }
+    },
+    {
+      "id": "live_client.interrupt",
+      "kind": "live_client_event",
+      "value": {
+        "type": "interrupt"
+      }
+    },
+    {
+      "id": "live_client.end_audio",
+      "kind": "live_client_event",
+      "value": {
+        "type": "end_audio"
+      }
+    },
+    {
+      "id": "live_server.audio",
+      "kind": "live_server_event",
+      "value": {
+        "type": "audio",
+        "data": "aGk=",
+        "media_type": "audio/pcm;rate=24000"
+      }
+    },
+    {
+      "id": "live_server.text",
+      "kind": "live_server_event",
+      "value": {
+        "type": "text",
+        "text": "hello"
+      }
+    },
+    {
+      "id": "live_server.tool_call",
+      "kind": "live_server_event",
+      "value": {
+        "type": "tool_call",
+        "id": "call_1",
+        "name": "lookup",
+        "input": {
+          "query": "weather"
+        }
+      }
+    },
+    {
+      "id": "live_server.tool_call_delta",
+      "kind": "live_server_event",
+      "value": {
+        "type": "tool_call_delta",
+        "id": "call_1",
+        "name": "lookup",
+        "input_delta": "{\"query\""
+      }
+    },
+    {
+      "id": "live_server.interrupted",
+      "kind": "live_server_event",
+      "value": {
+        "type": "interrupted"
+      }
+    },
+    {
+      "id": "live_server.turn_end",
+      "kind": "live_server_event",
+      "value": {
+        "type": "turn_end",
+        "usage": {
+          "input_tokens": 1,
+          "output_tokens": 2,
+          "total_tokens": 3
+        }
+      }
+    },
+    {
+      "id": "live_server.error",
+      "kind": "live_server_event",
+      "value": {
+        "type": "error",
+        "error": {
+          "code": "provider",
+          "message": "bad"
+        }
+      }
+    },
+    {
+      "id": "model_info.full",
+      "kind": "model_info",
+      "value": {
+        "id": "omega-4",
+        "provider": "exampleai",
+        "api_family": "openai-chat",
+        "aliases": [
+          "omega-4-latest"
+        ],
+        "origin": {
+          "type": "fine-tune",
+          "id": "ft-123",
+          "base_model": "omega-3"
+        },
+        "inference": {
+          "input_modalities": [
+            "text",
+            "image"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "context_window": 200000,
+          "max_output_tokens": 8192,
+          "supports_reasoning": true,
+          "reasoning_efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "pricing": {
+            "input_per_million": 3.0,
+            "output_per_million": 15.0,
+            "currency": "USD"
+          }
+        }
+      }
+    },
+    {
+      "id": "model_info.minimal",
+      "kind": "model_info",
+      "value": {
+        "id": "tiny-1",
+        "provider": "exampleai",
+        "api_family": "openai-chat"
+      }
+    },
+    {
+      "id": "model_info.pricing-cache",
+      "kind": "model_info",
+      "value": {
+        "id": "cachey-2",
+        "provider": "exampleai",
+        "api_family": "anthropic-messages",
+        "inference": {
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "context_window": 1000000,
+          "pricing": {
+            "input_per_million": 1.25,
+            "output_per_million": 10.0,
+            "cache_read_per_million": 0.125,
+            "cache_write_per_million": 1.5625,
+            "currency": "USD"
+          }
+        }
+      }
+    },
+    {
+      "id": "model_info.extensions-empty-object",
+      "kind": "model_info",
+      "value": {
+        "id": "opaque-1",
+        "provider": "exampleai",
+        "api_family": "openai-responses",
+        "extensions": {
+          "vendor_defaults": {}
+        }
+      }
+    },
+    {
+      "id": "model_info.origin-provider-data",
+      "kind": "model_info",
+      "value": {
+        "id": "distill-7",
+        "provider": "exampleai",
+        "api_family": "gemini",
+        "origin": {
+          "type": "distillation",
+          "base_model": "mega-7",
+          "provider_data": {
+            "job": "",
+            "steps": 0
+          }
+        },
+        "inference": {
+          "input_modalities": [
+            "text",
+            "audio"
+          ],
+          "output_modalities": [
+            "text",
+            "audio"
+          ],
+          "pricing": {
+            "input_per_million": 0.5,
+            "output_per_million": 2.0,
+            "currency": "EUR",
+            "dimensions": {
+              "audio_input_per_million": 4.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "config.cache-full",
+      "kind": "config",
+      "value": {
+        "max_tokens": 1024,
+        "temperature": 0.5,
+        "cache": {
+          "mode": "auto",
+          "retention": "long",
+          "key": "session-42",
+          "prefix_until_index": 3
+        }
+      }
+    },
+    {
+      "id": "config.cache-minimal",
+      "kind": "config",
+      "value": {
+        "cache": {
+          "mode": "off"
+        }
+      }
+    },
+    {
+      "id": "cache_config.full",
+      "kind": "cache_config",
+      "value": {
+        "mode": "auto",
+        "retention": "short",
+        "key": "tenant-a",
+        "prefix_until_index": 0
+      }
+    },
+    {
+      "id": "cache_config.minimal",
+      "kind": "cache_config",
+      "value": {
+        "mode": "auto"
+      }
+    },
+    {
+      "id": "continuation_state.response-id",
+      "kind": "continuation_state",
+      "value": {
+        "provider": "openai",
+        "kind": "response_id",
+        "data": {
+          "id": "resp_123"
+        }
+      }
+    },
+    {
+      "id": "continuation_state.opaque-data",
+      "kind": "continuation_state",
+      "value": {
+        "provider": "gemini",
+        "kind": "cached_content",
+        "data": {
+          "name": "cachedContents/xyz",
+          "ttl": "300s"
+        }
+      }
+    },
+    {
+      "id": "usage.nothing_reported",
+      "kind": "usage",
+      "value": {}
+    },
+    {
+      "id": "usage.reported_zeros",
+      "kind": "usage",
+      "value": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+      }
+    },
+    {
+      "id": "usage.partial_input_only",
+      "kind": "usage",
+      "value": {
+        "input_tokens": 7
+      }
+    },
+    {
+      "id": "config.number-float-fields-integral",
+      "kind": "config",
+      "value": {
+        "temperature": 1.0,
+        "top_p": 1.0
+      }
+    },
+    {
+      "id": "config.number-int-fields",
+      "kind": "config",
+      "value": {
+        "max_tokens": 64,
+        "top_k": 2
+      }
+    },
+    {
+      "id": "model_info.number-integral-pricing",
+      "kind": "model_info",
+      "value": {
+        "id": "flat-1",
+        "provider": "exampleai",
+        "api_family": "openai-chat",
+        "inference": {
+          "input_modalities": [
+            "text"
+          ],
+          "output_modalities": [
+            "text"
+          ],
+          "pricing": {
+            "input_per_million": 1.0,
+            "output_per_million": 2.0,
+            "currency": "USD"
+          }
+        }
+      }
+    },
+    {
+      "id": "batch_request.minimal",
+      "kind": "batch_request",
+      "value": {
+        "model": "omega-4",
+        "requests": [
+          {
+            "model": "omega-4",
+            "messages": [
+              {
+                "role": "user",
+                "parts": [
+                  {
+                    "type": "text",
+                    "text": "Capital of France? One word."
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "batch_request.full",
+      "kind": "batch_request",
+      "value": {
+        "model": "omega-4",
+        "requests": [
+          {
+            "model": "omega-4",
+            "messages": [
+              {
+                "role": "user",
+                "parts": [
+                  {
+                    "type": "text",
+                    "text": "a"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "model": "omega-4-mini",
+            "messages": [
+              {
+                "role": "user",
+                "parts": [
+                  {
+                    "type": "text",
+                    "text": "b"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "label": "nightly-eval",
+        "extensions": {
+          "completion_window": "24h"
+        }
+      }
+    },
+    {
+      "id": "batch_job.minimal",
+      "kind": "batch_job",
+      "value": {
+        "id": "batch_abc",
+        "status": "queued"
+      }
+    },
+    {
+      "id": "batch_job.full",
+      "kind": "batch_job",
+      "value": {
+        "id": "msgbatch_abc",
+        "status": "completed",
+        "label": "nightly-eval",
+        "created_at": "2026-08-31T19:22:09Z",
+        "provider_data": {
+          "processing_status": "ended"
+        }
+      }
+    },
+    {
+      "id": "batch_entry.succeeded",
+      "kind": "batch_entry",
+      "value": {
+        "index": 0,
+        "outcome": "succeeded",
+        "response": {
+          "id": "msg_1",
+          "model": "omega-4",
+          "message": {
+            "role": "assistant",
+            "parts": [
+              {
+                "type": "text",
+                "text": "Paris"
+              }
+            ]
+          },
+          "finish_reason": "stop",
+          "usage": {
+            "input_tokens": 8,
+            "output_tokens": 1,
+            "total_tokens": 9
+          }
+        }
+      }
+    },
+    {
+      "id": "batch_entry.errored",
+      "kind": "batch_entry",
+      "value": {
+        "index": 1,
+        "outcome": "errored",
+        "error": {
+          "code": "invalid_request",
+          "message": "model not found",
+          "provider_code": "invalid_request_error"
+        }
+      }
+    },
+    {
+      "id": "batch_entry.expired",
+      "kind": "batch_entry",
+      "value": {
+        "index": 2,
+        "outcome": "expired"
+      }
+    },
+    {
+      "id": "file_upload_request.bytes",
+      "kind": "file_upload_request",
+      "value": {
+        "filename": "notes.txt",
+        "bytes_data": "aGVsbG8=",
+        "media_type": "text/plain"
+      }
+    },
+    {
+      "id": "file_upload_request.path",
+      "kind": "file_upload_request",
+      "value": {
+        "filename": "clip.mp4",
+        "media_type": "video/mp4",
+        "extensions": {
+          "purpose": "vision"
+        },
+        "path": "/data/clip.mp4"
+      }
+    },
+    {
+      "id": "file_info.minimal",
+      "kind": "file_info",
+      "value": {
+        "id": "file_1",
+        "readiness": "ready"
+      }
+    },
+    {
+      "id": "file_info.full",
+      "kind": "file_info",
+      "value": {
+        "id": "file_abc",
+        "filename": "notes.txt",
+        "media_type": "text/plain",
+        "size_bytes": 76,
+        "created_at": "2026-08-31T22:39:04Z",
+        "expires_at": "2026-09-30T22:39:04Z",
+        "readiness": "ready",
+        "downloadable": false,
+        "provider_data": {
+          "type": "file"
+        }
+      }
+    },
+    {
+      "id": "file_info.pending",
+      "kind": "file_info",
+      "value": {
+        "id": "https://generativelanguage.googleapis.com/v1beta/files/abc",
+        "filename": "clip.mp4",
+        "media_type": "video/mp4",
+        "size_bytes": 1048576,
+        "readiness": "pending"
+      }
+    },
+    {
+      "id": "file_page.with_cursor",
+      "kind": "file_page",
+      "value": {
+        "items": [
+          {
+            "id": "file_1",
+            "filename": "a.txt",
+            "readiness": "ready"
+          }
+        ],
+        "next_cursor": "page_abc123"
+      }
+    },
+    {
+      "id": "file_page.last",
+      "kind": "file_page",
+      "value": {
+        "items": [
+          {
+            "id": "file_2",
+            "filename": "b.txt",
+            "readiness": "ready"
+          }
+        ]
+      }
+    },
+    {
+      "id": "image_generation_request.minimal",
+      "kind": "image_generation_request",
+      "value": {
+        "model": "gpt-image-1-mini",
+        "prompt": "A red circle"
+      }
+    },
+    {
+      "id": "image_generation_request.edit_full",
+      "kind": "image_generation_request",
+      "value": {
+        "model": "grok-imagine-image",
+        "prompt": "Add a blue square",
+        "size": "16:9",
+        "images": [
+          {
+            "type": "image",
+            "media_type": "image/png",
+            "data": "aGVsbG8="
+          },
+          {
+            "type": "image",
+            "media_type": "image/png",
+            "url": "https://example.com/in.png"
+          }
+        ],
+        "extensions": {
+          "quality": "low"
+        }
+      }
+    },
+    {
+      "id": "image_generation_response.minimal",
+      "kind": "image_generation_response",
+      "value": {
+        "images": [
+          {
+            "type": "image",
+            "media_type": "image/jpeg",
+            "data": "aGVsbG8="
+          }
+        ]
+      }
+    },
+    {
+      "id": "image_generation_response.full",
+      "kind": "image_generation_response",
+      "value": {
+        "images": [
+          {
+            "type": "image",
+            "media_type": "image/png",
+            "data": "aGVsbG8="
+          }
+        ],
+        "text": "Here's a red circle: ",
+        "id": "resp_1",
+        "model": "gemini-2.5-flash-image",
+        "usage": {
+          "input_tokens": 10,
+          "output_tokens": 1305,
+          "total_tokens": 1315
+        },
+        "provider_data": {
+          "responseId": "resp_1"
+        }
+      }
+    },
+    {
+      "id": "speech_generation_request.minimal",
+      "kind": "speech_generation_request",
+      "value": {
+        "model": "gpt-4o-mini-tts",
+        "prompt": "Hello."
+      }
+    },
+    {
+      "id": "speech_generation_request.full",
+      "kind": "speech_generation_request",
+      "value": {
+        "model": "gemini-2.5-flash-preview-tts",
+        "prompt": "Hello.",
+        "voice": "Kore",
+        "format": "wav",
+        "extensions": {
+          "speed": 1
+        }
+      }
+    },
+    {
+      "id": "speech_generation_response.minimal",
+      "kind": "speech_generation_response",
+      "value": {
+        "audio": {
+          "type": "audio",
+          "media_type": "audio/mpeg",
+          "data": "aGVsbG8="
+        }
+      }
+    },
+    {
+      "id": "speech_generation_response.full",
+      "kind": "speech_generation_response",
+      "value": {
+        "audio": {
+          "type": "audio",
+          "media_type": "audio/L16;codec=pcm;rate=24000",
+          "data": "aGVsbG8="
+        },
+        "id": "resp_2",
+        "model": "gemini-2.5-flash-preview-tts",
+        "usage": {
+          "input_tokens": 6,
+          "output_tokens": 59,
+          "total_tokens": 65
+        },
+        "provider_data": {
+          "modelVersion": "gemini-2.5-flash-preview-tts"
+        }
+      }
+    },
+    {
+      "id": "video_generation_request.minimal",
+      "kind": "video_generation_request",
+      "value": {
+        "model": "grok-imagine-video",
+        "prompt": "A red ball bounces once"
+      }
+    },
+    {
+      "id": "video_generation_request.full",
+      "kind": "video_generation_request",
+      "value": {
+        "model": "sora-2",
+        "prompt": "A red ball bounces once",
+        "seconds": 4,
+        "extensions": {
+          "size": "720x1280"
+        }
+      }
+    },
+    {
+      "id": "video_job.minimal",
+      "kind": "video_job",
+      "value": {
+        "id": "video_1",
+        "status": "queued"
+      }
+    },
+    {
+      "id": "video_job.full",
+      "kind": "video_job",
+      "value": {
+        "id": "models/veo-3.1-lite-generate-preview/operations/0008ar3b1ksa",
+        "status": "completed",
+        "progress": 100,
+        "created_at": "2026-09-01T12:46:16Z",
+        "model": "sora-2",
+        "provider_data": {
+          "status": "done"
+        }
+      }
+    },
+    {
+      "id": "config.logprobs-zero",
+      "kind": "config",
+      "value": {
+        "logprobs": 0
+      }
+    },
+    {
+      "id": "config.logprobs",
+      "kind": "config",
+      "value": {
+        "max_tokens": 16,
+        "logprobs": 3
+      }
+    },
+    {
+      "id": "delta.text-logprobs",
+      "kind": "delta",
+      "value": {
+        "type": "text",
+        "text": "hi",
+        "part_index": 0,
+        "logprobs": [
+          {
+            "token": "hi",
+            "logprob": -0.25,
+            "bytes": [
+              104,
+              105
+            ],
+            "top": [
+              {
+                "token": "hi",
+                "logprob": -0.25,
+                "bytes": [
+                  104,
+                  105
+                ]
+              },
+              {
+                "token": "Hi",
+                "logprob": -2.5,
+                "bytes": [
+                  72,
+                  105
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "response.with_logprobs",
+      "kind": "response",
+      "value": {
+        "id": "resp_lp",
+        "model": "m",
+        "message": {
+          "role": "assistant",
+          "parts": [
+            {
+              "type": "text",
+              "text": "hi"
+            }
+          ]
+        },
+        "finish_reason": "stop",
+        "usage": {
+          "input_tokens": 1,
+          "output_tokens": 1,
+          "total_tokens": 2
+        },
+        "logprobs": [
+          {
+            "token": "hi",
+            "logprob": -0.25,
+            "top": [
+              {
+                "token": "hi",
+                "logprob": -0.25,
+                "token_id": 544
+              },
+              {
+                "token": "yo",
+                "logprob": -3.0,
+                "token_id": 921
+              }
+            ]
+          }
+        ]
+      }
     }
-   }
-  },
-  {
-   "id": "video_generation_request.minimal",
-   "kind": "video_generation_request",
-   "value": {
-    "model": "grok-imagine-video",
-    "prompt": "A red ball bounces once"
-   }
-  },
-  {
-   "id": "video_generation_request.full",
-   "kind": "video_generation_request",
-   "value": {
-    "model": "sora-2",
-    "prompt": "A red ball bounces once",
-    "seconds": 4,
-    "extensions": {
-     "size": "720x1280"
-    }
-   }
-  },
-  {
-   "id": "video_job.minimal",
-   "kind": "video_job",
-   "value": {
-    "id": "video_1",
-    "status": "queued"
-   }
-  },
-  {
-   "id": "video_job.full",
-   "kind": "video_job",
-   "value": {
-    "id": "models/veo-3.1-lite-generate-preview/operations/0008ar3b1ksa",
-    "status": "completed",
-    "progress": 100,
-    "created_at": "2026-09-01T12:46:16Z",
-    "model": "sora-2",
-    "provider_data": {
-     "status": "done"
-    }
-   }
-  }
- ]
+  ]
 }

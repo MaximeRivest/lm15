@@ -409,16 +409,33 @@ class AnthropicLM(BaseProviderLM):
         tc = request.config.tool_choice
         if tc is None:
             return None
-        
+
         payload: dict[str, Any] = {}
         if tc.mode == "none":
             payload["type"] = "none"
         elif tc.allowed:
-            if len(tc.allowed) == 1:
+            # {"type": "tool", "name": ...} forces client tools AND server
+            # tools — verified live 2026-09-01 with web_search (the API
+            # reference is silent on server tools; the capture is the
+            # evidence).  Builtin names ride the same form because
+            # _builtin_to_anthropic puts the canonical name on the wire.
+            if len(tc.allowed) == 1 and tc.mode == "required":
                 payload["type"] = "tool"
                 payload["name"] = tc.allowed[0]
-            else:
+            elif set(tc.allowed) == {t.name for t in request.tools}:
+                # Allowing every declared tool is no restriction at all.
                 payload["type"] = "any" if tc.mode == "required" else "auto"
+            else:
+                # A proper-subset allowlist has no Anthropic wire form.
+                # Degrading to any/auto would let the model call excluded
+                # tools — raise, never silently widen the caller's policy.
+                raise UnsupportedFeatureError(
+                    "anthropic: tool_choice.allowed subsets are not supported — "
+                    "the Messages API can force one named tool or allow all "
+                    "declared tools, but cannot restrict to a subset. Send only "
+                    "the allowed tools in Request.tools instead",
+                    provider=self.provider,
+                )
         elif tc.mode == "required":
             payload["type"] = "any"
         else:
@@ -426,7 +443,7 @@ class AnthropicLM(BaseProviderLM):
 
         if tc.parallel is False and payload["type"] != "none":
             payload["disable_parallel_tool_use"] = True
-            
+
         return payload
 
     def _payload(self, request: Request, stream: bool) -> dict[str, Any]:
@@ -498,6 +515,13 @@ class AnthropicLM(BaseProviderLM):
             raise UnsupportedFeatureError(
                 "anthropic: config.store is not supported — the Messages API has no "
                 "response-storage opt-out field (OpenAI and Gemini carry it)",
+                provider=self.provider,
+            )
+        if request.config.logprobs is not None:
+            raise UnsupportedFeatureError(
+                "anthropic: config.logprobs is not supported — the Messages API "
+                "does not expose token log probabilities (OpenAI and Gemini "
+                "carry them)",
                 provider=self.provider,
             )
         if request.config.extensions:
