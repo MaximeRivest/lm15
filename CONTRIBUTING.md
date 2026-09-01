@@ -179,8 +179,14 @@ source of truth for both contributors and reviewers:
 5. **Sign your work (DCO).** Every commit must carry a
    `Signed-off-by:` line asserting the [Developer Certificate of
    Origin](https://developercertificate.org/) — that you have the legal
-   right to contribute the change. Use `git commit -s`; configure once
-   with `git config format.signOff true` to never think about it again.
+   right to contribute the change. Enable the repo hook once per clone
+   and every commit is signed off automatically:
+
+   ```bash
+   git config core.hooksPath .githooks
+   ```
+
+   (Manual alternative: `git commit -s`.)
 6. **No secrets.** Never commit API keys, tokens, or fixture data
    captured with real credentials. Secret scanning with push protection
    is enabled and will reject such pushes.

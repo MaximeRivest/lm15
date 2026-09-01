@@ -1,0 +1,10 @@
+#!/bin/sh
+# Append a DCO Signed-off-by trailer to every commit, unless one is
+# already present (so `git commit -s` and rebases stay idempotent).
+#
+# Enable once per clone:
+#   git config core.hooksPath .githooks
+COMMIT_MSG_FILE="$1"
+
+SOB=$(git var GIT_COMMITTER_IDENT | sed -n 's/^\(.*>\).*$/Signed-off-by: \1/p')
+git interpret-trailers --if-exists doNothing --trailer "$SOB" --in-place "$COMMIT_MSG_FILE"
