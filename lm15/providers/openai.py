@@ -1351,6 +1351,10 @@ class OpenAILM(BaseProviderLM):
                     )
         # Entries the output files never mention (an expired or cancelled
         # batch stops mid-flight): fill from the job's terminal status.
+        # Live edge (observed 2026-09-01): a batch cancelled during
+        # `validating` reports request_counts.total=0 — the provider never
+        # registered the requests — so results() is honestly EMPTY; lm15
+        # does not fabricate entries from the input file side-channel.
         counts = status_body.get("request_counts") if isinstance(status_body.get("request_counts"), dict) else {}
         total = int(counts.get("total") or 0) or (max(found) + 1 if found else 0)
         fill: str = "expired" if job_status == "expired" else "cancelled" if job_status == "cancelled" else "errored"

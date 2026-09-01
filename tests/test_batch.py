@@ -209,6 +209,21 @@ def test_openai_results_two_files_and_fill_in() -> None:
     assert entries[2].response is None and entries[2].error is None
 
 
+def test_openai_cancelled_during_validating_has_no_entries() -> None:
+    # Live wire body captured 2026-09-01 (openai-cancel.json): a batch
+    # cancelled while `validating` reports request_counts.total=0 — the
+    # provider never registered the requests. results() faithfully
+    # mirrors that accounting instead of fabricating entries from the
+    # (expiring) input file side-channel.
+    status_body = {"id": "batch_c", "status": "cancelled",
+                   "output_file_id": None, "error_file_id": None,
+                   "request_counts": {"total": 0, "completed": 0, "failed": 0},
+                   "metadata": {"label": "lm15-cancel-capture-2026-09-01"}}
+    transport = FakeTransport([wire(status_body)])
+    lm = OpenAILM(api_key="k", transport=transport)
+    assert lm.batch_results("batch_c") == ()
+
+
 # ─── Gemini (wire shapes verified live 2026-08-31) ───────────────────
 
 def gemini_status_body(state: str, done: bool = False, extra: dict | None = None) -> dict:
