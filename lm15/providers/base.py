@@ -23,8 +23,8 @@ from ..transports import TransportResponse
 from ..transports import StdlibTransport
 from ..transports import TransportError as NetworkTransportError
 from ..types import (
-    AudioGenerationRequest,
-    AudioGenerationResponse,
+    SpeechGenerationRequest,
+    SpeechGenerationResponse,
     BATCH_TERMINAL_STATUSES,
     BatchEntry,
     BatchJobInfo,
@@ -273,11 +273,52 @@ class BaseProviderLM:
     def live(self, config: LiveConfig) -> LiveSession:
         raise UnsupportedFeatureError(f"{self.provider}: live not supported", provider=self.provider)
 
-    def image_generate(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
-        raise UnsupportedFeatureError(f"{self.provider}: image generation not supported", provider=self.provider)
+    # ─── Media generation (images / speech) ────────────────────────
+    #
+    # Same pure-hook pattern as files and batch: adapters implement the
+    # build/parse pair; the sync drivers below and the async mirrors both
+    # drive the same hooks.  Parse hooks take the full HttpResponse, not
+    # just the body: OpenAI speech returns raw bytes whose media type
+    # lives in the content-type HEADER (captured 2026-09-01).  Media
+    # types always come from the wire — hardcoding one is a lie on at
+    # least one provider (OpenAI png / Gemini png / xAI jpeg captured).
 
-    def audio_generate(self, request: AudioGenerationRequest) -> AudioGenerationResponse:
-        raise UnsupportedFeatureError(f"{self.provider}: audio generation not supported", provider=self.provider)
+    def _generation_unsupported(self, kind: str) -> UnsupportedFeatureError:
+        return UnsupportedFeatureError(f"{self.provider}: {kind} generation not supported", provider=self.provider)
+
+    def _image_generate_request(self, request: ImageGenerationRequest) -> TransportRequest:
+        raise self._generation_unsupported("image")
+
+    def _image_generation_from_response(self, request: ImageGenerationRequest, resp: HttpResponse) -> ImageGenerationResponse:
+        raise self._generation_unsupported("image")
+
+    def _speech_generate_request(self, request: SpeechGenerationRequest) -> TransportRequest:
+        raise self._generation_unsupported("speech")
+
+    def _speech_generation_from_response(self, request: SpeechGenerationRequest, resp: HttpResponse) -> SpeechGenerationResponse:
+        raise self._generation_unsupported("speech")
+
+    def image_generate(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
+        """Generate (or, with ``request.images``, edit) images.
+
+        Input images are ordinary ImageParts; adapters route them to the
+        provider's real edit door (OpenAI: ``/images/edits``; Gemini: the
+        same chat call; xAI: ``/images/edits``) and raise where the wire
+        has none — never silently ignore them.
+        """
+        resp = self._send(self._image_generate_request(request))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return self._image_generation_from_response(request, resp)
+
+    def speech_generate(self, request: SpeechGenerationRequest) -> SpeechGenerationResponse:
+        """Text-to-speech.  Omitted ``voice``/``format`` mean the server's
+        defaults, honestly reported in the returned part's media_type —
+        lm15 injects no defaults of its own."""
+        resp = self._send(self._speech_generate_request(request))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return self._speech_generation_from_response(request, resp)
 
     # ─── Live model listing (provisional endpoint) ──────────────────────────
     #

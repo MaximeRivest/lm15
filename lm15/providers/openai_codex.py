@@ -21,8 +21,8 @@ from ..features import EndpointSupport, ProviderManifest
 from ..protocols import Capabilities, LiveSession
 from ..result import materialize_response
 from ..types import (
-    AudioGenerationRequest,
-    AudioGenerationResponse,
+    SpeechGenerationRequest,
+    SpeechGenerationResponse,
     BatchEntry,
     BatchJobInfo,
     BatchRequest,
@@ -248,5 +248,5 @@ class OpenAICodexLM(OpenAILM):
     def image_generate(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
         raise UnsupportedFeatureError("openai-codex: image generation is not supported", provider=self.provider)
 
-    def audio_generate(self, request: AudioGenerationRequest) -> AudioGenerationResponse:
-        raise UnsupportedFeatureError("openai-codex: audio generation is not supported", provider=self.provider)
+    def speech_generate(self, request: SpeechGenerationRequest) -> SpeechGenerationResponse:
+        raise UnsupportedFeatureError("openai-codex: speech generation is not supported", provider=self.provider)

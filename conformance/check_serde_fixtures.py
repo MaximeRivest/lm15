@@ -60,6 +60,10 @@ KIND_SERDE: dict[str, tuple[JsonToObj, ObjToJson]] = {
     "file_upload_request": (serde.file_upload_request_from_dict, serde.file_upload_request_to_dict),
     "file_info": (serde.file_info_from_dict, serde.file_info_to_dict),
     "file_page": (serde.file_page_from_dict, serde.file_page_to_dict),
+    "image_generation_request": (serde.image_generation_request_from_dict, serde.image_generation_request_to_dict),
+    "image_generation_response": (serde.image_generation_response_from_dict, serde.image_generation_response_to_dict),
+    "speech_generation_request": (serde.speech_generation_request_from_dict, serde.speech_generation_request_to_dict),
+    "speech_generation_response": (serde.speech_generation_response_from_dict, serde.speech_generation_response_to_dict),
 }
 
 

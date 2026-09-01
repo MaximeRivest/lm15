@@ -19,8 +19,8 @@ if str(REPO_ROOT) not in sys.path:
 from lm15.providers import AnthropicLM, GeminiLM, OpenAILM  # noqa: E402
 from lm15.types import (  # noqa: E402
     AudioFormat,
-    AudioGenerationRequest,
-    AudioGenerationResponse,
+    SpeechGenerationRequest,
+    SpeechGenerationResponse,
     BatchRequest,
     BatchJobInfo,
     FileInfo,
@@ -171,13 +171,13 @@ def openai_image_generate() -> None:
     assert out.images[0].data == "aGk="
 
 
-def openai_audio_generate() -> None:
+def openai_speech_generate() -> None:
     transport = FakeTransport([FakeResponse(200, b"WAV", headers=[("content-type", "audio/wav")])])
     lm = OpenAILM(api_key="test", transport=transport)
-    out = lm.audio_generate(AudioGenerationRequest(model="tts", prompt="hello", voice="alloy", format="wav"))
+    out = lm.speech_generate(SpeechGenerationRequest(model="tts", prompt="hello", voice="alloy", format="wav"))
     req = transport.requests[0]
     assert req.url == "https://api.openai.com/v1/audio/speech"
-    assert isinstance(out, AudioGenerationResponse)
+    assert isinstance(out, SpeechGenerationResponse)
     assert out.audio.media_type == "audio/wav"
     assert base64.b64decode(out.audio.data) == b"WAV"
 
@@ -337,7 +337,7 @@ CASES: tuple[tuple[str, Callable[[], None]], ...] = (
     ("openai.file_upload", openai_file_upload),
     ("openai.batch_submit", openai_batch_submit),
     ("openai.image_generate", openai_image_generate),
-    ("openai.audio_generate", openai_audio_generate),
+    ("openai.speech_generate", openai_speech_generate),
     ("openai.live_url_and_headers", openai_live_url_and_headers),
     ("openai.live_session_payload_shape", openai_live_session_payload_shape),
     ("anthropic.file_upload", anthropic_file_upload),

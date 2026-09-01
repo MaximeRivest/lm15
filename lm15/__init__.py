@@ -99,8 +99,8 @@ from .types import (
     BatchJobInfo,
     ImageGenerationRequest,
     ImageGenerationResponse,
-    AudioGenerationRequest,
-    AudioGenerationResponse,
+    SpeechGenerationRequest,
+    SpeechGenerationResponse,
     AudioFormat,
     # live session types
     LiveConfig,
@@ -214,7 +214,7 @@ __all__ = [
     "BatchRequest", "BatchJobInfo", "BatchEntry",
     "BatchJob", "AsyncBatchJob",
     "ImageGenerationRequest", "ImageGenerationResponse",
-    "AudioGenerationRequest", "AudioGenerationResponse", "AudioFormat",
+    "SpeechGenerationRequest", "SpeechGenerationResponse", "AudioFormat",
     "LiveConfig", "Turn",
     # vocabularies
     "Role", "PartType", "FinishReason", "ReasoningEffort", "ErrorCode",

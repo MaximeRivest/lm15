@@ -37,6 +37,10 @@ from .types import (
     FileInfo,
     FilePage,
     FileUploadRequest,
+    ImageGenerationRequest,
+    ImageGenerationResponse,
+    SpeechGenerationRequest,
+    SpeechGenerationResponse,
     FunctionTool,
     ImageDelta,
     ImagePart,
@@ -801,6 +805,90 @@ def file_page_from_dict(d: dict[str, Any]) -> FilePage:
     return FilePage(
         items=tuple(file_info_from_dict(f) for f in d.get("items", [])),
         next_cursor=d.get("next_cursor"),
+    )
+
+
+# ─── Media generation ────────────────────────────────────────────────
+
+def image_generation_request_to_dict(r: ImageGenerationRequest) -> dict[str, Any]:
+    return _clean_mapping({
+        "model": r.model,
+        "prompt": r.prompt,
+        "size": r.size,
+        "images": [part_to_dict(img) for img in r.images] or None,
+        "extensions": r.extensions,
+    })
+
+
+def image_generation_request_from_dict(d: dict[str, Any]) -> ImageGenerationRequest:
+    return ImageGenerationRequest(
+        model=d["model"],
+        prompt=d["prompt"],
+        size=d.get("size"),
+        images=tuple(part_from_dict(img) for img in d.get("images", [])),
+        extensions=d.get("extensions"),
+    )
+
+
+def image_generation_response_to_dict(r: ImageGenerationResponse) -> dict[str, Any]:
+    return _clean_mapping({
+        "images": [part_to_dict(img) for img in r.images],
+        "text": r.text,
+        "id": r.id,
+        "model": r.model,
+        "usage": usage_to_dict(r.usage) or None,
+        "provider_data": r.provider_data,
+    })
+
+
+def image_generation_response_from_dict(d: dict[str, Any]) -> ImageGenerationResponse:
+    return ImageGenerationResponse(
+        images=tuple(part_from_dict(img) for img in d.get("images", [])),
+        text=d.get("text"),
+        id=d.get("id"),
+        model=d.get("model"),
+        usage=usage_from_dict(d.get("usage") or {}),
+        provider_data=d.get("provider_data"),
+    )
+
+
+def speech_generation_request_to_dict(r: SpeechGenerationRequest) -> dict[str, Any]:
+    return _clean_mapping({
+        "model": r.model,
+        "prompt": r.prompt,
+        "voice": r.voice,
+        "format": r.format,
+        "extensions": r.extensions,
+    })
+
+
+def speech_generation_request_from_dict(d: dict[str, Any]) -> SpeechGenerationRequest:
+    return SpeechGenerationRequest(
+        model=d["model"],
+        prompt=d["prompt"],
+        voice=d.get("voice"),
+        format=d.get("format"),
+        extensions=d.get("extensions"),
+    )
+
+
+def speech_generation_response_to_dict(r: SpeechGenerationResponse) -> dict[str, Any]:
+    return _clean_mapping({
+        "audio": part_to_dict(r.audio),
+        "id": r.id,
+        "model": r.model,
+        "usage": usage_to_dict(r.usage) or None,
+        "provider_data": r.provider_data,
+    })
+
+
+def speech_generation_response_from_dict(d: dict[str, Any]) -> SpeechGenerationResponse:
+    return SpeechGenerationResponse(
+        audio=part_from_dict(d["audio"]),
+        id=d.get("id"),
+        model=d.get("model"),
+        usage=usage_from_dict(d.get("usage") or {}),
+        provider_data=d.get("provider_data"),
     )
 
 

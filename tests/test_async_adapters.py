@@ -189,11 +189,17 @@ def test_inner_sync_transport_raises_if_touched(provider, sync_cls, async_cls):
 
 
 def test_async_unsupported_endpoints_are_honest():
-    lm = AsyncOpenAILM(api_key="test", transport=FakeAsyncTransport(b"{}"))
+    # Generation went async-first-class (drivers over the sync hooks);
+    # honesty now means: providers WITHOUT the endpoint raise through the
+    # same hooks the sync path uses — anthropic has no generation wire.
+    from lm15.providers.async_base import AsyncAnthropicLM
     from lm15.types import ImageGenerationRequest
 
-    with pytest.raises(UnsupportedFeatureError, match="use the sync adapter"):
-        lm.image_generate(ImageGenerationRequest(model="m", prompt="a cat"))
+    lm = AsyncAnthropicLM(api_key="test", transport=FakeAsyncTransport(b"{}"))
+    with pytest.raises(UnsupportedFeatureError, match="image generation not supported"):
+        asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+            lm.image_generate(ImageGenerationRequest(model="m", prompt="a cat"))
+        )
 
 
 # ─── live smoke vs local ollama ──────────────────────────────────────

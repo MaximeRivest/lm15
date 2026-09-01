@@ -15,6 +15,7 @@ from ..errors import (
     RateLimitError,
     ServerError,
     TimeoutError,
+    UnsupportedFeatureError,
     UnsupportedModelError,
     canonical_error_code,
     map_http_error,
@@ -28,8 +29,8 @@ from ..transports import TransportRequest
 from ..types import (
     AudioDelta,
     AudioFormat,
-    AudioGenerationRequest,
-    AudioGenerationResponse,
+    SpeechGenerationRequest,
+    SpeechGenerationResponse,
     AudioPart,
     BatchEntry,
     BatchJobInfo,
@@ -269,7 +270,7 @@ class OpenAILM(BaseProviderLM):
         files=True,
         batches=True,
         images=True,
-        audio=True,
+        speech=True,
         responses_api=True,
         models=True,
     )
@@ -1433,35 +1434,80 @@ class OpenAILM(BaseProviderLM):
         items = data.get("data") if isinstance(data, dict) else None
         return tuple(self._batch_job_info(item) for item in (items or []) if isinstance(item, dict))
 
-    def image_generate(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
-        payload = {"model": request.model, "prompt": request.prompt, "size": request.size, **(request.extensions or {})}
-        payload = {k: v for k, v in payload.items() if v is not None}
-        resp = self._send(make_json_request(method="POST", url=f"{self.base_url.rstrip('/')}/images/generations", headers=self._headers(), payload=payload, read_timeout=120.0))
-        if resp.status >= 400:
-            raise self.normalize_error(resp.status, resp.text())
+    # ─── Media generation (captured live 2026-09-01) ────────────────────
+    #
+    # Images: /images/generations (JSON) or, when input images are present,
+    # /images/edits (multipart) — verified honored by pixel check.  The
+    # response states the format in `output_format`; the media type is read
+    # from the wire, never assumed.  Usage carries real token counts.
+    # Speech: /audio/speech returns RAW BYTES; the media type lives in the
+    # content-type header (server default is audio/mpeg — lm15 injects no
+    # voice/format defaults of its own).
+
+    def _image_generate_request(self, request: ImageGenerationRequest) -> TransportRequest:
+        base = self.base_url.rstrip("/")
+        if not request.images:
+            payload = {"model": request.model, "prompt": request.prompt, "size": request.size, **(request.extensions or {})}
+            payload = {k: v for k, v in payload.items() if v is not None}
+            return make_json_request(method="POST", url=f"{base}/images/generations", headers=self._headers(), payload=payload, read_timeout=300.0)
+        # Edits are multipart: the wire takes uploaded bytes only.
+        for part in request.images:
+            if part.data is None and part.path is None:
+                raise UnsupportedFeatureError(
+                    "openai: image edits take inline data or a local path; "
+                    "url/file_id-addressed input images have no wire slot",
+                    provider=self.provider,
+                )
+        fields = [("model", str(request.model)), ("prompt", request.prompt)]
+        if request.size is not None:
+            fields.append(("size", request.size))
+        fields += [(k, str(v)) for k, v in (request.extensions or {}).items()]
+        files = [
+            ("image[]", f"image-{i}", part.media_type, part.bytes)
+            for i, part in enumerate(request.images)
+        ]
+        content_type, body = multipart_form_body(fields=fields, files=files)
+        return TransportRequest(
+            method="POST",
+            url=f"{base}/images/edits",
+            headers=list(self._headers(content_type=content_type).items()),
+            body=body,
+            read_timeout=300.0,
+        )
+
+    def _image_generation_from_response(self, request: ImageGenerationRequest, resp: HttpResponse) -> ImageGenerationResponse:
         data = resp.json()
+        output_format = data.get("output_format")
+        media_type = f"image/{output_format}" if isinstance(output_format, str) and output_format else None
         images: list[ImagePart] = []
         for item in data.get("data", []) or []:
+            if not isinstance(item, dict):
+                continue
             if item.get("b64_json"):
-                images.append(ImagePart(media_type="image/png", data=str(item["b64_json"])))
+                images.append(ImagePart(media_type=media_type or "application/octet-stream", data=str(item["b64_json"])))
             elif item.get("url"):
-                images.append(ImagePart(media_type="image/png", url=str(item["url"])))
-        return ImageGenerationResponse(images=tuple(images), id=data.get("id"), model=data.get("model"), provider_data=data)
+                images.append(ImagePart(media_type=media_type or "application/octet-stream", url=str(item["url"])))
+        usage_obj = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+        usage = Usage(
+            input_tokens=usage_obj.get("input_tokens"),
+            output_tokens=usage_obj.get("output_tokens"),
+            total_tokens=usage_obj.get("total_tokens"),
+        )
+        # Captured: the images response carries no id and no model echo.
+        return ImageGenerationResponse(images=tuple(images), usage=usage, provider_data=data)
 
-    def audio_generate(self, request: AudioGenerationRequest) -> AudioGenerationResponse:
-        payload = {"model": request.model, "input": request.prompt, "voice": request.voice or "alloy", "format": request.format or "wav", **(request.extensions or {})}
-        resp = self._send(make_json_request(method="POST", url=f"{self.base_url.rstrip('/')}/audio/speech", headers=self._headers(), payload=payload, read_timeout=120.0))
-        if resp.status >= 400:
-            raise self.normalize_error(resp.status, resp.text())
-        ctype = (resp.header("content-type") or "audio/wav").split(";", 1)[0].strip()
-        try:
-            payload_json = json.loads(resp.body)
-            if isinstance(payload_json, dict) and payload_json.get("audio"):
-                b64 = str(payload_json["audio"])
-            elif isinstance(payload_json, dict) and payload_json.get("b64_json"):
-                b64 = str(payload_json["b64_json"])
-            else:
-                b64 = base64.b64encode(resp.body).decode("ascii")
-        except Exception:
-            b64 = base64.b64encode(resp.body).decode("ascii")
-        return AudioGenerationResponse(audio=AudioPart(media_type=ctype, data=b64), model=request.model, provider_data={"content_type": ctype})
+    def _speech_generate_request(self, request: SpeechGenerationRequest) -> TransportRequest:
+        payload: dict[str, Any] = {"model": request.model, "input": request.prompt, **(request.extensions or {})}
+        if request.voice is not None:
+            payload["voice"] = request.voice
+        if request.format is not None:
+            payload["response_format"] = request.format
+        return make_json_request(method="POST", url=f"{self.base_url.rstrip('/')}/audio/speech", headers=self._headers(), payload=payload, read_timeout=300.0)
+
+    def _speech_generation_from_response(self, request: SpeechGenerationRequest, resp: HttpResponse) -> SpeechGenerationResponse:
+        content_type = (resp.header("content-type") or "").split(";", 1)[0].strip()
+        if not content_type:
+            raise ProviderError("openai: speech response carries no content-type", provider=self.provider)
+        audio = AudioPart(media_type=content_type, data=base64.b64encode(resp.body).decode("ascii"))
+        # The body is raw media: no usage, no id, no model echo exist.
+        return SpeechGenerationResponse(audio=audio, provider_data={"content_type": content_type})

@@ -2230,24 +2230,42 @@ class _PromptRequest(_ModelRequest):
 
 @dataclass(frozen=True, slots=True)
 class ImageGenerationRequest(_PromptRequest):
+    """Text (and optionally input images, for edits) in; images out.
+
+    ``size`` takes the provider's own sizing vocabulary — like ``model``
+    and ``voice``, the field is portable but the values are not (OpenAI:
+    pixels; Gemini: aspect ratios).  ``images`` are ordinary ImageParts
+    (inline data / url / file_id / path); adapters route them to the
+    provider's real edit door and raise where the wire has none.
+    """
+
     size: str | None = None
+    images: tuple[ImagePart, ...] = ()
     extensions: Extensions | None = None
 
     def __post_init__(self) -> None:
         _PromptRequest.__post_init__(self)
         _validate_optional_text(self.size, field_name="size", allow_empty=False)
+        object.__setattr__(self, "images", tuple(self.images))
+        if not all(isinstance(img, ImagePart) for img in self.images):
+            raise TypeError("ImageGenerationRequest.images must contain ImagePart objects")
         _validate_extensions_field(self)
 
 
 @dataclass(frozen=True, slots=True)
 class ImageGenerationResponse:
+    """Generated images, plus any text the model said while drawing
+    (Gemini routinely narrates; dropping it would be silent data loss)."""
+
     images: tuple[ImagePart, ...]
+    text: str | None = None
     id: str | None = None
     model: str | None = None
     usage: Usage = field(default_factory=Usage)
     provider_data: ProviderData | None = None
 
     def __post_init__(self) -> None:
+        _validate_optional_text(self.text, field_name="ImageGenerationResponse.text", allow_empty=False)
         _validate_optional_text(self.id, field_name="ImageGenerationResponse.id", allow_empty=False)
         _validate_optional_text(self.model, field_name="ImageGenerationResponse.model", allow_empty=False)
         if not isinstance(self.usage, Usage):
@@ -2260,11 +2278,19 @@ class ImageGenerationResponse:
         _validate_json_field(self, "provider_data")
 
 
-# ─── Audio Generation ────────────────────────────────────────────────
+# ─── Speech Generation ────────────────────────────────────────────────
 
 
 @dataclass(frozen=True, slots=True)
-class AudioGenerationRequest(_PromptRequest):
+class SpeechGenerationRequest(_PromptRequest):
+    """Text-to-speech.  Named for what every wire actually sells: speech.
+
+    ``voice`` and ``format`` take the provider's own vocabularies.  An
+    omitted field means the SERVER decides (OpenAI's real default format
+    is MP3); lm15 injects no defaults of its own.  ``format`` raises on
+    providers whose wire has no slot for it (Gemini: always PCM).
+    """
+
     voice: str | None = None
     format: str | None = None
     extensions: Extensions | None = None
@@ -2277,7 +2303,7 @@ class AudioGenerationRequest(_PromptRequest):
 
 
 @dataclass(frozen=True, slots=True)
-class AudioGenerationResponse:
+class SpeechGenerationResponse:
     audio: AudioPart
     id: str | None = None
     model: str | None = None
@@ -2285,10 +2311,10 @@ class AudioGenerationResponse:
     provider_data: ProviderData | None = None
 
     def __post_init__(self) -> None:
-        _validate_optional_text(self.id, field_name="AudioGenerationResponse.id", allow_empty=False)
-        _validate_optional_text(self.model, field_name="AudioGenerationResponse.model", allow_empty=False)
+        _validate_optional_text(self.id, field_name="SpeechGenerationResponse.id", allow_empty=False)
+        _validate_optional_text(self.model, field_name="SpeechGenerationResponse.model", allow_empty=False)
         if not isinstance(self.usage, Usage):
-            raise TypeError("AudioGenerationResponse.usage must be a Usage")
+            raise TypeError("SpeechGenerationResponse.usage must be a Usage")
         if not isinstance(self.audio, AudioPart):
             raise TypeError("audio must be an AudioPart")
         _validate_json_field(self, "provider_data")
@@ -2299,7 +2325,7 @@ EndpointRequest: TypeAlias = (
     | FileUploadRequest
     | BatchRequest
     | ImageGenerationRequest
-    | AudioGenerationRequest
+    | SpeechGenerationRequest
 )
 
 EndpointResponse: TypeAlias = (
@@ -2307,7 +2333,7 @@ EndpointResponse: TypeAlias = (
     | FileInfo
     | BatchJobInfo
     | ImageGenerationResponse
-    | AudioGenerationResponse
+    | SpeechGenerationResponse
 )
 
 

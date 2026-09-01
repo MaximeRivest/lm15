@@ -34,7 +34,7 @@ from ..transports import (
     TransportError as NetworkTransportError,
 )
 from ..types import (
-    AudioGenerationRequest,
+    SpeechGenerationRequest,
     BatchRequest,
     CacheConfig,
     FileUploadRequest,
@@ -308,11 +308,19 @@ class AsyncBaseProviderLM:
     def live(self, config: LiveConfig):
         raise self._async_unsupported("live")
 
-    def image_generate(self, request: ImageGenerationRequest):
-        raise self._async_unsupported("image generation")
+    # ── Media generation: async drivers over the sync adapter's pure hooks ──
 
-    def audio_generate(self, request: AudioGenerationRequest):
-        raise self._async_unsupported("audio generation")
+    async def image_generate(self, request: ImageGenerationRequest):
+        resp = await self._send(self._inner._image_generate_request(request))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return self._inner._image_generation_from_response(request, resp)
+
+    async def speech_generate(self, request: SpeechGenerationRequest):
+        resp = await self._send(self._inner._speech_generate_request(request))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return self._inner._speech_generation_from_response(request, resp)
 
 
 async def _aiter_lines(resp: AsyncTransportResponse) -> AsyncIterator[bytes]:
@@ -681,8 +689,8 @@ class AsyncOpenAICodexLM(AsyncBaseProviderLM):
     def image_generate(self, request: ImageGenerationRequest):
         return self._inner.image_generate(request)  # raises UnsupportedFeatureError
 
-    def audio_generate(self, request: AudioGenerationRequest):
-        return self._inner.audio_generate(request)  # raises UnsupportedFeatureError
+    def speech_generate(self, request: SpeechGenerationRequest):
+        return self._inner.speech_generate(request)  # raises UnsupportedFeatureError
 
 
 @dataclass(slots=True)

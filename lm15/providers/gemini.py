@@ -18,6 +18,7 @@ from ..errors import (
     RateLimitError,
     ServerError,
     TimeoutError,
+    UnsupportedFeatureError,
     UnsupportedModelError,
     canonical_error_code,
     map_http_error,
@@ -29,8 +30,8 @@ from ..sse import SSEEvent
 from ..transports import TransportRequest
 from ..types import (
     AudioDelta,
-    AudioGenerationRequest,
-    AudioGenerationResponse,
+    SpeechGenerationRequest,
+    SpeechGenerationResponse,
     AudioPart,
     BatchEntry,
     BatchJobInfo,
@@ -337,7 +338,7 @@ class GeminiLM(BaseProviderLM):
         files=True,
         batches=True,
         images=True,
-        audio=True,
+        speech=True,
         models=True,
     )
     manifest: ClassVar[ProviderManifest] = ProviderManifest(
@@ -1570,21 +1571,69 @@ class GeminiLM(BaseProviderLM):
         items = data.get("operations") if isinstance(data, dict) else None
         return tuple(self._batch_job_info(item) for item in (items or []) if isinstance(item, dict))
 
-    def image_generate(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
-        extensions = {"generationConfig": {"responseModalities": ["IMAGE"]}, **(request.extensions or {})}
-        lm_req = Request(model=request.model, messages=(Message.user(request.prompt),), config=Config(extensions=extensions))
-        resp = self.complete(lm_req)
-        images = tuple(part for part in resp.message.parts if isinstance(part, ImagePart))
-        return ImageGenerationResponse(images=images, id=resp.id, model=resp.model, usage=resp.usage, provider_data=resp.provider_data)
+    # ─── Media generation (captured live 2026-09-01) ────────────────────
+    #
+    # Gemini has no dedicated generation endpoints: image models and TTS
+    # models answer the ordinary generateContent call.  The hooks compose
+    # the frozen chat mapping (build_request / parse_response), so the
+    # shared sync drivers and the async mirrors both work unchanged.
+    # Input images (edits) are ordinary parts in the same call — verified
+    # honored by pixel check.  Image responses routinely carry narration
+    # text next to the image; it lands in ImageGenerationResponse.text.
 
-    def audio_generate(self, request: AudioGenerationRequest) -> AudioGenerationResponse:
+    def _image_generation_lm_request(self, request: ImageGenerationRequest) -> Request:
+        extensions = dict(request.extensions or {})
+        if request.size is not None:
+            generation_config = dict(extensions.get("generationConfig") or {})
+            image_config = dict(generation_config.get("imageConfig") or {})
+            image_config.setdefault("aspectRatio", request.size)
+            generation_config["imageConfig"] = image_config
+            extensions["generationConfig"] = generation_config
+        parts = (TextPart(text=request.prompt), *request.images)
+        return Request(
+            model=request.model,
+            messages=(Message(role="user", parts=parts),),
+            config=Config(extensions=extensions) if extensions else Config(),
+        )
+
+    def _image_generate_request(self, request: ImageGenerationRequest) -> TransportRequest:
+        return self.build_request(self._image_generation_lm_request(request), stream=False)
+
+    def _image_generation_from_response(self, request: ImageGenerationRequest, resp: HttpResponse) -> ImageGenerationResponse:
+        chat = self.parse_response(self._image_generation_lm_request(request), resp)
+        images = tuple(part for part in chat.message.parts if isinstance(part, ImagePart))
+        if not images:
+            raise ProviderError("gemini: model returned no image parts", provider=self.provider)
+        texts = [part.text for part in chat.message.parts if isinstance(part, TextPart) and part.text]
+        return ImageGenerationResponse(
+            images=images,
+            text="".join(texts) or None,
+            id=chat.id,
+            model=chat.model,
+            usage=chat.usage,
+            provider_data=chat.provider_data,
+        )
+
+    def _speech_generation_lm_request(self, request: SpeechGenerationRequest) -> Request:
+        if request.format is not None:
+            # No wire slot: Gemini TTS always answers PCM (captured
+            # audio/L16;codec=pcm;rate=24000).  Raising beats dropping.
+            raise UnsupportedFeatureError(
+                "gemini: speech format cannot be chosen; the wire always returns PCM",
+                provider=self.provider,
+            )
         generation_config: dict[str, Any] = {"responseModalities": ["AUDIO"]}
-        if request.voice:
+        if request.voice is not None:
             generation_config["speechConfig"] = {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": request.voice}}}
         extensions = {"generationConfig": generation_config, **(request.extensions or {})}
-        lm_req = Request(model=request.model, messages=(Message.user(request.prompt),), config=Config(extensions=extensions))
-        resp = self.complete(lm_req)
-        audio = resp.message.first(AudioPart)
+        return Request(model=request.model, messages=(Message.user(request.prompt),), config=Config(extensions=extensions))
+
+    def _speech_generate_request(self, request: SpeechGenerationRequest) -> TransportRequest:
+        return self.build_request(self._speech_generation_lm_request(request), stream=False)
+
+    def _speech_generation_from_response(self, request: SpeechGenerationRequest, resp: HttpResponse) -> SpeechGenerationResponse:
+        chat = self.parse_response(self._speech_generation_lm_request(request), resp)
+        audio = chat.message.first(AudioPart)
         if audio is None:
-            raise ValueError("provider did not return audio data")
-        return AudioGenerationResponse(audio=audio, id=resp.id, model=resp.model, usage=resp.usage, provider_data=resp.provider_data)
+            raise ProviderError("gemini: model returned no audio part", provider=self.provider)
+        return SpeechGenerationResponse(audio=audio, id=chat.id, model=chat.model, usage=chat.usage, provider_data=chat.provider_data)

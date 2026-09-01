@@ -15,7 +15,7 @@ class EndpointSupport:
     files: bool = False
     batches: bool = False
     images: bool = False
-    audio: bool = False
+    speech: bool = False
     responses_api: bool = False
     models: bool = False
 
