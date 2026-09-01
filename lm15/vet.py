@@ -107,6 +107,8 @@ KIND_SERDE: dict[str, tuple[JsonToObj, ObjToJson]] = {
     "image_generation_response": (serde.image_generation_response_from_dict, serde.image_generation_response_to_dict),
     "speech_generation_request": (serde.speech_generation_request_from_dict, serde.speech_generation_request_to_dict),
     "speech_generation_response": (serde.speech_generation_response_from_dict, serde.speech_generation_response_to_dict),
+    "video_generation_request": (serde.video_generation_request_from_dict, serde.video_generation_request_to_dict),
+    "video_job": (serde.video_job_from_dict, serde.video_job_to_dict),
     "audio_format": (serde.audio_format_from_dict, serde.audio_format_to_dict),
     "live_config": (serde.live_config_from_dict, serde.live_config_to_dict),
     "live_client_event": (serde.live_client_event_from_dict, serde.live_client_event_to_dict),
@@ -338,6 +340,52 @@ def op_file_op_parse(msg: JsonObject) -> JsonObject:
     raise ValueError(f"unknown file parse kind: {kind}")
 
 
+def op_video_op_build(msg: JsonObject) -> JsonObject:
+    """Wire request(s) for one video-job operation (action discriminates).
+
+    Always returns {"requests": [...]}: result_fetch may be zero requests
+    (xAI's terminal body carries a public URL) or one (Sora content, Veo's
+    key-bound file URI).
+    """
+    lm = adapter_for_provider(str(msg["provider"]), str(msg["api_key"]), _base_url(msg))
+    action = str(msg["action"])
+    if action == "submit":
+        request = serde.video_generation_request_from_dict(msg["video_request"])
+        return {"requests": [normalize_transport_request(lm._video_submit_request(request))]}
+    if action == "status":
+        return {"requests": [normalize_transport_request(lm._video_status_request(str(msg["video_id"])))]}
+    if action == "result_fetch":
+        fetch = lm._video_result_fetch(msg["status_body"])
+        return {"requests": [] if fetch is None else [normalize_transport_request(fetch)]}
+    if action == "list":
+        return {"requests": [normalize_transport_request(lm._video_list_request(int(msg.get("limit", 20)), msg.get("model")))]}
+    raise ValueError(f"unknown video action: {action}")
+
+
+def op_video_op_parse(msg: JsonObject) -> JsonObject:
+    """Canonical video snapshots / parts from pinned wire bodies."""
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg))
+    kind = str(msg["kind"])
+    if kind == "job":
+        status = int(msg["status"])
+        body = base64.b64decode(msg["body_b64"]).decode("utf-8")
+        if status >= 400:
+            raise lm.normalize_error(status, body)
+        return {"job": serde.video_job_to_dict(lm._video_job_from_body(body, msg.get("video_id")))}
+    if kind == "list":
+        body = base64.b64decode(msg["body_b64"]).decode("utf-8")
+        return {"jobs": [serde.video_job_to_dict(j) for j in lm._video_jobs_from_list_body(body)]}
+    if kind == "part":
+        fetched = None
+        if msg.get("fetched_b64") is not None:
+            fetched = HttpResponse(
+                status=200, reason="OK", headers=_headers_list(msg),
+                body=base64.b64decode(msg["fetched_b64"]),
+            )
+        return {"part": serde.part_to_dict(lm._video_part(msg["status_body"], fetched))}
+    raise ValueError(f"unknown video parse kind: {kind}")
+
+
 def op_batch_op_build(msg: JsonObject) -> JsonObject:
     """Wire request(s) for one batch operation (action discriminates).
 
@@ -550,6 +598,8 @@ HANDLERS: dict[str, Callable[[JsonObject], JsonObject]] = {
     "generation_parse": op_generation_parse,
     "file_op_build": op_file_op_build,
     "file_op_parse": op_file_op_parse,
+    "video_op_build": op_video_op_build,
+    "video_op_parse": op_video_op_parse,
     "batch_op_build": op_batch_op_build,
     "batch_op_parse": op_batch_op_parse,
 }

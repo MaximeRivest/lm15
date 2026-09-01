@@ -49,6 +49,7 @@ except PackageNotFoundError:  # running from a source checkout
 
 # ── Canonical types ──────────────────────────────────────────────────
 from .batch import AsyncBatchJob, BatchJob
+from .video_jobs import AsyncVideoJob, VideoJob
 from .live import Turn
 from .types import (
     # request/response core
@@ -97,6 +98,8 @@ from .types import (
     BatchRequest,
     BatchEntry,
     BatchJobInfo,
+    VideoGenerationRequest,
+    VideoJobInfo,
     ImageGenerationRequest,
     ImageGenerationResponse,
     SpeechGenerationRequest,
@@ -212,6 +215,7 @@ __all__ = [
     # auxiliary endpoints
     "FileUploadRequest", "FileInfo", "FilePage",
     "BatchRequest", "BatchJobInfo", "BatchEntry",
+    "VideoGenerationRequest", "VideoJobInfo", "VideoJob", "AsyncVideoJob",
     "BatchJob", "AsyncBatchJob",
     "ImageGenerationRequest", "ImageGenerationResponse",
     "SpeechGenerationRequest", "SpeechGenerationResponse", "AudioFormat",

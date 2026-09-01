@@ -78,7 +78,7 @@ that materializes into the identical `Response`.
   [Authentication](authentication.md).
 - **"How do I do X?"** — sixteen [cookbook recipes](cookbooks/index.md),
   from [first request](cookbooks/01-first-request.md) to
-  [live sessions](cookbooks/14-live-sessions.md).
+  [live sessions](cookbooks/15-live-sessions.md).
 - **"Why should I trust the translation?"**
   [How lm15 is specified](how-lm15-is-specified.md) — the contract,
   the authority model, and what "frozen" means here. The part of lm15

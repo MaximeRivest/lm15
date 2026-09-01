@@ -23,6 +23,10 @@ from ..transports import TransportResponse
 from ..transports import StdlibTransport
 from ..transports import TransportError as NetworkTransportError
 from ..types import (
+    VIDEO_TERMINAL_STATUSES,
+    VideoGenerationRequest,
+    VideoJobInfo,
+    VideoPart,
     SpeechGenerationRequest,
     SpeechGenerationResponse,
     BATCH_TERMINAL_STATUSES,
@@ -319,6 +323,109 @@ class BaseProviderLM:
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
         return self._speech_generation_from_response(request, resp)
+
+    # ─── Video generation (job-shaped on every wire: Sora / Veo / grok) ─────
+    #
+    # Same pure-hook pattern as batch: submit returns a ticket, status
+    # polls it, result turns the terminal snapshot into a VideoPart —
+    # with an optional fetch step (Sora delivers bytes from a content
+    # endpoint; Veo and xAI put a URL in the terminal body).  The
+    # VideoJob handle in lm15.video adds the wait/re-attach ergonomics.
+
+    def _video_unsupported(self) -> UnsupportedFeatureError:
+        return UnsupportedFeatureError(f"{self.provider}: video generation not supported", provider=self.provider)
+
+    def _video_submit_request(self, request: VideoGenerationRequest) -> TransportRequest:
+        raise self._video_unsupported()
+
+    def _video_job_from_body(self, body: str, video_id: "str | None" = None) -> VideoJobInfo:
+        """Parse a submit or status body; ``video_id`` is the known ticket
+        id for wires whose status bodies do not echo it (xAI)."""
+        raise self._video_unsupported()
+
+    def _video_status_request(self, video_id: str) -> TransportRequest:
+        raise self._video_unsupported()
+
+    def _video_result_fetch(self, status_body: "dict[str, Any]") -> TransportRequest | None:
+        """Optional download step; None = the terminal body carries the URL."""
+        raise self._video_unsupported()
+
+    def _video_part(self, status_body: "dict[str, Any]", fetched: "HttpResponse | None") -> VideoPart:
+        raise self._video_unsupported()
+
+    def _video_list_request(self, limit: int, model: str | None) -> TransportRequest:
+        raise self._video_unsupported()
+
+    def _video_jobs_from_list_body(self, body: str) -> "tuple[VideoJobInfo, ...]":
+        raise self._video_unsupported()
+
+    def video_submit(self, request: VideoGenerationRequest) -> VideoJobInfo:
+        """Submit a video job; returns the ticket snapshot."""
+        resp = self._send(self._video_submit_request(request))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return self._video_job_from_body(resp.text())
+
+    def video_status(self, video_id: str) -> VideoJobInfo:
+        resp = self._send(self._video_status_request(video_id))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return self._video_job_from_body(resp.text(), video_id)
+
+    def video_result(self, video_id: str) -> VideoPart:
+        """The finished video as a VideoPart, in the provider's own
+        delivery mode (URL or bytes) — no silent re-hosting, no silent
+        gigabyte download; ``part.bytes`` fetches URL results on demand.
+        Raises ValueError while the job runs."""
+        resp = self._send(self._video_status_request(video_id))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        job = self._video_job_from_body(resp.text(), video_id)
+        if job.status not in VIDEO_TERMINAL_STATUSES:
+            raise ValueError(
+                f"video {video_id} is not finished (status={job.status!r}); "
+                f"wait() or poll video_status() until done"
+            )
+        status_body = resp.json()
+        fetch = self._video_result_fetch(status_body)
+        fetched = None
+        if fetch is not None:
+            fetched = self._send(fetch)
+            if fetched.status >= 400:
+                raise self.normalize_error(fetched.status, fetched.text())
+        return self._video_part(status_body, fetched)
+
+    def video_list(self, limit: int = 20, model: str | None = None) -> "tuple[VideoJobInfo, ...]":
+        """One page of this credential's video jobs.  ``model`` is required
+        on Gemini (operations list per model), ignored on OpenAI; xAI has
+        no list endpoint at all and raises."""
+        resp = self._send(self._video_list_request(limit, model))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return self._video_jobs_from_list_body(resp.text())
+
+    # Ergonomic verbs (ticket handles) ---------------------------------------
+
+    def video_generate(self, request: VideoGenerationRequest) -> "VideoJob":
+        """Submit and wrap the ticket in a VideoJob handle."""
+        from ..video_jobs import VideoJob
+
+        return VideoJob(self, self.video_submit(request))
+
+    def video_job(self, video_id: str) -> "VideoJob":
+        """Re-attach to an existing job by id alone."""
+        from ..video_jobs import VideoJob
+
+        return VideoJob(self, self.video_status(video_id))
+
+    def video_jobs(self, limit: int = 20, model: str | None = None) -> "tuple[VideoJob, ...]":
+        """Enumerate this credential's video jobs, where the wire lists
+        them (OpenAI: account-wide; Gemini: per model, pass ``model``).
+        xAI has no list endpoint and raises: the ticket you stored is
+        the only copy."""
+        from ..video_jobs import VideoJob
+
+        return tuple(VideoJob(self, info) for info in self.video_list(limit, model))
 
     # ─── Live model listing (provisional endpoint) ──────────────────────────
     #

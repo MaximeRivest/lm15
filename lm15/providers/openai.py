@@ -27,6 +27,9 @@ from ..protocols import Capabilities
 from ..sse import SSEEvent
 from ..transports import TransportRequest
 from ..types import (
+    VideoGenerationRequest,
+    VideoJobInfo,
+    VideoPart,
     AudioDelta,
     AudioFormat,
     SpeechGenerationRequest,
@@ -271,6 +274,7 @@ class OpenAILM(BaseProviderLM):
         batches=True,
         images=True,
         speech=True,
+        video=True,
         responses_api=True,
         models=True,
     )
@@ -1455,6 +1459,87 @@ class OpenAILM(BaseProviderLM):
         data = json.loads(body)
         items = data.get("data") if isinstance(data, dict) else None
         return tuple(self._batch_job_info(item) for item in (items or []) if isinstance(item, dict))
+
+    # ─── Video generation (Sora; captured live 2026-09-01) ──────────────
+    #
+    # Jobs at /v1/videos: submit -> {status: queued, progress}, poll ->
+    # in_progress -> completed, then /videos/{id}/content streams the MP4
+    # bytes (media type from the content-type header).  The list endpoint
+    # is account-wide.
+
+    _VIDEO_STATUS_MAP: ClassVar[dict[str, str]] = {
+        "queued": "queued",
+        "in_progress": "running",
+        "completed": "completed",
+        "failed": "failed",
+        "cancelled": "cancelled",
+    }
+
+    def _video_submit_request(self, request: VideoGenerationRequest) -> TransportRequest:
+        if request.images:
+            # Sora's image input (input_reference) is a multipart upload; the
+            # mapping is unverified against the live wire, and Sora also
+            # constrains reference sizes.  Raising beats shipping a guess.
+            raise UnsupportedFeatureError(
+                "openai: video input images (input_reference) are not mapped yet; "
+                "use the provider door until the mapping is live-receipted",
+                provider=self.provider,
+            )
+        payload: dict[str, Any] = {"model": request.model, "prompt": request.prompt, **(request.extensions or {})}
+        if request.seconds is not None:
+            payload["seconds"] = str(request.seconds)  # the wire wants a string enum
+        return make_json_request(method="POST", url=f"{self.base_url.rstrip('/')}/videos", headers=self._headers(), payload=payload, read_timeout=120.0)
+
+    def _video_job_from_body(self, body: str, video_id: "str | None" = None) -> VideoJobInfo:
+        return self._video_job_info(json.loads(body))
+
+    def _video_job_info(self, data: dict[str, Any]) -> VideoJobInfo:
+        video_id = data.get("id")
+        if not isinstance(video_id, str) or not video_id:
+            raise ProviderError("openai: video object carries no id", provider=self.provider)
+        wire_status = str(data.get("status") or "")
+        status = self._VIDEO_STATUS_MAP.get(wire_status)
+        if status is None:
+            raise ProviderError(f"openai: unknown video status {wire_status!r}", provider=self.provider)
+        progress = data.get("progress")
+        return VideoJobInfo(
+            id=video_id,
+            status=status,
+            progress=int(progress) if isinstance(progress, (int, float)) and not isinstance(progress, bool) else None,
+            created_at=iso_utc(data.get("created_at")),
+            model=data.get("model"),
+            provider_data=data,
+        )
+
+    def _video_status_request(self, video_id: str) -> TransportRequest:
+        return make_json_request(method="GET", url=f"{self.base_url.rstrip('/')}/videos/{video_id}", headers=self._headers(), read_timeout=60.0)
+
+    def _video_result_fetch(self, status_body: dict[str, Any]) -> TransportRequest:
+        return make_json_request(
+            method="GET",
+            url=f"{self.base_url.rstrip('/')}/videos/{status_body.get('id')}/content",
+            headers=self._headers(),
+            read_timeout=600.0,
+        )
+
+    def _video_part(self, status_body: dict[str, Any], fetched: "HttpResponse | None") -> VideoPart:
+        if fetched is None:
+            raise ProviderError("openai: video content fetch is required", provider=self.provider)
+        content_type = (fetched.header("content-type") or "").split(";", 1)[0].strip()
+        if not content_type:
+            raise ProviderError("openai: video content carries no content-type", provider=self.provider)
+        return VideoPart(media_type=content_type, data=base64.b64encode(fetched.body).decode("ascii"))
+
+    def _video_list_request(self, limit: int, model: str | None) -> TransportRequest:
+        return make_json_request(
+            method="GET", url=f"{self.base_url.rstrip('/')}/videos",
+            params={"limit": int(limit)}, headers=self._headers(), read_timeout=60.0,
+        )
+
+    def _video_jobs_from_list_body(self, body: str) -> tuple[VideoJobInfo, ...]:
+        data = json.loads(body)
+        items = data.get("data") if isinstance(data, dict) else None
+        return tuple(self._video_job_info(item) for item in (items or []) if isinstance(item, dict))
 
     # ─── Media generation (captured live 2026-09-01) ────────────────────
     #

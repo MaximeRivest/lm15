@@ -186,12 +186,12 @@ the layer above.
 - **Replay.** `lm15.result.response_to_events(response)` converts a
   complete `Response` back into a stream — useful for testing stream
   consumers without a network (recipe
-  [15](16-errors-and-testing.md)).
+  [15](17-errors-and-testing.md)).
 
 ## See also
 
 - [01 — Your first request](01-first-request.md) — keys and the router front door.
 - [06 — Function tools](06-function-tools.md) — tool-call parts surfaced by `ResponseStream`.
 - [10 — Audio, video & reasoning models](10-audio-video-reasoning.md) — thinking deltas.
-- [16 — Errors, retries & testing](16-errors-and-testing.md) — stream errors, offline replay.
+- [17 — Errors, retries & testing](17-errors-and-testing.md) — stream errors, offline replay.
 - [Using the router](../using-the-router.md) — resolution rules and `RouterConfig`.

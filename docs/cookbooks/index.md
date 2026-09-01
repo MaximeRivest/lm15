@@ -40,14 +40,16 @@ capture. Style rules live in [STYLE.md](STYLE.md).
   a ticket; collect the answers later at about half price.
 - [13 — Media generation (images & speech)](13-media-generation.md)
   — Images and speech out of the same Part types you send in.
-- [14 — Live sessions (realtime)](14-live-sessions.md) — Bidirectional
+- [14 — Video generation](14-video-generation.md) — Job-shaped on every
+  wire: submit a ticket, wait, collect the MP4.
+- [15 — Live sessions (realtime)](15-live-sessions.md) — Bidirectional
   sessions over websockets: events in, audio and text out.
 
 ## Production
 
-- [15 — Local & OpenAI-compatible servers](15-local-and-compatible-servers.md)
+- [16 — Local & OpenAI-compatible servers](16-local-and-compatible-servers.md)
   — Ollama, vLLM, and friends via `OpenAIChatLM` with `base_url` and compat.
-- [16 — Errors, retries & testing](16-errors-and-testing.md) — The typed
+- [17 — Errors, retries & testing](17-errors-and-testing.md) — The typed
   error tree, why retry policy is yours, and testing without a network.
-- [17 — Provider passthrough](17-provider-passthrough.md) — Reaching
+- [18 — Provider passthrough](18-provider-passthrough.md) — Reaching
   provider-only knobs without forking your code off lm15's types.

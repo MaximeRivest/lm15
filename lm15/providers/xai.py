@@ -29,7 +29,7 @@ from ..errors import ProviderError, UnsupportedFeatureError, with_credential_hin
 from ..features import EndpointSupport, ProviderManifest
 from ..protocols import Capabilities
 from ..transports import TransportRequest
-from ..types import ImageGenerationRequest, ImageGenerationResponse, ImagePart, Usage
+from ..types import ImageGenerationRequest, ImageGenerationResponse, ImagePart, Usage, VideoGenerationRequest, VideoJobInfo, VideoPart
 from .base import Credential, HttpResponse, SyncTransport, default_transport
 from .common import make_json_request
 from .openai_chat import OpenAIChatLM
@@ -46,7 +46,7 @@ XAI_CAPABILITIES = Capabilities(
 class XaiLM(OpenAIChatLM):
     """Chat Completions adapter for xAI, with subscription OAuth fallback."""
 
-    supports: ClassVar[EndpointSupport] = EndpointSupport(complete=True, stream=True, models=True, images=True)
+    supports: ClassVar[EndpointSupport] = EndpointSupport(complete=True, stream=True, models=True, images=True, video=True)
     manifest: ClassVar[ProviderManifest] = ProviderManifest(
         provider="xai",
         supports=supports,
@@ -121,6 +121,88 @@ class XaiLM(OpenAIChatLM):
         # Captured: usage reports cost_in_usd_ticks only — no token counts
         # exist, so Usage stays empty and the figure lives in provider_data.
         return ImageGenerationResponse(images=tuple(images), usage=Usage(), provider_data=data)
+
+    # ─── Video generation (grok-imagine; captured live 2026-09-01) ──────
+    #
+    # POST /videos/generations -> {"request_id"}; GET /videos/{id} ->
+    # pending + progress %, then done + a PUBLIC MP4 URL (downloads with
+    # no auth, verified) — so the result is URL-addressed, no fetch step.
+    # There is NO list endpoint (probed: 404): the ticket you store is
+    # the only copy.
+
+    _VIDEO_STATUS_MAP: ClassVar[dict[str, str]] = {
+        "pending": "running",
+        "done": "completed",
+        "failed": "failed",
+    }
+
+    def _video_submit_request(self, request: VideoGenerationRequest) -> TransportRequest:
+        if request.seconds is not None:
+            raise UnsupportedFeatureError(
+                "xai: video duration has no wire slot", provider=self.provider,
+            )
+        if request.images:
+            # The image-generation wire silently IGNORES unknown fields
+            # (pixel-verified 2026-09-01); an unverified image-input mapping
+            # here could silently produce prompt-only videos.  Raise until
+            # the field is live-receipted.
+            raise UnsupportedFeatureError(
+                "xai: video input images are not mapped yet; "
+                "use extensions until the mapping is live-receipted",
+                provider=self.provider,
+            )
+        payload: dict[str, Any] = {"model": request.model, "prompt": request.prompt, **(request.extensions or {})}
+        return make_json_request(
+            method="POST", url=f"{self.base_url.rstrip('/')}/videos/generations",
+            headers=self._headers(), payload=payload, read_timeout=120.0,
+        )
+
+    def _video_job_from_body(self, body: str, video_id: "str | None" = None) -> VideoJobInfo:
+        data = json.loads(body)
+        request_id = data.get("request_id")
+        if isinstance(request_id, str) and request_id:
+            # The submit acknowledgement: a bare ticket, not yet started.
+            return VideoJobInfo(id=request_id, status="queued", provider_data=data)
+        if video_id is None:
+            raise ProviderError("xai: video body carries no request_id", provider=self.provider)
+        return self._video_status_info(video_id, data)
+
+    def _video_status_request(self, video_id: str) -> TransportRequest:
+        return make_json_request(
+            method="GET", url=f"{self.base_url.rstrip('/')}/videos/{video_id}",
+            headers=self._headers(), read_timeout=60.0,
+        )
+
+    def _video_status_info(self, video_id: str, data: "dict[str, Any]") -> VideoJobInfo:
+        wire_status = str(data.get("status") or "")
+        status = self._VIDEO_STATUS_MAP.get(wire_status)
+        if status is None:
+            raise ProviderError(f"xai: unknown video status {wire_status!r}", provider=self.provider)
+        progress = data.get("progress")
+        return VideoJobInfo(
+            id=video_id,
+            status=status,
+            progress=int(progress) if isinstance(progress, (int, float)) and not isinstance(progress, bool) else None,
+            model=data.get("model"),
+            provider_data=data,
+        )
+
+    def _video_list_request(self, limit: int, model: "str | None") -> TransportRequest:
+        raise UnsupportedFeatureError(
+            "xai: the wire has no video list endpoint (probed 2026-09-01: 404) — "
+            "the ticket you stored is the only copy",
+            provider=self.provider,
+        )
+
+    def _video_result_fetch(self, status_body: "dict[str, Any]") -> None:
+        return None  # the terminal body carries a public URL
+
+    def _video_part(self, status_body: "dict[str, Any]", fetched: object) -> VideoPart:
+        video = status_body.get("video") if isinstance(status_body.get("video"), dict) else {}
+        url = video.get("url")
+        if not isinstance(url, str) or not url:
+            raise ProviderError("xai: terminal video carries no url", provider=self.provider)
+        return VideoPart(media_type="video/mp4", url=url)
 
     def normalize_error(self, status: int, body: str) -> ProviderError:
         # xAI's own envelope is {"code": str, "error": str} (captured

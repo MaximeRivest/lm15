@@ -166,8 +166,8 @@ lm15 never falls back to silently looping `complete()` at full price.
 
 - [13 — Media generation](13-media-generation.md) — the other non-chat
   endpoints.
-- [15 — Local & OpenAI-compatible servers](15-local-and-compatible-servers.md)
-- [16 — Errors, retries & testing](16-errors-and-testing.md) — the
+- [16 — Local & OpenAI-compatible servers](16-local-and-compatible-servers.md)
+- [17 — Errors, retries & testing](17-errors-and-testing.md) — the
   typed error tree entries carry.
-- [17 — Provider passthrough](17-provider-passthrough.md) — reading
+- [18 — Provider passthrough](18-provider-passthrough.md) — reading
   `provider_data`.

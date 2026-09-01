@@ -41,6 +41,8 @@ from .types import (
     ImageGenerationResponse,
     SpeechGenerationRequest,
     SpeechGenerationResponse,
+    VideoGenerationRequest,
+    VideoJobInfo,
     FunctionTool,
     ImageDelta,
     ImagePart,
@@ -894,6 +896,50 @@ def speech_generation_response_from_dict(d: dict[str, Any]) -> SpeechGenerationR
         id=d.get("id"),
         model=d.get("model"),
         usage=usage_from_dict(d.get("usage") or {}),
+        provider_data=d.get("provider_data"),
+    )
+
+
+# ─── Video generation ────────────────────────────────────────────────
+
+def video_generation_request_to_dict(r: VideoGenerationRequest) -> dict[str, Any]:
+    return _clean_mapping({
+        "model": r.model,
+        "prompt": r.prompt,
+        "seconds": r.seconds,
+        "images": [part_to_dict(img) for img in r.images] or None,
+        "extensions": r.extensions,
+    })
+
+
+def video_generation_request_from_dict(d: dict[str, Any]) -> VideoGenerationRequest:
+    return VideoGenerationRequest(
+        model=d["model"],
+        prompt=d["prompt"],
+        seconds=d.get("seconds"),
+        images=tuple(part_from_dict(img) for img in d.get("images", [])),
+        extensions=d.get("extensions"),
+    )
+
+
+def video_job_to_dict(j: VideoJobInfo) -> dict[str, Any]:
+    return _clean_mapping({
+        "id": j.id,
+        "status": j.status,
+        "progress": j.progress,
+        "created_at": j.created_at,
+        "model": j.model,
+        "provider_data": j.provider_data,
+    })
+
+
+def video_job_from_dict(d: dict[str, Any]) -> VideoJobInfo:
+    return VideoJobInfo(
+        id=d["id"],
+        status=d["status"],
+        progress=d.get("progress"),
+        created_at=d.get("created_at"),
+        model=d.get("model"),
         provider_data=d.get("provider_data"),
     )
 

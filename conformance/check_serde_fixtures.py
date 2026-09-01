@@ -64,6 +64,8 @@ KIND_SERDE: dict[str, tuple[JsonToObj, ObjToJson]] = {
     "image_generation_response": (serde.image_generation_response_from_dict, serde.image_generation_response_to_dict),
     "speech_generation_request": (serde.speech_generation_request_from_dict, serde.speech_generation_request_to_dict),
     "speech_generation_response": (serde.speech_generation_response_from_dict, serde.speech_generation_response_to_dict),
+    "video_generation_request": (serde.video_generation_request_from_dict, serde.video_generation_request_to_dict),
+    "video_job": (serde.video_job_from_dict, serde.video_job_to_dict),
 }
 
 

@@ -34,6 +34,7 @@ from ..transports import (
     TransportError as NetworkTransportError,
 )
 from ..types import (
+    VideoGenerationRequest,
     SpeechGenerationRequest,
     BatchRequest,
     CacheConfig,
@@ -307,6 +308,62 @@ class AsyncBaseProviderLM:
 
     def live(self, config: LiveConfig):
         raise self._async_unsupported("live")
+
+    # ── Video generation: async drivers over the sync adapter's pure hooks ──
+
+    async def video_submit(self, request: "VideoGenerationRequest"):
+        resp = await self._send(self._inner._video_submit_request(request))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return self._inner._video_job_from_body(resp.text())
+
+    async def video_status(self, video_id: str):
+        resp = await self._send(self._inner._video_status_request(video_id))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return self._inner._video_job_from_body(resp.text(), video_id)
+
+    async def video_result(self, video_id: str):
+        from ..types import VIDEO_TERMINAL_STATUSES
+
+        resp = await self._send(self._inner._video_status_request(video_id))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        job = self._inner._video_job_from_body(resp.text(), video_id)
+        if job.status not in VIDEO_TERMINAL_STATUSES:
+            raise ValueError(
+                f"video {video_id} is not finished (status={job.status!r}); "
+                f"wait() or poll video_status() until done"
+            )
+        status_body = resp.json()
+        fetch = self._inner._video_result_fetch(status_body)
+        fetched = None
+        if fetch is not None:
+            fetched = await self._send(fetch)
+            if fetched.status >= 400:
+                raise self._inner.normalize_error(fetched.status, fetched.text())
+        return self._inner._video_part(status_body, fetched)
+
+    async def video_list(self, limit: int = 20, model: str | None = None):
+        resp = await self._send(self._inner._video_list_request(limit, model))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return self._inner._video_jobs_from_list_body(resp.text())
+
+    async def video_generate(self, request: "VideoGenerationRequest"):
+        from ..video_jobs import AsyncVideoJob
+
+        return AsyncVideoJob(self, await self.video_submit(request))
+
+    async def video_job(self, video_id: str):
+        from ..video_jobs import AsyncVideoJob
+
+        return AsyncVideoJob(self, await self.video_status(video_id))
+
+    async def video_jobs(self, limit: int = 20, model: str | None = None):
+        from ..video_jobs import AsyncVideoJob
+
+        return tuple(AsyncVideoJob(self, info) for info in await self.video_list(limit, model))
 
     # ── Media generation: async drivers over the sync adapter's pure hooks ──
 

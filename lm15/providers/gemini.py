@@ -29,6 +29,9 @@ from ..protocols import Capabilities
 from ..sse import SSEEvent
 from ..transports import TransportRequest
 from ..types import (
+    VideoGenerationRequest,
+    VideoJobInfo,
+    VideoPart,
     AudioDelta,
     SpeechGenerationRequest,
     SpeechGenerationResponse,
@@ -339,6 +342,7 @@ class GeminiLM(BaseProviderLM):
         batches=True,
         images=True,
         speech=True,
+        video=True,
         models=True,
     )
     manifest: ClassVar[ProviderManifest] = ProviderManifest(
@@ -1594,6 +1598,107 @@ class GeminiLM(BaseProviderLM):
         data = json.loads(body)
         items = data.get("operations") if isinstance(data, dict) else None
         return tuple(self._batch_job_info(item) for item in (items or []) if isinstance(item, dict))
+
+    # ─── Video generation (Veo; captured live 2026-09-01) ───────────────
+    #
+    # predictLongRunning returns an operation name (the ticket); polling
+    # the operation yields done + response.generateVideoResponse with a
+    # file URI that is KEY-BOUND (403 without the header, verified), so
+    # the result step fetches the bytes — a URL the user cannot open is
+    # not an honest VideoPart.  Listing is per model.
+
+    def _video_submit_request(self, request: VideoGenerationRequest) -> TransportRequest:
+        if request.images:
+            # Veo's image input (instances[].image) is documented but not yet
+            # live-receipted; the generations-ignores-input trap on xAI made
+            # unverified media-input mappings a named hazard.  Raise for now.
+            raise UnsupportedFeatureError(
+                "gemini: video input images are not mapped yet; "
+                "use extensions until the mapping is live-receipted",
+                provider=self.provider,
+            )
+        instance: dict[str, Any] = {"prompt": request.prompt}
+        parameters: dict[str, Any] = {}
+        if request.seconds is not None:
+            parameters["durationSeconds"] = request.seconds
+        payload: dict[str, Any] = {"instances": [instance], **(request.extensions or {})}
+        if parameters:
+            payload.setdefault("parameters", parameters)
+        return make_json_request(
+            method="POST",
+            url=f"{self.base_url.rstrip('/')}/{self._model_path(request.model)}:predictLongRunning",
+            headers=self._auth_headers({"Content-Type": "application/json"}),
+            payload=payload,
+            read_timeout=120.0,
+        )
+
+    def _video_job_from_body(self, body: str, video_id: "str | None" = None) -> VideoJobInfo:
+        return self._video_job_info(json.loads(body))
+
+    def _video_job_info(self, data: dict[str, Any]) -> VideoJobInfo:
+        name = data.get("name")
+        if not isinstance(name, str) or not name:
+            raise ProviderError("gemini: video operation carries no name", provider=self.provider)
+        if data.get("done") is True:
+            status = "failed" if isinstance(data.get("error"), dict) else "completed"
+        else:
+            # Operations expose no queued/running distinction before done.
+            status = "running"
+        return VideoJobInfo(id=name, status=status, provider_data=data)
+
+    def _video_status_request(self, video_id: str) -> TransportRequest:
+        return make_json_request(
+            method="GET",
+            url=f"{self.base_url.rstrip('/')}/{video_id}",
+            headers=self._auth_headers({}),
+            read_timeout=60.0,
+        )
+
+    def _video_result_uri(self, status_body: dict[str, Any]) -> str:
+        response = status_body.get("response") if isinstance(status_body.get("response"), dict) else {}
+        gvr = response.get("generateVideoResponse") if isinstance(response.get("generateVideoResponse"), dict) else {}
+        samples = gvr.get("generatedSamples")
+        if isinstance(samples, list) and samples:
+            video = samples[0].get("video") if isinstance(samples[0], dict) else None
+            uri = video.get("uri") if isinstance(video, dict) else None
+            if isinstance(uri, str) and uri:
+                return uri
+        raise ProviderError("gemini: terminal video operation carries no video uri", provider=self.provider)
+
+    def _video_result_fetch(self, status_body: dict[str, Any]) -> TransportRequest:
+        return make_json_request(
+            method="GET",
+            url=self._video_result_uri(status_body),
+            headers=self._auth_headers({}),
+            read_timeout=600.0,
+        )
+
+    def _video_part(self, status_body: dict[str, Any], fetched: "HttpResponse | None") -> VideoPart:
+        if fetched is None:
+            raise ProviderError("gemini: video content fetch is required", provider=self.provider)
+        content_type = (fetched.header("content-type") or "").split(";", 1)[0].strip()
+        if not content_type:
+            raise ProviderError("gemini: video download carries no content-type", provider=self.provider)
+        return VideoPart(media_type=content_type, data=base64.b64encode(fetched.body).decode("ascii"))
+
+    def _video_list_request(self, limit: int, model: str | None) -> TransportRequest:
+        if not model:
+            raise UnsupportedFeatureError(
+                "gemini: video jobs list per model — pass model= (operations live under models/<model>/operations)",
+                provider=self.provider,
+            )
+        return make_json_request(
+            method="GET",
+            url=f"{self.base_url.rstrip('/')}/{self._model_path(model)}/operations",
+            params={"pageSize": int(limit)},
+            headers=self._auth_headers({}),
+            read_timeout=60.0,
+        )
+
+    def _video_jobs_from_list_body(self, body: str) -> tuple[VideoJobInfo, ...]:
+        data = json.loads(body)
+        ops = data.get("operations") if isinstance(data, dict) else None
+        return tuple(self._video_job_info(op) for op in (ops or []) if isinstance(op, dict))
 
     # ─── Media generation (captured live 2026-09-01) ────────────────────
     #

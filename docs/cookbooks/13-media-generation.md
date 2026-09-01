@@ -213,5 +213,5 @@ provider-named (`alloy`, `Kore`).
   same Part types as inputs.
 - [10 — Audio, video & reasoning models](10-audio-video-reasoning.md)
 - [12 — Batch jobs](12-batch-jobs.md) — the other non-chat endpoint.
-- [17 — Provider passthrough](17-provider-passthrough.md) — reading
+- [18 — Provider passthrough](18-provider-passthrough.md) — reading
   `provider_data` and `extensions`.

@@ -226,5 +226,5 @@ across all three. See [../using-the-router.md](../using-the-router.md).
 - [02 — Multi-turn conversations](02-conversations.md)
 - [10 — Audio, video & reasoning models](10-audio-video-reasoning.md)
 - [13 — Media generation (images & speech)](13-media-generation.md)
-- [16 — Errors, retries & testing](16-errors-and-testing.md)
+- [17 — Errors, retries & testing](17-errors-and-testing.md)
 - [../using-the-router.md](../using-the-router.md)

@@ -130,6 +130,8 @@ DEFAULT_RULES: tuple[RouteRule, ...] = (
     RouteRule("o4", "openai", note="OpenAI o4 reasoning family"),
     RouteRule("gemini-", "gemini", note="Google Gemini family"),
     RouteRule("grok-", "xai", note="xAI Grok family (XAI_API_KEY or subscription OAuth)"),
+    RouteRule("sora-", "openai", note="OpenAI Sora video generation"),
+    RouteRule("veo-", "gemini", note="Google Veo video generation"),
 )
 
 

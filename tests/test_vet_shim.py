@@ -41,6 +41,8 @@ ALL_OPS = [
     "serde_roundtrip",
     "surface_dump",
     "validate",
+    "video_op_build",
+    "video_op_parse",
 ]
 
 

@@ -1224,6 +1224,48 @@
      "modelVersion": "gemini-2.5-flash-preview-tts"
     }
    }
+  },
+  {
+   "id": "video_generation_request.minimal",
+   "kind": "video_generation_request",
+   "value": {
+    "model": "grok-imagine-video",
+    "prompt": "A red ball bounces once"
+   }
+  },
+  {
+   "id": "video_generation_request.full",
+   "kind": "video_generation_request",
+   "value": {
+    "model": "sora-2",
+    "prompt": "A red ball bounces once",
+    "seconds": 4,
+    "extensions": {
+     "size": "720x1280"
+    }
+   }
+  },
+  {
+   "id": "video_job.minimal",
+   "kind": "video_job",
+   "value": {
+    "id": "video_1",
+    "status": "queued"
+   }
+  },
+  {
+   "id": "video_job.full",
+   "kind": "video_job",
+   "value": {
+    "id": "models/veo-3.1-lite-generate-preview/operations/0008ar3b1ksa",
+    "status": "completed",
+    "progress": 100,
+    "created_at": "2026-09-01T12:46:16Z",
+    "model": "sora-2",
+    "provider_data": {
+     "status": "done"
+    }
+   }
   }
  ]
 }

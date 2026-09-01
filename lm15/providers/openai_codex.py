@@ -250,3 +250,14 @@ class OpenAICodexLM(OpenAILM):
 
     def speech_generate(self, request: SpeechGenerationRequest) -> SpeechGenerationResponse:
         raise UnsupportedFeatureError("openai-codex: speech generation is not supported", provider=self.provider)
+
+    # Video is an API-key surface; the subscription credential does not
+    # carry it.  Block the pure hooks so every driver and mirror raises.
+    def _video_submit_request(self, request):
+        raise UnsupportedFeatureError("openai-codex: video generation is not supported", provider=self.provider)
+
+    def _video_status_request(self, video_id: str):
+        raise UnsupportedFeatureError("openai-codex: video generation is not supported", provider=self.provider)
+
+    def _video_list_request(self, limit: int, model: str | None):
+        raise UnsupportedFeatureError("openai-codex: video generation is not supported", provider=self.provider)

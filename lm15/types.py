@@ -99,6 +99,7 @@ ERROR_CODES = frozenset(get_args(ErrorCode))
 
 StreamEventType = Literal["start", "delta", "end", "error"]
 BatchStatus = Literal["queued", "running", "cancelling", "completed", "failed", "cancelled", "expired"]
+VideoStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 BatchOutcome = Literal["succeeded", "errored", "cancelled", "expired"]
 FileReadiness = Literal["pending", "ready", "failed"]
 AudioEncoding = Literal["pcm16", "opus", "mp3", "aac"]
@@ -114,6 +115,9 @@ BATCH_STATUSES = frozenset(get_args(BatchStatus))
 BATCH_OUTCOMES = frozenset(get_args(BatchOutcome))
 # Job statuses in which a batch will make no further progress.
 BATCH_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "expired"})
+VIDEO_STATUSES = frozenset(get_args(VideoStatus))
+# Job statuses in which a video job will make no further progress.
+VIDEO_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 FILE_READINESS_VALUES = frozenset(get_args(FileReadiness))
 AUDIO_ENCODINGS = frozenset(get_args(AudioEncoding))
 TOOL_CHOICE_MODES = frozenset(get_args(ToolChoiceMode))
@@ -2335,12 +2339,78 @@ class SpeechGenerationResponse:
         _validate_json_field(self, "provider_data")
 
 
+# ─── Video Generation ────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class VideoGenerationRequest(_PromptRequest):
+    """Text (and optionally an input image) in; a video JOB out.
+
+    Video is job-shaped on every wire that sells it (Sora, Veo,
+    grok-imagine): submission returns a ticket, not bytes.  ``seconds``
+    maps to the provider's duration knob and raises where the wire has
+    none; ``images`` are input frames (image-to-video), ordinary
+    ImageParts.
+    """
+
+    seconds: int | None = None
+    images: tuple[ImagePart, ...] = ()
+    extensions: Extensions | None = None
+
+    def __post_init__(self) -> None:
+        _PromptRequest.__post_init__(self)
+        if self.seconds is not None and (
+            not isinstance(self.seconds, int) or isinstance(self.seconds, bool) or self.seconds <= 0
+        ):
+            raise ValueError("VideoGenerationRequest.seconds must be a positive int")
+        object.__setattr__(self, "images", tuple(self.images))
+        if not all(isinstance(img, ImagePart) for img in self.images):
+            raise TypeError("VideoGenerationRequest.images must contain ImagePart objects")
+        _validate_extensions_field(self)
+
+
+@dataclass(frozen=True, slots=True)
+class VideoJobInfo:
+    """A snapshot of a provider-side video job — the ticket.
+
+    ``id`` is the provider's job id, a plain string; store it anywhere
+    (on xAI it is the ONLY copy — the wire has no list endpoint).
+    ``progress`` is a percentage when the provider reports one.  Raw job
+    state stays verbatim in ``provider_data``.
+    """
+
+    id: str
+    status: VideoStatus
+    progress: int | None = None
+    created_at: str | None = None
+    model: str | None = None
+    provider_data: ProviderData | None = None
+
+    @property
+    def done(self) -> bool:
+        return self.status in VIDEO_TERMINAL_STATUSES
+
+    def __post_init__(self) -> None:
+        _validate_text(self.id, field_name="VideoJobInfo.id", allow_empty=False)
+        if self.status not in VIDEO_STATUSES:
+            raise ValueError(f"unsupported video status: {self.status}")
+        if self.progress is not None and (
+            not isinstance(self.progress, int) or isinstance(self.progress, bool)
+            or not 0 <= self.progress <= 100
+        ):
+            raise ValueError("VideoJobInfo.progress must be an int percentage 0-100")
+        _validate_optional_text(self.created_at, field_name="VideoJobInfo.created_at", allow_empty=False)
+        _validate_optional_text(self.model, field_name="VideoJobInfo.model", allow_empty=False)
+        _validate_json_field(self, "provider_data")
+
+
 EndpointRequest: TypeAlias = (
     Request
     | FileUploadRequest
     | BatchRequest
     | ImageGenerationRequest
     | SpeechGenerationRequest
+    | VideoGenerationRequest
 )
 
 EndpointResponse: TypeAlias = (
@@ -2349,6 +2419,7 @@ EndpointResponse: TypeAlias = (
     | BatchJobInfo
     | ImageGenerationResponse
     | SpeechGenerationResponse
+    | VideoJobInfo
 )
 
 
