@@ -312,6 +312,21 @@ class OpenAIChatCompat:
                 cache_control="openai",
             )
 
+        if key == "xai":
+            # Pinned live 2026-09-01 against grok-4.6: max_tokens accepted,
+            # reasoning arrives as message.reasoning_content (deepseek shape),
+            # stream_options.include_usage honored, no cache_control field
+            # (prompt caching is automatic; usage reports cached_tokens).
+            return cls(
+                instruction_role="system",
+                max_tokens_field="max_tokens",
+                stream_usage="include",
+                thinking_format="deepseek",
+                tool_result_name="omit",
+                strict_tools="omit",
+                cache_control="none",
+            )
+
         if key in {"vllm", "sglang"}:
             return cls(
                 instruction_role="system",
@@ -367,6 +382,7 @@ OPENAI_CHAT_PRESET_BASE_URLS: dict[str, str] = {
     "ollama": "http://localhost:11434/v1",
     "groq": "https://api.groq.com/openai/v1",
     "openrouter": "https://openrouter.ai/api/v1",
+    "xai": "https://api.x.ai/v1",
     "vllm": "http://localhost:8000/v1",
     "sglang": "http://localhost:30000/v1",
 }

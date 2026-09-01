@@ -3,8 +3,10 @@ lm15.auth — Local subscription credential helpers.
 
 These helpers intentionally do not read ordinary provider API keys from the
 environment.  They only support explicit local developer credentials created
-by provider CLIs: Claude Code (``~/.claude/.credentials.json``) and the OpenAI
-Codex CLI (``~/.codex/auth.json``).
+by provider CLIs: Claude Code (``~/.claude/.credentials.json``), the OpenAI
+Codex CLI (``~/.codex/auth.json``) — plus xAI subscription OAuth, which lm15
+logs in itself (device-code flow) because xAI ships no CLI credential file
+convention; see the xAI section at the bottom.
 
 Failure behavior is typed and helpful, never a raw JSON traceback:
 
@@ -43,6 +45,7 @@ import base64
 import json
 import os
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -56,16 +59,25 @@ from .errors import AuthError, NotConfiguredError
 __all__ = [
     "CredentialLockTimeout",
     "LocalOAuthCredential",
+    "XaiDeviceAuthorization",
     "get_claude_code_access_token",
     "get_codex_cli_access_token",
+    "get_xai_access_token",
     "load_claude_code_credential",
     "load_codex_cli_credential",
+    "load_xai_credential",
+    "login_xai",
+    "poll_xai_device_login",
     "read_claude_code_credential",
     "read_codex_cli_credential",
+    "read_xai_credential",
     "refresh_claude_code_credential",
     "refresh_codex_cli_credential",
+    "refresh_xai_credential",
+    "start_xai_device_login",
     "write_claude_code_credential",
     "write_codex_cli_credential",
+    "write_xai_credential",
 ]
 
 CLAUDE_CODE_CREDENTIALS_PATH = Path("~/.claude/.credentials.json").expanduser()
@@ -471,3 +483,344 @@ def get_codex_cli_access_token(
         )
         _write_codex_cli_credential_unlocked(refreshed, path, id_token=id_token)
     return refreshed
+
+
+# ─── xAI Grok (device-code OAuth; lm15 store or Pi agent store) ──────
+#
+# Unlike Claude Code and Codex, xAI has no first-party CLI credential file
+# convention lm15 can piggyback on.  lm15 therefore owns a login
+# (:func:`login_xai`, RFC 8628 device-code flow) writing to lm15's own
+# credential store, and additionally reads the Pi coding agent's store
+# (``~/.pi/agent/auth.json``) when present — both files share the same
+# ``{"xai": {"type": "oauth", "access", "refresh", "expires"}}`` schema.
+# Refreshes write back to whichever file the credential came from: xAI
+# rotates refresh tokens, so a refresh that is not persisted to its source
+# bricks that source's login.
+
+XAI_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
+XAI_DEVICE_CODE_URL = "https://auth.x.ai/oauth2/device/code"
+XAI_TOKEN_URL = "https://auth.x.ai/oauth2/token"
+XAI_OAUTH_SCOPE = "openid profile email offline_access grok-cli:access api:access"
+XAI_LOGIN_HINT = "Log in again: run lm15.auth.login_xai() (SuperGrok / X Premium subscription auth)"
+PI_AGENT_AUTH_PATH = Path("~/.pi/agent/auth.json").expanduser()
+
+_XAI_PROVIDER_KEY = "xai"
+_XAI_DEFAULT_TOKEN_LIFETIME_S = 3600
+
+
+def _xai_store_paths() -> tuple[Path, ...]:
+    from .authkit import default_credentials_path
+
+    return (default_credentials_path(), PI_AGENT_AUTH_PATH)
+
+
+def _xai_entry_to_credential(entry: Any) -> LocalOAuthCredential | None:
+    if not isinstance(entry, dict):
+        return None
+    access = entry.get("access")
+    if not isinstance(access, str) or not access:
+        return None
+    refresh = entry.get("refresh")
+    expires = entry.get("expires")
+    return LocalOAuthCredential(
+        access_token=access,
+        refresh_token=refresh if isinstance(refresh, str) and refresh else None,
+        expires_at=expires if isinstance(expires, int) and not isinstance(expires, bool) else None,
+    )
+
+
+def _xai_credential_to_entry(credential: LocalOAuthCredential, current: dict[str, Any] | None) -> dict[str, Any]:
+    entry = dict(current or {})
+    entry["type"] = "oauth"
+    entry["access"] = credential.access_token
+    if credential.refresh_token:
+        entry["refresh"] = credential.refresh_token
+    if credential.expires_at is not None:
+        entry["expires"] = credential.expires_at
+    return entry
+
+
+def _load_xai_with_source(
+    auth_path: str | os.PathLike[str] | None = None,
+) -> tuple[LocalOAuthCredential, Path]:
+    paths = (Path(auth_path).expanduser(),) if auth_path is not None else _xai_store_paths()
+    for path in paths:
+        data = _read_json_file_or_none(path)
+        credential = _xai_entry_to_credential(data.get(_XAI_PROVIDER_KEY)) if data else None
+        if credential is not None:
+            return credential, path
+    checked = ", ".join(str(p) for p in paths)
+    raise _not_configured(
+        "xai",
+        f"No xAI OAuth credential found (checked: {checked}).",
+        XAI_LOGIN_HINT,
+    )
+
+
+def load_xai_credential(
+    auth_path: str | os.PathLike[str] | None = None,
+) -> LocalOAuthCredential:
+    """Load the stored xAI OAuth credential, raising typed errors."""
+    credential, _ = _load_xai_with_source(auth_path)
+    return credential
+
+
+def read_xai_credential(
+    auth_path: str | os.PathLike[str] | None = None,
+) -> LocalOAuthCredential | None:
+    """Optional-style loader: None when no usable credential exists."""
+    try:
+        return load_xai_credential(auth_path)
+    except NotConfiguredError:
+        return None
+
+
+def _xai_credential_from_token_response(
+    payload: dict[str, Any],
+    previous_refresh_token: str | None = None,
+) -> LocalOAuthCredential:
+    access = payload.get("access_token")
+    if not isinstance(access, str) or not access:
+        raise RuntimeError("xAI token response is missing access_token")
+    refresh = payload.get("refresh_token")
+    if not isinstance(refresh, str) or not refresh:
+        # xAI may omit refresh_token when it does not rotate it.
+        refresh = previous_refresh_token
+    expires_in = payload.get("expires_in")
+    lifetime_s = (
+        expires_in
+        if isinstance(expires_in, (int, float)) and not isinstance(expires_in, bool) and expires_in > 0
+        else _XAI_DEFAULT_TOKEN_LIFETIME_S
+    )
+    return LocalOAuthCredential(
+        access_token=access,
+        refresh_token=refresh,
+        expires_at=int(time.time() * 1000 + lifetime_s * 1000 - _REFRESH_SKEW_MS),
+    )
+
+
+def refresh_xai_credential(refresh_token: str) -> LocalOAuthCredential:
+    payload = _post_form(
+        XAI_TOKEN_URL,
+        {
+            "grant_type": "refresh_token",
+            "client_id": XAI_CLIENT_ID,
+            "refresh_token": refresh_token,
+        },
+    )
+    return _xai_credential_from_token_response(payload, refresh_token)
+
+
+def write_xai_credential(
+    credential: LocalOAuthCredential,
+    auth_path: str | os.PathLike[str] | None = None,
+) -> None:
+    """Write the credential into a store file (default: lm15's own store)."""
+    from .authkit import CredentialFileStore, default_credentials_path
+
+    store = CredentialFileStore(auth_path if auth_path is not None else default_credentials_path())
+    store.mutate(_XAI_PROVIDER_KEY, lambda current: _xai_credential_to_entry(credential, current))
+
+
+def get_xai_access_token(
+    auth_path: str | os.PathLike[str] | None = None,
+    *,
+    refresh: bool = True,
+) -> str:
+    """Return a usable xAI access token, refreshing (and persisting) if expired.
+
+    Raises NotConfiguredError when no credential exists, AuthError when the
+    credential is expired and cannot be refreshed.  A refresh is written back
+    to the file the credential came from (lm15 store or Pi agent store) under
+    that file's lock, with a double-checked re-read: xAI rotates refresh
+    tokens, so losing the write would break every consumer of that file.
+    """
+    from .authkit import CredentialFileStore
+
+    credential, source = _load_xai_with_source(auth_path)
+    if not credential.expired:
+        return credential.access_token
+    if not refresh or not credential.refresh_token:
+        raise AuthError(
+            "xAI OAuth token is expired and no refresh token is available.",
+            provider="xai",
+            credential_hint=XAI_LOGIN_HINT,
+        )
+
+    result: dict[str, str] = {}
+
+    def _refresh_entry(current: dict[str, Any] | None) -> dict[str, Any] | None:
+        # Double-checked refresh: another process may have refreshed (and
+        # rotated the refresh token) while we waited for the lock.
+        fresh = _xai_entry_to_credential(current)
+        if fresh is not None and not fresh.expired:
+            result["access"] = fresh.access_token
+            return None
+        refresh_token = (fresh.refresh_token if fresh else None) or credential.refresh_token
+        if not refresh_token:
+            raise AuthError(
+                "xAI OAuth token is expired and no refresh token is available.",
+                provider="xai",
+                credential_hint=XAI_LOGIN_HINT,
+            )
+        try:
+            refreshed = refresh_xai_credential(refresh_token)
+        except AuthError:
+            raise
+        except Exception as exc:
+            raise AuthError(
+                "xAI OAuth token is expired and the refresh attempt failed.",
+                provider="xai",
+                credential_hint=XAI_LOGIN_HINT,
+            ) from exc
+        result["access"] = refreshed.access_token
+        return _xai_credential_to_entry(refreshed, current)
+
+    CredentialFileStore(source).mutate(_XAI_PROVIDER_KEY, _refresh_entry)
+    return result["access"]
+
+
+# ─── xAI device-code login (RFC 8628) ────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class XaiDeviceAuthorization:
+    """One pending device authorization.  The device code is repr-suppressed."""
+
+    user_code: str
+    verification_uri: str
+    verification_uri_complete: str | None
+    interval_s: float
+    expires_in_s: float
+    device_code: str = field(repr=False, default="")
+
+
+def _https_or_raise(raw: Any) -> str:
+    # The verification URI is shown to (and often opened by) the user; refuse
+    # anything a malicious response could turn into a local scheme launch.
+    if isinstance(raw, str):
+        try:
+            parsed = urllib.parse.urlparse(raw)
+        except ValueError:
+            parsed = None
+        if parsed is not None and parsed.scheme == "https" and parsed.netloc:
+            return raw
+    raise AuthError("xAI device authorization returned an untrusted verification URI.", provider="xai")
+
+
+def _parse_xai_device_authorization(payload: dict[str, Any]) -> XaiDeviceAuthorization:
+    device_code = payload.get("device_code")
+    user_code = payload.get("user_code")
+    expires_in = payload.get("expires_in")
+    if not isinstance(device_code, str) or not device_code or not isinstance(user_code, str) or not user_code:
+        raise AuthError("xAI device authorization response is missing required fields.", provider="xai")
+    if not isinstance(expires_in, (int, float)) or isinstance(expires_in, bool) or expires_in <= 0:
+        raise AuthError("xAI device authorization response is missing expires_in.", provider="xai")
+    interval = payload.get("interval")
+    interval_s = (
+        float(interval)
+        if isinstance(interval, (int, float)) and not isinstance(interval, bool) and interval > 0
+        else 5.0
+    )
+    complete = payload.get("verification_uri_complete")
+    return XaiDeviceAuthorization(
+        user_code=user_code,
+        verification_uri=_https_or_raise(payload.get("verification_uri")),
+        verification_uri_complete=_https_or_raise(complete) if isinstance(complete, str) and complete else None,
+        interval_s=interval_s,
+        expires_in_s=float(expires_in),
+        device_code=device_code,
+    )
+
+
+def _post_form_tolerant(url: str, payload: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+    """POST a form; return (ok, parsed body) even for 4xx responses.
+
+    Device-code polling encodes protocol state (authorization_pending,
+    slow_down, ...) in 4xx bodies, so HTTP errors are data here.
+    """
+    try:
+        return True, _post_form(url, payload)
+    except urllib.error.HTTPError as exc:
+        try:
+            data = json.loads(exc.read().decode("utf-8"))
+        except Exception:
+            data = {}
+        return False, data if isinstance(data, dict) else {}
+
+
+def start_xai_device_login() -> XaiDeviceAuthorization:
+    """Request a device authorization; show the user code, then poll."""
+    ok, payload = _post_form_tolerant(
+        XAI_DEVICE_CODE_URL,
+        {"client_id": XAI_CLIENT_ID, "scope": XAI_OAUTH_SCOPE, "referrer": "lm15"},
+    )
+    if not ok:
+        detail = payload.get("error_description") or payload.get("error") or "request failed"
+        raise AuthError(f"xAI device authorization failed: {detail}", provider="xai")
+    return _parse_xai_device_authorization(payload)
+
+
+def poll_xai_device_login(
+    device: XaiDeviceAuthorization,
+    *,
+    sleep: Any = time.sleep,
+) -> LocalOAuthCredential:
+    """Poll the token endpoint until the user approves; return the credential."""
+    from .authkit import DeviceComplete, DeviceFailed, DevicePending, DeviceSlowDown, poll_device_code
+
+    def _poll() -> Any:
+        ok, payload = _post_form_tolerant(
+            XAI_TOKEN_URL,
+            {
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                "client_id": XAI_CLIENT_ID,
+                "device_code": device.device_code,
+            },
+        )
+        if ok:
+            return DeviceComplete(_xai_credential_from_token_response(payload))
+        error = payload.get("error")
+        if error == "authorization_pending":
+            return DevicePending()
+        if error == "slow_down":
+            interval = payload.get("interval")
+            return DeviceSlowDown(
+                float(interval)
+                if isinstance(interval, (int, float)) and not isinstance(interval, bool) and interval > 0
+                else None
+            )
+        if error in {"access_denied", "authorization_denied"}:
+            return DeviceFailed("xAI device authorization was denied.")
+        if error == "expired_token":
+            return DeviceFailed("xAI device code expired before it was approved.")
+        detail = payload.get("error_description") or error or "request failed"
+        return DeviceFailed(f"xAI device token polling failed: {detail}")
+
+    return poll_device_code(
+        _poll,
+        interval_s=device.interval_s,
+        expires_in_s=device.expires_in_s,
+        provider="xai",
+        wait_before_first_poll=True,
+        sleep=sleep,
+    )
+
+
+def login_xai(
+    auth_path: str | os.PathLike[str] | None = None,
+    *,
+    echo: Any = print,
+) -> LocalOAuthCredential:
+    """Interactive device-code login; persists the credential and returns it.
+
+    Prints the verification URL and user code via ``echo`` and blocks until
+    the user approves in a browser (or the code expires).  The credential is
+    written to lm15's own store unless ``auth_path`` overrides it.
+    """
+    device = start_xai_device_login()
+    target = device.verification_uri_complete or device.verification_uri
+    echo(f"Open {target} and enter code: {device.user_code}")
+    credential = poll_xai_device_login(device)
+    write_xai_credential(credential, auth_path)
+    return credential

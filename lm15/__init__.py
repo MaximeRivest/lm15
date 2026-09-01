@@ -146,6 +146,7 @@ from .providers import (
     GeminiLM,
     ClaudeCodeLM,
     OpenAICodexLM,
+    XaiLM,
 )
 from .protocols import ProviderLM
 from .providers.async_base import (
@@ -155,6 +156,7 @@ from .providers.async_base import (
     AsyncGeminiLM,
     AsyncClaudeCodeLM,
     AsyncOpenAICodexLM,
+    AsyncXaiLM,
 )
 
 # ── Stream assembly ──────────────────────────────────────────────────
@@ -223,11 +225,11 @@ __all__ = [
     "ServerError", "UnsupportedModelError", "UnsupportedFeatureError",
     "NotConfiguredError", "RETRYABLE_ERRORS",
     # providers
-    "OpenAILM", "OpenAIChatLM", "AnthropicLM", "GeminiLM", "ClaudeCodeLM", "OpenAICodexLM",
+    "OpenAILM", "OpenAIChatLM", "AnthropicLM", "GeminiLM", "ClaudeCodeLM", "OpenAICodexLM", "XaiLM",
     "ProviderLM",
     # async mirror providers
     "AsyncOpenAILM", "AsyncOpenAIChatLM", "AsyncAnthropicLM", "AsyncGeminiLM",
-    "AsyncClaudeCodeLM", "AsyncOpenAICodexLM",
+    "AsyncClaudeCodeLM", "AsyncOpenAICodexLM", "AsyncXaiLM",
     # stream assembly
     "ResponseStream", "AsyncResponseStream",
     "materialize_response", "amaterialize_response", "response_to_events",

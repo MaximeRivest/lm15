@@ -57,6 +57,7 @@ from .openai_codex import (
     DEFAULT_CODEX_ORIGINATOR,
     OpenAICodexLM,
 )
+from .xai import DEFAULT_XAI_BASE_URL, XAI_CAPABILITIES, XaiLM
 
 
 class AsyncTransport(Protocol):
@@ -646,6 +647,33 @@ class AsyncOpenAICodexLM(AsyncBaseProviderLM):
         return self._inner.audio_generate(request)  # raises UnsupportedFeatureError
 
 
+@dataclass(slots=True)
+class AsyncXaiLM(AsyncBaseProviderLM):
+    """Async mirror of :class:`XaiLM` (subscription OAuth or bearer key)."""
+
+    api_key: Credential | None = field(default=None, repr=False)
+    credentials_path: "str | os.PathLike[str] | None" = None
+    transport: AsyncTransport = field(default_factory=default_async_transport)
+    base_url: str = DEFAULT_XAI_BASE_URL
+
+    # Not constructor params on the sync sibling either.
+    provider: str = field(default="xai", init=False)
+    capabilities: Capabilities = field(default=XAI_CAPABILITIES, init=False)
+    supports: ClassVar[EndpointSupport] = XaiLM.supports
+    manifest: ClassVar[ProviderManifest] = XaiLM.manifest
+
+    _inner: XaiLM = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        self._inner = XaiLM(
+            api_key=self.api_key,
+            credentials_path=self.credentials_path,
+            transport=_ForbiddenTransport(),
+            base_url=self.base_url,
+        )
+        self.api_key = self._inner.api_key  # static key or per-request credential provider (repr-suppressed)
+
+
 __all__ = [
     "AsyncBaseProviderLM",
     "AsyncTransport",
@@ -655,5 +683,6 @@ __all__ = [
     "AsyncOpenAIChatLM",
     "AsyncClaudeCodeLM",
     "AsyncOpenAICodexLM",
+    "AsyncXaiLM",
     "default_async_transport",
 ]

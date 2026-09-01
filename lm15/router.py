@@ -76,9 +76,11 @@ from .providers import (
     ClaudeCodeLM,
     Credential,
     GeminiLM,
+    AsyncXaiLM,
     OpenAIChatLM,
     OpenAICodexLM,
     OpenAILM,
+    XaiLM,
 )
 from .types import Request, Response, StreamEvent
 
@@ -127,6 +129,7 @@ DEFAULT_RULES: tuple[RouteRule, ...] = (
     RouteRule("o3", "openai", note="OpenAI o3 reasoning family"),
     RouteRule("o4", "openai", note="OpenAI o4 reasoning family"),
     RouteRule("gemini-", "gemini", note="Google Gemini family"),
+    RouteRule("grok-", "xai", note="xAI Grok family (XAI_API_KEY or subscription OAuth)"),
 )
 
 
@@ -139,6 +142,7 @@ ADAPTERS: Mapping[str, type] = {
     "gemini": GeminiLM,
     "claude-code": ClaudeCodeLM,
     "openai-codex": OpenAICodexLM,
+    "xai": XaiLM,
 }
 
 ASYNC_ADAPTERS: Mapping[str, type] = {
@@ -148,11 +152,16 @@ ASYNC_ADAPTERS: Mapping[str, type] = {
     "gemini": AsyncGeminiLM,
     "claude-code": AsyncClaudeCodeLM,
     "openai-codex": AsyncOpenAICodexLM,
+    "xai": AsyncXaiLM,
 }
 
 # Providers whose constructors self-resolve local OAuth credentials and
 # therefore take no api_key from the router.
 _OAUTH_PROVIDERS: frozenset[str] = frozenset({"claude-code", "openai-codex"})
+
+# Providers that take an ordinary api_key when one resolves (config /
+# XAI_API_KEY-style env), and self-resolve local OAuth when none does.
+_OAUTH_FALLBACK_PROVIDERS: frozenset[str] = frozenset({"xai"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -579,6 +588,8 @@ def _build_lm(resolution: Resolution, config: RouterConfig, adapters: Mapping[st
                 break
     if api_key is None and route is not None and route.default_key is not None:
         api_key = route.default_key
+    if not api_key and resolution.provider in _OAUTH_FALLBACK_PROVIDERS:
+        return cls(**extra)  # self-resolving local OAuth constructor
     if not api_key:
         env_keys = _declared_env_keys(resolution.provider, adapters)
         raise MissingCredentialError(
