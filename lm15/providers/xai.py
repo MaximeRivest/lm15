@@ -7,19 +7,25 @@ first-class adapter instead of a preset route is authentication: xAI sells
 subscription access (SuperGrok / X Premium) through a device-code OAuth
 flow, and the resulting access token is sent as an ordinary bearer key.
 
-Credential resolution order:
+Credential resolution order (``oauth-unless-explicit`` policy, spec/auth.md
+AUTH-1) — through the router:
 
-1. an explicit ``api_key`` argument (static string or callable);
-2. the router's usual key resolution (``RouterConfig.api_keys`` /
-   ``XAI_API_KEY``) — the router passes the result as ``api_key``;
-3. self-resolved subscription OAuth: lm15's own credential store, then the
-   Pi agent store (``~/.pi/agent/auth.json``); refreshed tokens are written
-   back to their source file (xAI rotates refresh tokens).
+1. an explicit ``RouterConfig.api_keys`` entry (or an ``api_key`` argument
+   when constructing this class directly): deliberate, in-process
+   configuration always wins;
+2. the stored subscription OAuth login when one is usable: lm15's own
+   credential store, then the Pi agent store (``~/.pi/agent/auth.json``);
+   refreshed tokens are written back to their source file (xAI rotates
+   refresh tokens);
+3. ``XAI_API_KEY`` from the environment, only when no usable subscription
+   login is stored.
 
-Billing trade-off, stated: a configured key wins over a stored subscription
-login.  A stray ``XAI_API_KEY`` in the environment therefore silently moves
-you from subscription (prepaid) to per-token billing.  Explicit-beats-ambient
-is the resolution rule everywhere in lm15; run
+Why the subscription outranks the env var: both are stored state, but using
+the subscription costs nothing per token while a key bills every call — and
+lm15's durable constraint is that normal inference must not unexpectedly
+spend money.  Stated residual trade-off: with a subscription stored, a set
+``XAI_API_KEY`` is silently ignored; if you need that key's account, pass it
+explicitly (``api_key=`` / ``RouterConfig.api_keys``).  Run
 ``lm15.doctor.explain_auth("xai")`` to see which rung won.
 """
 
@@ -58,8 +64,16 @@ class XaiLM(OpenAIChatLM):
         supports=supports,
         auth_modes=("bearer", "xai-oauth"),
         env_keys=("XAI_API_KEY",),
-        credential_policy="key-then-oauth",
+        credential_policy="oauth-unless-explicit",
     )
+
+    @classmethod
+    def has_stored_credential(cls) -> bool:
+        """Offline probe the router uses for the ``oauth-unless-explicit``
+        policy: is a usable subscription login stored locally?"""
+        from ..auth import usable_xai_credential
+
+        return usable_xai_credential()
 
     def __init__(
         self,

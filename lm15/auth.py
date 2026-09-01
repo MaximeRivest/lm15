@@ -76,6 +76,7 @@ __all__ = [
     "refresh_codex_cli_credential",
     "refresh_xai_credential",
     "start_xai_device_login",
+    "usable_xai_credential",
     "write_claude_code_credential",
     "write_codex_cli_credential",
     "write_xai_credential",
@@ -574,6 +575,22 @@ def read_xai_credential(
         return load_xai_credential(auth_path)
     except NotConfiguredError:
         return None
+
+
+def usable_xai_credential(auth_path: str | os.PathLike[str] | None = None) -> bool:
+    """True when a stored xAI subscription credential exists and is usable
+    (fresh, or expired with a refresh token to refresh it at request time).
+
+    Reads files only — never the network — so the router can consult it
+    while staying offline.  This is the probe behind the
+    ``oauth-unless-explicit`` credential policy (spec/auth.md AUTH-1): the
+    stored subscription wins over ambient environment keys exactly when
+    this returns True.
+    """
+    credential = read_xai_credential(auth_path)
+    if credential is None:
+        return False
+    return not credential.expired or bool(credential.refresh_token)
 
 
 def _xai_credential_from_token_response(

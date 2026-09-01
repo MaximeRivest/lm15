@@ -766,6 +766,8 @@ class AsyncXaiLM(AsyncBaseProviderLM):
     capabilities: Capabilities = field(default=XAI_CAPABILITIES, init=False)
     supports: ClassVar[EndpointSupport] = XaiLM.supports
     manifest: ClassVar[ProviderManifest] = XaiLM.manifest
+    # Same offline probe as the sync sibling (oauth-unless-explicit policy).
+    has_stored_credential: ClassVar = XaiLM.has_stored_credential
 
     _inner: XaiLM = field(init=False, repr=False, compare=False)
 

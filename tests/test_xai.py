@@ -186,15 +186,37 @@ def test_adapter_compat_pinned_to_live_wire():
     assert lm._resolved_compat.stream_usage == "include"
 
 
-def test_env_key_routes_without_oauth(monkeypatch, tmp_path):
+def test_env_key_used_only_without_stored_login(monkeypatch, tmp_path):
+    # oauth-unless-explicit: the env key is the last rung, reached only
+    # when no usable subscription login is stored anywhere.
     monkeypatch.setenv("XAI_API_KEY", "env-key")
     monkeypatch.setenv("LM15_CREDENTIALS_PATH", str(tmp_path / "empty.json"))
+    monkeypatch.setattr(auth, "PI_AGENT_AUTH_PATH", tmp_path / "no-pi.json")
     lm = LMRouter().lm("grok-4.6")
     assert isinstance(lm, XaiLM)
     assert lm.api_key == "env-key"
 
 
-def test_oauth_fallback_when_no_env_key(monkeypatch, tmp_path):
+def test_stored_login_shadows_env_key(monkeypatch, tmp_path):
+    # Subscription beats ambient env state: it spends no money per token.
+    monkeypatch.setenv("LM15_CREDENTIALS_PATH", str(_store(tmp_path, VALID_ENTRY)))
+    monkeypatch.setattr(auth, "PI_AGENT_AUTH_PATH", tmp_path / "no-pi.json")
+    lm = LMRouter(RouterConfig(env={"XAI_API_KEY": "env-key"})).lm("grok-4.6")
+    assert isinstance(lm, XaiLM)
+    assert callable(lm.api_key)
+    assert lm.api_key() == "at-1"
+
+
+def test_explicit_api_keys_entry_shadows_stored_login(monkeypatch, tmp_path):
+    # Deliberate in-process configuration always wins.
+    monkeypatch.setenv("LM15_CREDENTIALS_PATH", str(_store(tmp_path, VALID_ENTRY)))
+    monkeypatch.setattr(auth, "PI_AGENT_AUTH_PATH", tmp_path / "no-pi.json")
+    lm = LMRouter(RouterConfig(env={}, api_keys={"xai": "config-key"})).lm("grok-4.6")
+    assert isinstance(lm, XaiLM)
+    assert lm.api_key == "config-key"
+
+
+def test_oauth_used_when_no_env_key(monkeypatch, tmp_path):
     monkeypatch.delenv("XAI_API_KEY", raising=False)
     monkeypatch.setenv("LM15_CREDENTIALS_PATH", str(_store(tmp_path, VALID_ENTRY)))
     monkeypatch.setattr(auth, "PI_AGENT_AUTH_PATH", tmp_path / "no-pi.json")

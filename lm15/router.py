@@ -317,7 +317,14 @@ class Resolution:
         parts.append(f"wire model {self.model!r}")
         route = CHAT_PRESET_ROUTES.get(self.provider)
         policy = _credential_policy(self.provider)
-        if self.env_key is not None:
+        if policy == "oauth-unless-explicit":
+            # resolve() is pure (no file reads), so it describes the chain
+            # rather than asserting a winner.
+            chain = "key from explicit api_keys, else the stored subscription OAuth credential"
+            if self.env_key is not None:
+                chain += f", else ${self.env_key}"
+            parts.append(chain)
+        elif self.env_key is not None:
             parts.append(f"key from ${self.env_key}")
         elif policy == "oauth":
             parts.append("local OAuth credential (no env key)")
@@ -325,8 +332,6 @@ class Resolution:
             parts.append("key from explicit api_keys or the preset's local-server default")
         else:
             parts.append("key from explicit api_keys")
-        if policy == "key-then-oauth":
-            parts.append("else the stored local OAuth credential")
         return "; ".join(parts) + "."
 
     def __str__(self) -> str:
@@ -591,6 +596,10 @@ def _build_lm(resolution: Resolution, config: RouterConfig, adapters: Mapping[st
     if policy == "oauth":
         return cls(**extra)  # self-resolving local OAuth constructor
     api_key, _ = _api_keys_entry(config, resolution.provider)
+    if api_key is None and policy == "oauth-unless-explicit" and cls.has_stored_credential():
+        # A usable stored subscription login outranks ambient env keys:
+        # it spends no money per token (AUTH-1, oauth-unless-explicit).
+        return cls(**extra)  # self-resolving local OAuth constructor
     if api_key is None:
         env = config.env if config.env is not None else os.environ
         for key in _declared_env_keys(resolution.provider, adapters):
@@ -600,8 +609,9 @@ def _build_lm(resolution: Resolution, config: RouterConfig, adapters: Mapping[st
                 break
     if api_key is None and route is not None and route.default_key is not None:
         api_key = route.default_key
-    if not api_key and policy == "key-then-oauth":
-        return cls(**extra)  # self-resolving local OAuth constructor
+    if not api_key and policy == "oauth-unless-explicit":
+        # Nothing anywhere: the constructor raises the typed login-hint error.
+        return cls(**extra)
     if not api_key:
         env_keys = _declared_env_keys(resolution.provider, adapters)
         raise MissingCredentialError(

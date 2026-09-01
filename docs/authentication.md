@@ -33,7 +33,7 @@ only in the router, explicitly and inspectably.
 | `openai`, `openai-chat` | `OPENAI_API_KEY` | platform.openai.com/api-keys |
 | `anthropic` | `ANTHROPIC_API_KEY` | console.anthropic.com |
 | `gemini` | `GEMINI_API_KEY`, then `GOOGLE_API_KEY` | aistudio.google.com/apikey |
-| `xai` | `XAI_API_KEY` (subscription OAuth fallback) | console.x.ai |
+| `xai` | `XAI_API_KEY` (used only when no subscription login is stored) | console.x.ai |
 | `groq` | `GROQ_API_KEY` | console.groq.com/keys |
 | `openrouter` | `OPENROUTER_API_KEY` | openrouter.ai/keys |
 | `ollama`, `vllm`, `sglang` | — (keyless, placeholder sent) | — |
@@ -141,15 +141,19 @@ subscriptions, or the console URL where the provider's API key is
 created. (`login_xai()` remains as the concrete flow underneath.)
 
 After that, `XaiLM()` (and `grok-*` model strings through the router)
-work with no key: an explicit `api_key` or `XAI_API_KEY` always wins,
-and the stored subscription credential is the fallback. Refreshed
-tokens are written back atomically with owner-only permissions.
+work with no key, and the stored login **outranks** `XAI_API_KEY`: the
+subscription spends no money per token, and normal inference must never
+unexpectedly spend money. Only truly explicit configuration — an
+`api_key=` argument or a `RouterConfig(api_keys={"xai": ...})` entry —
+beats the stored login, because an instruction you write in this process
+must always win. Refreshed tokens are written back atomically with
+owner-only permissions.
 
-**Money warning, stated plainly:** because a key always beats the stored
-login, a stray `XAI_API_KEY` in your environment silently moves you from
-subscription (prepaid) to per-token billing. If your xAI usage suddenly
-costs money, run `lm15.doctor.explain_auth("xai")` — it shows exactly
-which credential rung won and which were shadowed.
+**Stated trade-off:** while a subscription login is stored, a set
+`XAI_API_KEY` is silently ignored (unusual — most SDKs let env vars win).
+If you need that key's account — team billing, its rate limits — pass it
+explicitly. When in doubt, run `lm15.doctor.explain_auth("xai")`: it
+shows exactly which credential rung won and which were shadowed.
 
 ## Keyless local servers
 

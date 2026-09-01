@@ -136,8 +136,9 @@ def _oauth_step(provider: str, path_override: str | None) -> AuthStep:
 
 
 def _xai_oauth_step(path_override: str | None, shadowed: bool) -> AuthStep:
-    """The final rung of xAI's key-then-oauth chain: the stored subscription
-    login (lm15's own store, then the Pi agent store)."""
+    """The stored xAI subscription login (lm15's own store, then the Pi
+    agent store) — the middle rung of the oauth-unless-explicit chain:
+    beaten only by an explicit api_keys entry, and itself beating env."""
     paths = (Path(path_override).expanduser(),) if path_override else _xai_store_paths()
     try:
         credential, path = _load_xai_with_source(path_override)
@@ -208,6 +209,14 @@ def explain_auth(
             )
         )
 
+    if policy == "oauth-unless-explicit":
+        # The stored subscription login outranks env keys (AUTH-1): it
+        # spends no money per token.  Only the explicit api_keys entry
+        # above can shadow it.
+        step = _xai_oauth_step(xai_credentials_path, shadowed=selected)
+        steps.append(step)
+        selected = selected or step.state == "selected"
+
     for key in _declared_env_keys(canonical, ADAPTERS):
         if environment.get(key):
             state = "shadowed" if selected else "selected"
@@ -232,10 +241,5 @@ def explain_auth(
             )
         )
         selected = True
-
-    if policy == "key-then-oauth":
-        step = _xai_oauth_step(xai_credentials_path, shadowed=selected)
-        steps.append(step)
-        selected = selected or step.state == "selected"
 
     return AuthReport(provider=canonical, steps=tuple(steps), configured=selected)

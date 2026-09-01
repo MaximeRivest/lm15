@@ -5,6 +5,10 @@ The router and doctor derive OAuth behavior from
 list left to drift (spec/auth.md AUTH-1, amended 2026-09-01).  ``login()``
 is the one door for interactive flows: it runs the flow lm15 owns (xai) and
 fails typed, with the exact fix, everywhere else.
+
+The oauth-unless-explicit chain (explicit config → stored subscription →
+env) is pinned hermetically here with a fake adapter, and against the
+contract fixtures in test_auth_resolution_contract.py.
 """
 from __future__ import annotations
 
@@ -12,9 +16,10 @@ import pytest
 
 from lm15.auth import login
 from lm15.errors import UnsupportedFeatureError
-from lm15.router import ADAPTERS, CHAT_PRESET_ROUTES, LMRouter, RouterConfig, _credential_policy
+from lm15.features import EndpointSupport, ProviderManifest
+from lm15.router import ADAPTERS, CHAT_PRESET_ROUTES, LMRouter, Resolution, RouterConfig, _build_lm, _credential_policy
 
-VALID_POLICIES = {"key", "oauth", "key-then-oauth"}
+VALID_POLICIES = {"key", "oauth", "oauth-unless-explicit"}
 
 
 class TestManifestPolicies:
@@ -26,10 +31,17 @@ class TestManifestPolicies:
         # The policy and the auth_modes tell one story, not two.
         assert _credential_policy("claude-code") == "oauth"
         assert _credential_policy("openai-codex") == "oauth"
-        assert _credential_policy("xai") == "key-then-oauth"
+        assert _credential_policy("xai") == "oauth-unless-explicit"
         assert _credential_policy("openai") == "key"
         assert _credential_policy("anthropic") == "key"
         assert _credential_policy("gemini") == "key"
+
+    def test_oauth_unless_explicit_adapters_expose_the_probe(self):
+        # The policy requires an offline stored-credential probe; a declared
+        # policy without the probe would crash the router at build time.
+        for provider, cls in ADAPTERS.items():
+            if cls.manifest.credential_policy == "oauth-unless-explicit":
+                assert callable(getattr(cls, "has_stored_credential", None)), provider
 
     def test_oauth_policies_declare_no_env_keys(self):
         # "oauth" means the env chain never runs; declaring env keys for an
@@ -42,9 +54,62 @@ class TestManifestPolicies:
         for provider in CHAT_PRESET_ROUTES:
             assert _credential_policy(provider) == "key"
 
-    def test_resolution_describe_names_the_xai_fallback(self):
-        resolution = LMRouter(RouterConfig(env={})).resolve("xai:grok-4")
-        assert "local OAuth credential" in resolution.describe()
+    def test_resolution_describe_names_the_xai_chain(self):
+        described = LMRouter(RouterConfig(env={})).resolve("xai:grok-4").describe()
+        assert "stored subscription OAuth credential" in described
+        # The chain reads in resolution order: explicit config, then the
+        # subscription, then the env var.
+        assert described.index("explicit api_keys") < described.index("subscription") < described.index("XAI_API_KEY")
+
+
+def _fake_xai_adapter(stored: bool):
+    class FakeXaiLM:
+        manifest = ProviderManifest(
+            provider="fakexai",
+            supports=EndpointSupport(),
+            auth_modes=("bearer", "xai-oauth"),
+            env_keys=("FAKE_XAI_KEY",),
+            credential_policy="oauth-unless-explicit",
+        )
+
+        def __init__(self, api_key=None, **kwargs):
+            self.api_key = api_key
+
+        @classmethod
+        def has_stored_credential(cls) -> bool:
+            return stored
+
+    return FakeXaiLM
+
+
+def _resolution() -> Resolution:
+    return Resolution(requested="fakexai:m", model="m", provider="fakexai", adapter="FakeXaiLM", source="prefix")
+
+
+class TestOauthUnlessExplicitChain:
+    """Hermetic pin of the build-time order: config → stored login → env."""
+
+    def test_explicit_config_beats_stored_login(self):
+        cls = _fake_xai_adapter(stored=True)
+        lm = _build_lm(_resolution(), RouterConfig(env={"FAKE_XAI_KEY": "envkey"}, api_keys={"fakexai": "configkey"}), {"fakexai": cls})
+        assert lm.api_key == "configkey"
+
+    def test_stored_login_beats_env(self):
+        cls = _fake_xai_adapter(stored=True)
+        lm = _build_lm(_resolution(), RouterConfig(env={"FAKE_XAI_KEY": "envkey"}), {"fakexai": cls})
+        assert lm.api_key is None  # self-resolving OAuth constructor: no money per token
+
+    def test_env_used_when_no_usable_login(self):
+        cls = _fake_xai_adapter(stored=False)
+        lm = _build_lm(_resolution(), RouterConfig(env={"FAKE_XAI_KEY": "envkey"}), {"fakexai": cls})
+        assert lm.api_key == "envkey"
+
+    def test_nothing_anywhere_defers_to_the_oauth_constructor(self):
+        # The real adapter raises the typed login-hint error here; the
+        # router's job is only to hand over to the self-resolving path.
+        cls = _fake_xai_adapter(stored=False)
+        lm = _build_lm(_resolution(), RouterConfig(env={}), {"fakexai": cls})
+        assert lm.api_key is None
 
 
 class TestUniformLogin:
