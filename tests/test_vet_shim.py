@@ -30,6 +30,7 @@ ALL_OPS = [
     "normalize_error",
     "parse_models_response",
     "parse_response",
+    "replay_live",
     "replay_stream",
     "serde_roundtrip",
     "surface_dump",

@@ -263,6 +263,34 @@ def op_parse_models_response(msg: JsonObject) -> JsonObject:
     return {"models": [serde.model_info_to_dict(m) for m in models]}
 
 
+def op_replay_live(msg: JsonObject) -> JsonObject:
+    """Live transcript replay: the pure websocket codec, no socket.
+
+    Three transformations per case, all driven by the recorded transcript:
+    setup frames from the LiveConfig, wire frames from each canonical
+    client event, and canonical server events from each verbatim recorded
+    server frame (empty list = housekeeping frame, deliberately ignored).
+    The harness performs all comparison; session mechanics (locking,
+    queues, iteration sugar) are per-language and stay out of scope.
+    """
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg))
+    config = serde.live_config_from_dict(msg["live_config"])
+    encoder = lm._live_encoder(config)
+    client_frames = [
+        encoder(serde.live_client_event_from_dict(event))
+        for event in msg.get("client_events", [])
+    ]
+    events = []
+    for frame_b64 in msg.get("server_frames_b64", []):
+        raw = base64.b64decode(frame_b64)
+        events.append([serde.live_server_event_to_dict(e) for e in lm._decode_live_server_event(raw)])
+    return {
+        "setup_frames": lm._live_setup_frames(config),
+        "client_frames": client_frames,
+        "events": events,
+    }
+
+
 def op_explain_auth(msg: JsonObject) -> JsonObject:
     """AUTH-7 resolution chain over harness-supplied inputs only.
 
@@ -368,6 +396,7 @@ HANDLERS: dict[str, Callable[[JsonObject], JsonObject]] = {
     "explain_auth": op_explain_auth,
     "build_models_request": op_build_models_request,
     "parse_models_response": op_parse_models_response,
+    "replay_live": op_replay_live,
 }
 
 

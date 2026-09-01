@@ -985,13 +985,23 @@ class OpenAILM(BaseProviderLM):
 
     def live(self, config: LiveConfig):
         ws = self._live_connect(self._live_url(config.model), self._live_headers())
-        ws.send(json.dumps(self._live_session_update_payload(config)))
+        for frame in self._live_setup_frames(config):
+            ws.send(json.dumps(frame))
 
         return WebSocketLiveSession(
             ws=ws,
-            encode_event=self._encode_live_client_event,
+            encode_event=self._live_encoder(config),
             decode_event=self._decode_live_server_event,
         )
+
+    # Pure live-codec hooks (uniform across providers; the vet shim's
+    # replay_live op and the async twin drive these, never the socket).
+
+    def _live_setup_frames(self, config: LiveConfig) -> list[dict[str, Any]]:
+        return [self._live_session_update_payload(config)]
+
+    def _live_encoder(self, config: LiveConfig):
+        return self._encode_live_client_event
 
     def _live_connect(self, url: str, headers: dict[str, str]):
         connect = require_websocket_sync_connect()

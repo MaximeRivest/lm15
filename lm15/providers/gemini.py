@@ -1138,7 +1138,8 @@ class GeminiLM(BaseProviderLM):
 
     def live(self, config: LiveConfig):
         ws = self._live_connect(self._live_url())
-        ws.send(json.dumps(self._live_setup_frame(config)))
+        for frame in self._live_setup_frames(config):
+            ws.send(json.dumps(frame))
         self._wait_for_setup_complete(ws)
         return WebSocketLiveSession(
             ws=ws,
@@ -1150,7 +1151,11 @@ class GeminiLM(BaseProviderLM):
         connect = require_websocket_sync_connect()
         return connect(url)
 
-    # Pure pieces shared by the sync session and the native async twin.
+    # Pure pieces shared by the sync session, the native async twin, and
+    # the vet shim's replay_live op (uniform hook: _live_setup_frames).
+
+    def _live_setup_frames(self, config: LiveConfig) -> list[dict[str, Any]]:
+        return [self._live_setup_frame(config)]
 
     def _live_setup_frame(self, config: LiveConfig) -> dict[str, Any]:
         payload = self._live_setup_payload(config)

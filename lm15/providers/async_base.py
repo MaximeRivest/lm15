@@ -366,10 +366,11 @@ class AsyncOpenAILM(AsyncBaseProviderLM):
         connect = require_websocket_async_connect()
         inner = self._inner
         ws = await connect(inner._live_url(config.model), additional_headers=inner._live_headers())
-        await ws.send(_json.dumps(inner._live_session_update_payload(config)))
+        for frame in inner._live_setup_frames(config):
+            await ws.send(_json.dumps(frame))
         return AsyncWebSocketLiveSession(
             ws=ws,
-            encode_event=inner._encode_live_client_event,
+            encode_event=inner._live_encoder(config),
             decode_event=inner._decode_live_server_event,
         )
 
@@ -498,7 +499,8 @@ class AsyncGeminiLM(AsyncBaseProviderLM):
         connect = require_websocket_async_connect()
         inner = self._inner
         ws = await connect(inner._live_url())
-        await ws.send(_json.dumps(inner._live_setup_frame(config)))
+        for frame in inner._live_setup_frames(config):
+            await ws.send(_json.dumps(frame))
         while not inner._live_setup_status(await ws.recv()):
             pass
         return AsyncWebSocketLiveSession(
