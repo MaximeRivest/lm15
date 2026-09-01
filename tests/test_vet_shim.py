@@ -23,10 +23,16 @@ pytestmark = pytest.mark.skipif(
 )
 
 ALL_OPS = [
+    "batch_op_build",
+    "batch_op_parse",
     "build_models_request",
     "build_request",
     "capabilities",
     "explain_auth",
+    "file_op_build",
+    "file_op_parse",
+    "generation_build",
+    "generation_parse",
     "normalize_error",
     "parse_models_response",
     "parse_response",

@@ -63,6 +63,10 @@ def adapter_for_provider(provider: str, api_key: str, base_url: str | None = Non
         from .providers.claude_code import ClaudeCodeLM
 
         return ClaudeCodeLM(**kwargs)
+    if provider == "xai":
+        from .providers.xai import XaiLM
+
+        return XaiLM(**kwargs)
     if provider in ("openai-codex", "openai_codex"):
         from .providers.openai_codex import OpenAICodexLM
 
@@ -263,6 +267,126 @@ def op_parse_models_response(msg: JsonObject) -> JsonObject:
     return {"models": [serde.model_info_to_dict(m) for m in models]}
 
 
+def _headers_list(msg: JsonObject) -> list:
+    headers = msg.get("headers") or {}
+    return [(str(k), str(v)) for k, v in headers.items()]
+
+
+def op_generation_build(msg: JsonObject) -> JsonObject:
+    """Wire request for image_generate / speech_generate (kind discriminates)."""
+    lm = adapter_for_provider(str(msg["provider"]), str(msg["api_key"]), _base_url(msg))
+    kind = str(msg["kind"])
+    if kind == "image":
+        request = serde.image_generation_request_from_dict(msg["generation_request"])
+        return normalize_transport_request(lm._image_generate_request(request))
+    if kind == "speech":
+        request = serde.speech_generation_request_from_dict(msg["generation_request"])
+        return normalize_transport_request(lm._speech_generate_request(request))
+    raise ValueError(f"unknown generation kind: {kind}")
+
+
+def op_generation_parse(msg: JsonObject) -> JsonObject:
+    """Canonical generation response from a pinned wire body (+ headers:
+    OpenAI speech is raw bytes typed only by content-type)."""
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg))
+    kind = str(msg["kind"])
+    status = int(msg["status"])
+    body = base64.b64decode(msg["body_b64"])
+    if status >= 400:
+        raise lm.normalize_error(status, body.decode("utf-8", "replace"))
+    resp = HttpResponse(status=status, reason="OK", headers=_headers_list(msg), body=body)
+    if kind == "image":
+        request = serde.image_generation_request_from_dict(msg["generation_request"])
+        return serde.image_generation_response_to_dict(lm._image_generation_from_response(request, resp))
+    if kind == "speech":
+        request = serde.speech_generation_request_from_dict(msg["generation_request"])
+        return serde.speech_generation_response_to_dict(lm._speech_generation_from_response(request, resp))
+    raise ValueError(f"unknown generation kind: {kind}")
+
+
+def op_file_op_build(msg: JsonObject) -> JsonObject:
+    """Wire request for one files-lifecycle operation (file_op discriminates)."""
+    lm = adapter_for_provider(str(msg["provider"]), str(msg["api_key"]), _base_url(msg))
+    op = str(msg["file_op"])
+    if op == "upload":
+        request = serde.file_upload_request_from_dict(msg["upload_request"])
+        return normalize_transport_request(lm._file_upload_request(request))
+    if op == "get":
+        return normalize_transport_request(lm._file_get_request(str(msg["file_id"])))
+    if op == "list":
+        cursor = msg.get("cursor")
+        return normalize_transport_request(lm._file_list_request(int(msg.get("limit", 20)), cursor))
+    if op == "delete":
+        return normalize_transport_request(lm._file_delete_request(str(msg["file_id"])))
+    if op == "download":
+        return normalize_transport_request(lm._file_download_request(str(msg["file_id"])))
+    raise ValueError(f"unknown file_op: {op}")
+
+
+def op_file_op_parse(msg: JsonObject) -> JsonObject:
+    """Canonical FileInfo / FilePage from a pinned wire body (kind discriminates)."""
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg))
+    kind = str(msg["kind"])
+    status = int(msg["status"])
+    body = base64.b64decode(msg["body_b64"]).decode("utf-8")
+    if status >= 400:
+        raise lm.normalize_error(status, body)
+    if kind == "info":
+        return {"file": serde.file_info_to_dict(lm._file_info_from_body(body))}
+    if kind == "page":
+        return {"page": serde.file_page_to_dict(lm._file_page_from_list_body(body))}
+    raise ValueError(f"unknown file parse kind: {kind}")
+
+
+def op_batch_op_build(msg: JsonObject) -> JsonObject:
+    """Wire request(s) for one batch operation (action discriminates).
+
+    Always returns {"requests": [...]}: upload may be zero requests
+    (single-step providers), result_fetches may be several (OpenAI's
+    output and error files).
+    """
+    lm = adapter_for_provider(str(msg["provider"]), str(msg["api_key"]), _base_url(msg))
+    action = str(msg["action"])
+    if action == "upload":
+        request = serde.batch_request_from_dict(msg["batch_request"])
+        upload = lm._batch_upload_request(request)
+        return {"requests": [] if upload is None else [normalize_transport_request(upload)]}
+    if action == "submit":
+        request = serde.batch_request_from_dict(msg["batch_request"])
+        upload_body = msg.get("upload_body")
+        return {"requests": [normalize_transport_request(lm._batch_submit_request(request, upload_body))]}
+    if action == "status":
+        return {"requests": [normalize_transport_request(lm._batch_status_request(str(msg["batch_id"])))]}
+    if action == "cancel":
+        return {"requests": [normalize_transport_request(lm._batch_cancel_request(str(msg["batch_id"])))]}
+    if action == "list":
+        return {"requests": [normalize_transport_request(lm._batch_list_request(int(msg.get("limit", 20))))]}
+    if action == "result_fetches":
+        fetches = lm._batch_result_fetches(msg["status_body"])
+        return {"requests": [normalize_transport_request(f) for f in fetches]}
+    raise ValueError(f"unknown batch action: {action}")
+
+
+def op_batch_op_parse(msg: JsonObject) -> JsonObject:
+    """Canonical batch snapshots from pinned wire bodies (kind discriminates)."""
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg))
+    kind = str(msg["kind"])
+    if kind == "job":
+        status = int(msg["status"])
+        body = base64.b64decode(msg["body_b64"]).decode("utf-8")
+        if status >= 400:
+            raise lm.normalize_error(status, body)
+        return {"job": serde.batch_job_to_dict(lm._batch_job_from_body(body))}
+    if kind == "list":
+        body = base64.b64decode(msg["body_b64"]).decode("utf-8")
+        return {"jobs": [serde.batch_job_to_dict(j) for j in lm._batch_jobs_from_list_body(body)]}
+    if kind == "entries":
+        fetched = tuple(base64.b64decode(b).decode("utf-8") for b in msg.get("fetched_b64", []))
+        entries = lm._batch_entries(msg["status_body"], fetched)
+        return {"entries": [serde.batch_entry_to_dict(e) for e in entries]}
+    raise ValueError(f"unknown batch parse kind: {kind}")
+
+
 def op_replay_live(msg: JsonObject) -> JsonObject:
     """Live transcript replay: the pure websocket codec, no socket.
 
@@ -397,6 +521,12 @@ HANDLERS: dict[str, Callable[[JsonObject], JsonObject]] = {
     "build_models_request": op_build_models_request,
     "parse_models_response": op_parse_models_response,
     "replay_live": op_replay_live,
+    "generation_build": op_generation_build,
+    "generation_parse": op_generation_parse,
+    "file_op_build": op_file_op_build,
+    "file_op_parse": op_file_op_parse,
+    "batch_op_build": op_batch_op_build,
+    "batch_op_parse": op_batch_op_parse,
 }
 
 
