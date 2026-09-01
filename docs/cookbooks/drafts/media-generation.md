@@ -175,6 +175,40 @@ Third provider, third receipt for the same rule: xAI returns **JPEG**
 and says so in an explicit `mime_type` field. Any adapter that
 hardcodes a media type is lying on at least one wire.
 
+### Edit an image
+
+All three image providers accept input images — "here is my picture,
+change this one thing" — and the input is a plain `ImagePart`, with the
+same addressing modes parts always have (inline data, URL, file id):
+
+```python
+from lm15 import ImagePart
+import base64
+
+resp = lm.image_generate(ImageGenerationRequest(
+    model="gpt-image-1-mini",
+    prompt="Add one small solid blue square in the bottom-right corner. "
+           "Keep everything else exactly the same.",
+    images=(ImagePart(media_type="image/png",
+                      data=base64.b64encode(Path("circle.png").read_bytes()).decode()),),
+))
+```
+
+Every claim above was verified the hard way: a red circle went in with
+that prompt on all three providers, and the outputs were
+pixel-checked — the circle survives (OpenAI 17% red, Gemini 20%, xAI
+20%) only when the wire honors the input. Two traps the checks caught:
+
+- **OpenAI edits live at a different endpoint** (`/v1/images/edits`,
+  multipart). The adapter switches endpoints when `images` is present;
+  the user never sees this.
+- **xAI's `generations` endpoint silently ignores image input** — no
+  error, just an unrelated picture. Only `/v1/images/edits` with
+  `"image": {"url": ...}` honors it (data URIs work; raw base64 is
+  rejected with a 400 naming `url` and `file_id` as the two options).
+  An adapter that posts input images to the wrong xAI endpoint fails
+  invisibly — exactly the class of bug the pixel check exists to catch.
+
 ### Providers that cannot draw
 
 ```python
@@ -217,6 +251,8 @@ documentation.
 | Image usage | token counts, image/text split | `usageMetadata`, modality split | `cost_in_usd_ticks` only — no tokens |
 | Image `id` / `model` echo | **absent** from response | `responseId`, `modelVersion` | absent |
 | Sizing vocabulary | pixels (`1024x1024`) | aspect ratio via `imageConfig` (`16:9` → 1344×768 captured) | quality/resolution tiers (per catalog pricing) |
+| Image editing | `POST /v1/images/edits`, multipart (verified by pixel check) | same chat call, image part + text (verified) | `POST /v1/images/edits`, `image:{url\|file_id}` (verified; `generations` ignores input images silently) |
+| Edit input addressing | uploaded bytes (multipart) | inline data / file URI parts | https URL, data URI, or `file_id` (xAI has a Files API) |
 | Speech endpoint | `POST /v1/audio/speech` | `generateContent` + `speechConfig` on `*-tts` models | **none** (voice is app-only) |
 | Speech response | **raw bytes**, truth in `content-type` header | `inlineData` part with full MIME (`audio/L16;codec=pcm;rate=24000`) | — |
 | Speech default format | `audio/mpeg` (captured) | PCM only, no knob | — |
@@ -263,15 +299,24 @@ documentation.
 8. **`id` and `model` stay optional in responses.** Captured: OpenAI
    images return neither; Gemini returns both (`responseId`,
    `modelVersion`).
-9. **Multi-image (`n`), quality, background ride `extensions`.**
+9. **Multi-image (`n`), quality, background, masks ride `extensions`.**
    OpenAI-only knobs today; promote later if a second wire grows them.
-10. **Serde kinds** for the four request/response types, with media
+10. **`ImageGenerationRequest` gains `images: tuple[ImagePart, ...]`**
+    (input images for editing), verified honored on all three wires by
+    pixel-checking a controlled edit. Adapter mapping: OpenAI → switch
+    to `/v1/images/edits` (multipart); Gemini → image parts in the
+    same `generateContent` call; xAI → `/v1/images/edits` with
+    `image:{url}` (data URI for inline bytes, `file_id` for file
+    references) — never `generations`, which ignores input images
+    without an error. xAI takes exactly one input image: more than one
+    raises, per the no-silent-drop rule.
+11. **Serde kinds** for the four request/response types, with media
     payloads as base64 fields exactly as parts already serialize.
     This closes most of the "types without kinds" debt.
-11. **Video is out of scope here** and reuses the ticket pattern when
+12. **Video is out of scope here** and reuses the ticket pattern when
     it comes. Named reason for not bundling it: sync-in, job-out are
     different teaching shapes, and this page teaches the sync pair.
-12. **Chat-door generation stays chat.** Gemini image models used in
+13. **Chat-door generation stays chat.** Gemini image models used in
     ordinary `complete()` calls return image parts inside a normal
     `Response` — that already works and stays untouched. The dedicated
     verbs exist for the dedicated intent, not as the only door.
