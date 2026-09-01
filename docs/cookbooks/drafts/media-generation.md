@@ -4,8 +4,9 @@
 > `image_generate` / `audio_generate` code is a prototype that predates
 > the contract discipline; this page decides the shape it should have
 > before that code is rebuilt. Unlike the batch draft, every `output`
-> block here is **real**: captured live on 2026-09-01 against OpenAI
-> and Gemini (transcripts in `curl-fixtures/genmedia-2026-09-01/`).
+> block here is **real**: captured live on 2026-09-01 against OpenAI,
+> Gemini, and xAI (transcripts in `curl-fixtures/genmedia-2026-09-01/`
+> and `curl-fixtures/xai-2026-09-01/`).
 > The design appendix desk-checks every field against those captures
 > and lists the ratifiable decisions. Do not link this from the
 > cookbook index until the rebuild lands.
@@ -16,11 +17,12 @@
 
 **Problem** — Sometimes the thing you want back is not text. You want
 a picture of the diagram you described, or your paragraph read aloud.
-Both OpenAI and Gemini sell this; Anthropic does not. The wires could
+OpenAI, Gemini, and xAI sell this; Anthropic does not. The wires could
 not look more different — OpenAI has a dedicated `/images` endpoint
-and a raw-bytes `/audio/speech` endpoint, while Gemini does both
-through the same chat call it uses for everything — but the *shape* of
-the exchange is identical: a prompt goes in, media parts come out.
+and a raw-bytes `/audio/speech` endpoint, Gemini does everything
+through the same chat call it uses for text, and xAI mirrors OpenAI's
+image endpoint — but the *shape* of the exchange is identical: a
+prompt goes in, media parts come out.
 
 ```text
 image_generate(request)  -> ImageGenerationResponse   images as ImagePart
@@ -154,6 +156,25 @@ on Gemini **raises** instead of being dropped: lm15 never accepts a
 field it cannot deliver (`format` rides `extensions`-free only where
 the wire has a slot for it, same rule as batch labels on Anthropic).
 
+### The same call on Grok
+
+```python
+lm = router.lm("grok-imagine-image")  # subscription OAuth or XAI_API_KEY
+
+resp = lm.image_generate(ImageGenerationRequest(
+    model="grok-imagine-image",
+    prompt="A simple flat red circle centered on a white background",
+))
+print(resp.images[0].media_type)
+```
+```output
+image/jpeg
+```
+
+Third provider, third receipt for the same rule: xAI returns **JPEG**
+and says so in an explicit `mime_type` field. Any adapter that
+hardcodes a media type is lying on at least one wire.
+
 ### Providers that cannot draw
 
 ```python
@@ -168,8 +189,12 @@ instead of routing your prompt somewhere you did not choose.
 
 ### What about video?
 
-Sora (OpenAI) and Veo (Gemini) are **jobs**, not calls — you submit,
-wait minutes, then download. That is the batch ticket pattern
+Video is a **job**, not a call, on every wire that sells it — Sora
+(OpenAI), Veo (Gemini, `predictLongRunning`), and grok-imagine (xAI),
+which was captured live for this draft: `POST /v1/videos/generations`
+returns `{"request_id": ...}` in one second; `GET /v1/videos/{id}`
+reports `pending` with a progress percentage; ~30 seconds later it is
+`done` with a public MP4 URL. That is the batch ticket pattern
 ([recipe 12](12-batch-jobs.md)) applied to a different factory, and it
 gets its own design pass. This page deliberately covers only the
 synchronous pair.
@@ -184,20 +209,21 @@ documentation.
 
 ### What the wires actually do
 
-| Fact | OpenAI | Gemini |
-|---|---|---|
-| Image endpoint | `POST /v1/images/generations` | `generateContent` on `*-image` models |
-| Image encoding | `data[n].b64_json`, format in `output_format` | `inlineData` part, format in `mimeType` |
-| Text alongside image | never | routinely (captured) |
-| Image usage | token counts, image/text split | `usageMetadata`, modality split |
-| Image `id` / `model` echo | **absent** from response | `responseId`, `modelVersion` |
-| Sizing vocabulary | pixels (`1024x1024`) | aspect ratio via `imageConfig` (`16:9` → 1344×768 captured) |
-| Speech endpoint | `POST /v1/audio/speech` | `generateContent` + `speechConfig` on `*-tts` models |
-| Speech response | **raw bytes**, truth in `content-type` header | `inlineData` part with full MIME (`audio/L16;codec=pcm;rate=24000`) |
-| Speech default format | `audio/mpeg` (captured) | PCM only, no knob |
-| `voice` required? | no (captured: server default exists) | no (captured) |
-| Speech usage | none (raw body) | `usageMetadata` |
-| DALL·E / Imagen | **gone from the model list** | **absent from the API** |
+| Fact | OpenAI | Gemini | xAI |
+|---|---|---|---|
+| Image endpoint | `POST /v1/images/generations` | `generateContent` on `*-image` models | `POST /v1/images/generations` (OpenAI shape) |
+| Image encoding | `data[n].b64_json`, format in `output_format` | `inlineData` part, format in `mimeType` | `data[n].b64_json` + explicit `mime_type` (**JPEG**, captured) |
+| Text alongside image | never | routinely (captured) | never |
+| Image usage | token counts, image/text split | `usageMetadata`, modality split | `cost_in_usd_ticks` only — no tokens |
+| Image `id` / `model` echo | **absent** from response | `responseId`, `modelVersion` | absent |
+| Sizing vocabulary | pixels (`1024x1024`) | aspect ratio via `imageConfig` (`16:9` → 1344×768 captured) | quality/resolution tiers (per catalog pricing) |
+| Speech endpoint | `POST /v1/audio/speech` | `generateContent` + `speechConfig` on `*-tts` models | **none** (voice is app-only) |
+| Speech response | **raw bytes**, truth in `content-type` header | `inlineData` part with full MIME (`audio/L16;codec=pcm;rate=24000`) | — |
+| Speech default format | `audio/mpeg` (captured) | PCM only, no knob | — |
+| `voice` required? | no (captured: server default exists) | no (captured) | — |
+| Speech usage | none (raw body) | `usageMetadata` | — |
+| Video | Sora job API | Veo via `predictLongRunning` | submit → poll → MP4 URL (captured, ~30 s) |
+| DALL·E / Imagen | **gone from the model list** | **absent from the API** | — |
 
 ### Decisions to ratify
 
@@ -211,8 +237,9 @@ documentation.
    `output_format`. OpenAI speech: the `content-type` header. Gemini:
    `inlineData.mimeType` verbatim — including the parameterized
    `audio/L16;codec=pcm;rate=24000`, which `AudioPart` already accepts.
-   The prototype hardcodes `image/png`; captured truth made that a
-   coincidence, not a fact.
+   xAI images: `mime_type`, and it is JPEG. The prototype hardcodes
+   `image/png`; captured truth made that a coincidence on two wires
+   and a lie on the third.
 3. **Kill the client-side defaults.** The prototype injects
    `voice="alloy"` and `format="wav"`. Both captured as optional on
    the wire with server defaults. lm15 sending its own defaults
@@ -223,9 +250,11 @@ documentation.
    Gemini returns commentary text next to the image. Without the
    field, canonical parsing silently discards model output — the one
    sin the contract exists to prevent. OpenAI sets it to `None`.
-6. **Parse usage.** Both image wires bill real tokens and say so; the
-   prototype returns an empty `Usage`. OpenAI speech genuinely has
-   none — empty `Usage` is honest there.
+6. **Parse usage.** OpenAI and Gemini image wires bill real tokens and
+   say so; the prototype returns an empty `Usage`. OpenAI speech
+   genuinely has none — empty `Usage` is honest there. xAI reports
+   only a dollar-tick cost, no tokens: empty `Usage` plus the verbatim
+   figure in `provider_data`.
 7. **`size` is canonical, vocabulary is provider's.** Precedent:
    `model` and `voice` already work this way. OpenAI gets it verbatim;
    Gemini gets it as `imageConfig.aspectRatio`. Trade-off stated: a
