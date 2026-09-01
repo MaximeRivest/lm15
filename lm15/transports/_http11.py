@@ -53,6 +53,7 @@ def build_request_head(
     """
     _validate_field("method", method)
     _validate_field("target", target)
+    _validate_field("host", host)
     for k, v in headers:
         _validate_field(f"header name ({k})", k)
         _validate_field(f"header value ({k})", v)

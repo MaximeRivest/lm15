@@ -116,6 +116,15 @@ class TestBuildRequestHead:
                 port=443, is_tls=True, headers=[], body_length=None,
             )
 
+    def test_forbids_bare_newline_in_host(self) -> None:
+        # The Host header is built from the host argument; it must get the
+        # same CRLF-injection screening as caller-supplied headers.
+        with pytest.raises(ProtocolError):
+            build_request_head(
+                method="GET", target="/", host="example.com\r\nInjected: yes",
+                port=443, is_tls=True, headers=[], body_length=None,
+            )
+
 
 class TestResponseHeadParser:
     def _feed(self, parser: ResponseHeadParser, data: bytes) -> bool:

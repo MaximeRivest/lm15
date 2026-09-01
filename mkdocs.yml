@@ -63,6 +63,7 @@ nav:
       - Model profiles & compat: using-model-profiles.md
       - Transports: using-the-transports.md
       - Design rationale: design-rationale.md
+      - Security assessment: security-assessment.md
   - Cookbooks:
       - Overview: cookbooks/index.md
       - Essentials:

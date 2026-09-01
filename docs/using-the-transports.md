@@ -215,6 +215,12 @@ For local development only, verification can be disabled:
 transport = StdlibTransport(verify=False)
 ```
 
+!!! danger "Never ship `verify=False`"
+    Disabling verification removes the only proof that you are talking
+    to the real server. Anyone on the network path can then read and
+    rewrite your traffic, including your API keys. For private test
+    CAs, use `ca_bundle=` instead — it keeps verification on.
+
 ## Headers and defaults
 
 The HTTP/1.1 codec adds defaults only when the caller did not provide them:
