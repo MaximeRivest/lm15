@@ -129,9 +129,12 @@ DEFAULT_RULES: tuple[RouteRule, ...] = (
     RouteRule("o3", "openai", note="OpenAI o3 reasoning family"),
     RouteRule("o4", "openai", note="OpenAI o4 reasoning family"),
     RouteRule("gemini-", "gemini", note="Google Gemini family"),
+    RouteRule("gemma-", "gemini", note="Google Gemma open models, served by the Gemini API (live /models listing 2026-09-01)"),
+    RouteRule("nano-banana", "gemini", note="Google image models on the Gemini API (live /models listing 2026-09-01)"),
     RouteRule("grok-", "xai", note="xAI Grok family (XAI_API_KEY or subscription OAuth)"),
     RouteRule("sora-", "openai", note="OpenAI Sora video generation"),
     RouteRule("veo-", "gemini", note="Google Veo video generation"),
+    RouteRule("chat-latest", "openai", note="OpenAI rolling chat alias (live /models listing 2026-09-01)"),
 )
 
 

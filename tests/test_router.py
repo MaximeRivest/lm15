@@ -726,3 +726,14 @@ class TestProviderStringGrammar:
             _router().resolve("antropic:claude-sonnet-4-5")
         assert "anthropic" in str(exc_info.value)
         assert "did you mean" in str(exc_info.value).lower()
+
+
+def test_rules_added_from_live_listing_2026_09_01() -> None:
+    # Evidence: the providers' own /models listings, 2026-09-01
+    # (lm15-dev/model-listings/listing-2026-09-01.json).
+    router = LMRouter()
+    assert router.resolve("gemma-4-31b-it").provider == "gemini"
+    assert router.resolve("nano-banana-pro-preview").provider == "gemini"
+    assert router.resolve("chat-latest").provider == "openai"
+    # The new rules must not shadow the explicit prefix form.
+    assert router.resolve("openai:gemma-4-31b-it").provider == "openai"

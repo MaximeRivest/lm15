@@ -53,11 +53,14 @@ def test_anthropic_spellings_and_store_raises() -> None:
         lm._payload(req(store=False), stream=False)
 
 
-def test_gemini_store_maps_and_others_raise() -> None:
+def test_gemini_store_and_service_tier_map_user_id_raises() -> None:
+    # serviceTier joined GenerateContent between the April and September
+    # 2026 doc snapshots; verified live 2026-09-01 (accepted, echoed in
+    # usageMetadata.serviceTier; unknown values rejected with HTTP 400).
     lm = GeminiLM(api_key="k", transport=FakeTransport([]))
     assert lm._payload(req(store=False))["store"] is False
-    with pytest.raises(UnsupportedFeatureError, match="service_tier"):
-        lm._payload(req(service_tier="auto"))
+    assert lm._payload(req(service_tier="flex"))["serviceTier"] == "flex"
+    assert "serviceTier" not in lm._payload(req())
     with pytest.raises(UnsupportedFeatureError, match="user_id"):
         lm._payload(req(user_id="u-1"))
 

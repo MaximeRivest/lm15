@@ -121,6 +121,19 @@ class XaiLM(OpenAIChatLM):
                 "Omit the reasoning config, or pick a non-reasoning Grok model.",
                 provider=self.provider,
             )
+        # docs.x.ai (models page, 2026-09-01): "logprobs and top_logprobs are
+        # not supported by models grok-4.20 and newer. These fields will be
+        # silently ignored if set."  Verified live 2026-09-01 on grok-4.6:
+        # HTTP 200, the choice carries no logprobs key at all.  Every Grok
+        # model served today is 4.20 or newer, so sending the field is a
+        # guaranteed silent no-op — raise instead.
+        if request.config.logprobs is not None:
+            raise UnsupportedFeatureError(
+                "xai: config.logprobs is not supported — grok-4.20 and newer "
+                "silently ignore logprobs/top_logprobs on the wire (docs.x.ai, "
+                "verified live 2026-09-01). OpenAI and Gemini carry logprobs.",
+                provider=self.provider,
+            )
         return super()._payload(request, stream)
 
     def _image_generate_request(self, request: ImageGenerationRequest) -> TransportRequest:

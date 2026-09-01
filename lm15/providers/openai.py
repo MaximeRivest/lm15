@@ -131,6 +131,36 @@ def _attach_unmapped(provider_data: dict[str, Any], unmapped: list[dict[str, str
     return out
 
 
+def _cache_breakpoint_index(request: Request, cache_control: str) -> int | None:
+    """Message index that carries the explicit prompt-cache breakpoint.
+
+    ``CacheConfig.prefix_until_index`` marks the end of the reusable prefix.
+    Both OpenAI dialects place ``prompt_cache_breakpoint`` on a text
+    content block (gpt-5.6+); the mapping is active only when the compat
+    policy names OpenAI's cache control (compat servers that declare
+    ``cache_control="none"`` get nothing, as for prompt_cache_key).  The
+    index is clamped to the last message, the Anthropic adapter's
+    precedent.
+    """
+    cache_cfg = request.config.cache
+    if cache_cfg is None or cache_cfg.mode == "off" or cache_cfg.prefix_until_index is None:
+        return None
+    if cache_control != "openai":
+        return None
+    return min(cache_cfg.prefix_until_index, len(request.messages) - 1)
+
+
+def _breakpoint_unsupported(provider: str, index: int, role: str) -> UnsupportedFeatureError:
+    return UnsupportedFeatureError(
+        f"{provider}: cache.prefix_until_index={index} points at a {role} message "
+        "whose last block is not text — the wire carries prompt_cache_breakpoint "
+        "on text input blocks only. Point the prefix at a user/developer message "
+        "that ends with text, or omit prefix_until_index (implicit caching still "
+        "applies).",
+        provider=provider,
+    )
+
+
 def _record_unmapped(unmapped: list[dict[str, str]], path: str, typ: Any) -> None:
     unmapped.append({"path": path, "type": str(typ or "<missing>")})
 
@@ -451,9 +481,13 @@ class OpenAILM(BaseProviderLM):
         self,
         messages: tuple[Message, ...],
         compat: ResolvedOpenAIResponsesCompat,
+        *,
+        breakpoint_index: int | None = None,
     ) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
-        for msg in messages:
+        for msg_index, msg in enumerate(messages):
+            if msg_index == breakpoint_index and msg.role in ("assistant", "tool"):
+                raise _breakpoint_unsupported(self.provider, msg_index, msg.role)
             if msg.role == "tool":
                 for part in msg.parts:
                     if isinstance(part, ToolResultPart):
@@ -483,6 +517,17 @@ class OpenAILM(BaseProviderLM):
                     for part in msg.parts
                     if not isinstance(part, (ToolCallPart, ToolResultPart))
                 ]
+            if msg_index == breakpoint_index:
+                # CacheConfig.prefix_until_index -> an explicit prompt-cache
+                # breakpoint on the last text block of that message (the
+                # Anthropic cache_control precedent).  The Responses wire
+                # carries prompt_cache_breakpoint on input_text blocks only
+                # (gpt-5.6+, verified live 2026-09-01: cache_write_tokens on
+                # the first call, cached_tokens on the next; pre-5.6 models
+                # reject with HTTP 400 — that loud failure is the contract).
+                if not content_parts or content_parts[-1].get("type") != "input_text":
+                    raise _breakpoint_unsupported(self.provider, msg_index, msg.role)
+                content_parts[-1]["prompt_cache_breakpoint"] = {"mode": "explicit"}
             if content_parts:
                 role = msg.role
                 if role == "developer":
@@ -537,7 +582,11 @@ class OpenAILM(BaseProviderLM):
         compat = self._compat(request)
         payload: dict[str, Any] = {
             "model": request.model,
-            "input": self._build_input(request.messages, compat),
+            "input": self._build_input(
+                request.messages,
+                compat,
+                breakpoint_index=_cache_breakpoint_index(request, compat.cache_control),
+            ),
             "stream": stream,
         }
         if request.system:
@@ -751,6 +800,7 @@ class OpenAILM(BaseProviderLM):
             total_tokens=usage_data.get("total_tokens"),
             reasoning_tokens=output_details.get("reasoning_tokens"),
             cache_read_tokens=input_details.get("cached_tokens"),
+            cache_write_tokens=input_details.get("cache_write_tokens"),
             input_audio_tokens=input_details.get("audio_tokens"),
             output_audio_tokens=output_details.get("audio_tokens"),
         )
@@ -877,6 +927,7 @@ class OpenAILM(BaseProviderLM):
                 total_tokens=usage_data.get("total_tokens"),
                 reasoning_tokens=output_details.get("reasoning_tokens"),
                 cache_read_tokens=input_details.get("cached_tokens"),
+                cache_write_tokens=input_details.get("cache_write_tokens"),
                 input_audio_tokens=input_details.get("audio_tokens"),
                 output_audio_tokens=output_details.get("audio_tokens"),
             )
@@ -1027,6 +1078,7 @@ class OpenAILM(BaseProviderLM):
                 total_tokens=usage_data.get("total_tokens"),
                 reasoning_tokens=u_out.get("reasoning_tokens"),
                 cache_read_tokens=u_in.get("cached_tokens"),
+                cache_write_tokens=u_in.get("cache_write_tokens"),
                 input_audio_tokens=u_in.get("audio_tokens"),
                 output_audio_tokens=u_out.get("audio_tokens"),
             )
@@ -1223,6 +1275,7 @@ class OpenAILM(BaseProviderLM):
                     total_tokens=usage_data.get("total_tokens"),
                     reasoning_tokens=u_out.get("reasoning_tokens"),
                     cache_read_tokens=u_in.get("cached_tokens"),
+                    cache_write_tokens=u_in.get("cache_write_tokens"),
                     input_audio_tokens=u_in.get("audio_tokens"),
                     output_audio_tokens=u_out.get("audio_tokens"),
                 )))

@@ -264,3 +264,21 @@ def test_reasoning_off_raises_unsupported():
     )
     with pytest.raises(UnsupportedFeatureError, match="reasoning cannot be disabled"):
         lm.build_request(request, stream=False)
+
+
+def test_logprobs_raises_unsupported():
+    # docs.x.ai (2026-09-01): "logprobs and top_logprobs are not supported
+    # by models grok-4.20 and newer. These fields will be silently ignored
+    # if set."  Verified live 2026-09-01 on grok-4.6: HTTP 200, the choice
+    # carries no logprobs key.  Every served Grok model is 4.20+, so the
+    # inherited chat-dialect mapping would be a guaranteed silent no-op.
+    from lm15.types import Config, Message, Request
+
+    lm = XaiLM(api_key="xai-test")
+    request = Request(
+        model="grok-4.6",
+        messages=(Message.user("hello"),),
+        config=Config(logprobs=0),
+    )
+    with pytest.raises(UnsupportedFeatureError, match="logprobs"):
+        lm.build_request(request, stream=False)

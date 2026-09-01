@@ -686,17 +686,18 @@ class GeminiLM(BaseProviderLM):
             self._apply_prompt_cache(request, payload)
 
         # Promoted cross-provider knobs (changes/2026-09-01-extensions-burn-down):
-        # store maps verbatim (same wire key as OpenAI, verified live);
-        # service_tier and user_id have no Gemini wire field — raise, never
-        # silently drop.
+        # store maps verbatim (same wire key as OpenAI, verified live).
+        # service_tier maps to the top-level `serviceTier` enum
+        # (unspecified|standard|flex|priority) — added to GenerateContent
+        # between the April and September 2026 doc snapshots and verified
+        # live 2026-09-01 (accepted + echoed in usageMetadata.serviceTier;
+        # an unknown value is rejected with HTTP 400 INVALID_ARGUMENT, so
+        # the server validates the field).  user_id has no Gemini wire
+        # field — raise, never silently drop.
         if request.config.store is not None:
             payload["store"] = request.config.store
         if request.config.service_tier is not None:
-            raise UnsupportedFeatureError(
-                "gemini: config.service_tier is not supported — GenerateContent has no "
-                "service-tier field (OpenAI and Anthropic carry it)",
-                provider=self.provider,
-            )
+            payload["serviceTier"] = request.config.service_tier
         if request.config.user_id is not None:
             raise UnsupportedFeatureError(
                 "gemini: config.user_id is not supported — GenerateContent has no "

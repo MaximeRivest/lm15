@@ -54,7 +54,13 @@ from .common import (
     parse_json_object,
     parts_to_text,
 )
-from .openai import OpenAILM, _attach_unmapped, _record_unmapped
+from .openai import (
+    OpenAILM,
+    _attach_unmapped,
+    _breakpoint_unsupported,
+    _cache_breakpoint_index,
+    _record_unmapped,
+)
 
 _DEFAULT_BASE_URL = "https://api.openai.com/v1"
 
@@ -76,13 +82,15 @@ _FINISH_REASON_MAP: dict[str, str] = {
 }
 
 
-def _chat_content_parts(msg: Message) -> str | list[dict[str, Any]]:
+def _chat_content_parts(msg: Message, *, force_array: bool = False) -> str | list[dict[str, Any]]:
     """Map non-assistant message parts to chat-completions content.
 
     Single text part → plain string; anything multimodal → content array.
+    ``force_array`` keeps the array form for a lone text part (a cache
+    breakpoint rides on a text content block, never on a bare string).
     """
     parts = [p for p in msg.parts if not isinstance(p, (ToolCallPart, ToolResultPart))]
-    if len(parts) == 1 and isinstance(parts[0], TextPart):
+    if len(parts) == 1 and isinstance(parts[0], TextPart) and not force_array:
         return parts[0].text
     out: list[dict[str, Any]] = []
     for part in parts:
@@ -133,6 +141,7 @@ def _usage_from_chat(usage_data: dict[str, Any]) -> Usage:
         total_tokens=usage_data.get("total_tokens"),
         reasoning_tokens=completion_details.get("reasoning_tokens"),
         cache_read_tokens=prompt_details.get("cached_tokens"),
+        cache_write_tokens=prompt_details.get("cache_write_tokens"),
         input_audio_tokens=prompt_details.get("audio_tokens"),
         output_audio_tokens=completion_details.get("audio_tokens"),
     )
@@ -232,7 +241,10 @@ class OpenAIChatLM(BaseProviderLM):
             system_text = request.system if isinstance(request.system, str) else parts_to_text(request.system)
             messages.append({"role": compat.instruction_role, "content": system_text})
 
-        for msg in request.messages:
+        breakpoint_index = _cache_breakpoint_index(request, compat.cache_control)
+        for msg_index, msg in enumerate(request.messages):
+            if msg_index == breakpoint_index and msg.role in ("assistant", "tool"):
+                raise _breakpoint_unsupported(self.provider, msg_index, msg.role)
             if msg.role == "tool":
                 for part in msg.parts:
                     if isinstance(part, ToolResultPart):
@@ -281,7 +293,16 @@ class OpenAIChatLM(BaseProviderLM):
                 continue
 
             role = compat.instruction_role if msg.role == "developer" else msg.role
-            content = _chat_content_parts(msg)
+            at_breakpoint = msg_index == breakpoint_index
+            content = _chat_content_parts(msg, force_array=at_breakpoint)
+            if at_breakpoint:
+                # Same rule as the Responses dialect: the breakpoint rides on
+                # the last text content block of the prefix message
+                # (chat--create.md: ChatCompletionContentPartText carries
+                # prompt_cache_breakpoint).
+                if not isinstance(content, list) or not content or content[-1].get("type") != "text":
+                    raise _breakpoint_unsupported(self.provider, msg_index, msg.role)
+                content[-1]["prompt_cache_breakpoint"] = {"mode": "explicit"}
             if content or content == "":
                 messages.append({"role": role, "content": content})
         return messages
