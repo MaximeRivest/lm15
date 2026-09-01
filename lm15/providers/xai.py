@@ -20,6 +20,7 @@ Credential resolution order:
 from __future__ import annotations
 
 import base64
+import json
 import os
 from typing import Any, ClassVar
 
@@ -122,6 +123,16 @@ class XaiLM(OpenAIChatLM):
         return ImageGenerationResponse(images=tuple(images), usage=Usage(), provider_data=data)
 
     def normalize_error(self, status: int, body: str) -> ProviderError:
+        # xAI's own envelope is {"code": str, "error": str} (captured
+        # 2026-09-01: model-not-found 400, unauthenticated 401) — refold it
+        # into the OpenAI shape so the shared mapping preserves the wire
+        # code as provider_code instead of dropping it.
+        try:
+            data = json.loads(body)
+            if isinstance(data, dict) and isinstance(data.get("error"), str):
+                body = json.dumps({"error": {"message": data["error"], "code": data.get("code")}})
+        except ValueError:
+            pass
         error = super().normalize_error(status, body)
         # Auth failures on the subscription path guide the user back to
         # login; on the API-key path the generic message already fits.

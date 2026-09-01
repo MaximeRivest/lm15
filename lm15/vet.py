@@ -451,7 +451,32 @@ def op_surface_dump(msg: JsonObject) -> JsonObject:
     return {
         "types": _reflect_types(),
         "enums": _reflect_enums(),
+        "providers": _reflect_providers(),
     }
+
+
+def _reflect_providers() -> JsonObject:
+    """Every first-class adapter's manifest: who supports what, by reflection.
+
+    This is the support matrix the contract pins (spec/support-matrix.json):
+    a port that silently disagrees about endpoint support fails the audit,
+    not a user at runtime.
+    """
+    from .router import ADAPTERS
+
+    out: JsonObject = {}
+    for provider in sorted(ADAPTERS):
+        manifest = ADAPTERS[provider].manifest
+        supports = manifest.supports
+        out[provider] = {
+            "supports": {
+                f.name: sorted(getattr(supports, f.name)) if f.name == "extra" else getattr(supports, f.name)
+                for f in dataclasses.fields(supports)
+            },
+            "auth_modes": list(manifest.auth_modes),
+            "env_keys": list(manifest.env_keys),
+        }
+    return out
 
 
 def _reflect_types() -> JsonObject:
