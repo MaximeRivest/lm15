@@ -58,6 +58,15 @@ from .openai import OpenAILM, _attach_unmapped, _record_unmapped
 
 _DEFAULT_BASE_URL = "https://api.openai.com/v1"
 
+# Canonical builtin tool name → Groq server-executed tool type (compat
+# builtin_tools="groq"; both verified live 2026-09-01: Groq runs them
+# server-side and reports the trace in message.executed_tools, which
+# stays in provider_data per MAP-1).
+_GROQ_BUILTIN_MAP: dict[str, str] = {
+    "web_search": "browser_search",
+    "code_execution": "code_interpreter",
+}
+
 _FINISH_REASON_MAP: dict[str, str] = {
     "stop": "stop",
     "length": "length",
@@ -277,6 +286,36 @@ class OpenAIChatLM(BaseProviderLM):
                 messages.append({"role": role, "content": content})
         return messages
 
+    def _builtin_tool_payload(self, tool: BuiltinTool, compat: ResolvedOpenAIChatCompat) -> dict[str, Any]:
+        """Map a BuiltinTool for the chat dialect, or raise.
+
+        The base Chat Completions wire carries function/custom tools only,
+        and some compat servers silently IGNORE unknown tool types
+        (OpenRouter returned 200 with no search, verified live 2026-09-01)
+        — passthrough would fabricate wire shapes and silent no-ops, so
+        every unproven target raises.
+        """
+        if compat.builtin_tools == "groq":
+            wire_type = _GROQ_BUILTIN_MAP.get(tool.name)
+            if wire_type is None:
+                raise UnsupportedFeatureError(
+                    f"{self.provider}: builtin tool {tool.name!r} has no Groq wire "
+                    f"mapping — supported: {sorted(_GROQ_BUILTIN_MAP)}",
+                    provider=self.provider,
+                )
+            entry: dict[str, Any] = {"type": wire_type}
+            if tool.config:
+                entry.update(tool.config)
+            return entry
+        raise UnsupportedFeatureError(
+            f"{self.provider}: builtin tool {tool.name!r} is not supported on this "
+            "server — the Chat Completions wire carries function tools only, and "
+            "unproven servers may silently ignore unknown tool types. Use "
+            "compat='groq' for Groq's server-executed tools, or the OpenAI "
+            "Responses / Anthropic / Gemini providers",
+            provider=self.provider,
+        )
+
     def _tool_choice_payload(self, request: Request) -> Any:
         tc = request.config.tool_choice
         if tc is None:
@@ -347,6 +386,8 @@ class OpenAIChatLM(BaseProviderLM):
                     if compat.strict_tools == "include":
                         function_payload["strict"] = False
                     tools_wire.append({"type": "function", "function": function_payload})
+                elif isinstance(tool, BuiltinTool):
+                    tools_wire.append(self._builtin_tool_payload(tool, compat))
             if tools_wire:
                 payload["tools"] = tools_wire
         tool_choice = self._tool_choice_payload(request)

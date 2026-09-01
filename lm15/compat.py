@@ -217,6 +217,14 @@ OpenAIChatThinkingFormat = Literal[
     "qwen_chat_template",
     "zai",
 ]
+# BuiltinTool policy for the chat dialect. The base Chat Completions wire
+# carries function/custom tools ONLY (doc: chat--create.md), and some
+# compat servers silently IGNORE unknown tool types (OpenRouter, verified
+# live 2026-09-01) — so "reject" (raise) is the only safe default.
+# "groq" maps canonical builtin names onto Groq's server-executed tool
+# types (browser_search / code_interpreter, both verified live
+# 2026-09-01).
+OpenAIChatBuiltinTools = Literal["auto", "reject", "groq"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +245,7 @@ class OpenAIChatCompat:
     thinking_replay: OpenAIChatThinkingReplay | None = None
     assistant_reasoning_content: OpenAIChatAssistantReasoningContent | None = None
     strict_tools: OpenAIStrictTools | None = None
+    builtin_tools: OpenAIChatBuiltinTools | None = None
     cache_control: OpenAICacheControl | None = None
     routing: JsonObject | None = None
     extensions: JsonObject | None = None
@@ -259,6 +268,7 @@ class OpenAIChatCompat:
             "assistant_reasoning_content",
         )
         _check_literal_or_none(self.strict_tools, OpenAIStrictTools, "strict_tools")
+        _check_literal_or_none(self.builtin_tools, OpenAIChatBuiltinTools, "builtin_tools")
         _check_literal_or_none(self.cache_control, OpenAICacheControl, "cache_control")
         _check_json_object_or_none(self.routing, "routing")
         _check_json_object_or_none(self.extensions, "extensions")
@@ -298,6 +308,7 @@ class OpenAIChatCompat:
                 thinking_format="reasoning_effort",
                 tool_result_name="omit",
                 strict_tools="omit",
+                builtin_tools="groq",
                 cache_control="none",
             )
 
@@ -409,6 +420,7 @@ class ResolvedOpenAIChatCompat:
     thinking_replay: Literal["native", "as_text", "omit"] = "omit"
     assistant_reasoning_content: Literal["include_empty", "omit"] = "omit"
     strict_tools: Literal["include", "omit"] = "omit"
+    builtin_tools: Literal["reject", "groq"] = "reject"
     cache_control: Literal["none", "openai", "anthropic"] = "openai"
     routing: JsonObject | None = None
     extensions: JsonObject | None = None
@@ -424,6 +436,7 @@ _CHAT_AUTO_DEFAULTS: dict[str, str] = {
     "thinking_replay": "omit",
     "assistant_reasoning_content": "omit",
     "strict_tools": "omit",
+    "builtin_tools": "reject",
     "cache_control": "openai",
 }
 
