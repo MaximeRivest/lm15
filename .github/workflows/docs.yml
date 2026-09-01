@@ -5,11 +5,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: write
+# Default to nothing; only the deploy job gets the write it needs.
+permissions: {}
 
 jobs:
   deploy:
+    permissions:
+      contents: write  # mkdocs gh-deploy pushes to the gh-pages branch
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

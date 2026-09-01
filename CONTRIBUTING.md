@@ -160,6 +160,76 @@ A provider adapter is responsible for:
 Keep provider-only options in `Config.extensions` rather than adding universal
 fields unless the same concept is supported across providers.
 
+## What makes a contribution acceptable
+
+Every pull request is judged against these requirements; they are the
+source of truth for both contributors and reviewers:
+
+1. **Tests.** Behavior changes come with tests — unit tests in `tests/`,
+   and fixture/conformance updates when the wire behavior changes (see
+   the fixture workflow above). "It works locally" is not evidence.
+2. **The contract comes first.** Changes to wire behavior land in
+   `lm15-contract` before they land here, and `CONTRACT_PIN` moves in
+   the same commit as the code (see the pin discipline above).
+3. **Stdlib only.** No new runtime dependencies. See the dependency
+   policy below for the (high) bar to change that.
+4. **CI must be green.** The full pytest suite, the strict conformance
+   suite, and the pinned contract harness all run on every push and
+   pull request.
+5. **Sign your work (DCO).** Every commit must carry a
+   `Signed-off-by:` line asserting the [Developer Certificate of
+   Origin](https://developercertificate.org/) — that you have the legal
+   right to contribute the change. Use `git commit -s`; configure once
+   with `git config format.signOff true` to never think about it again.
+6. **No secrets.** Never commit API keys, tokens, or fixture data
+   captured with real credentials. Secret scanning with push protection
+   is enabled and will reject such pushes.
+
+## Building from source
+
+The package is pure Python with no build-time dependencies beyond
+`setuptools`:
+
+```bash
+git clone https://github.com/lm15-dev/lm15-python.git
+cd lm15-python
+python -m venv .venv && . .venv/bin/activate
+pip install -e .              # editable install
+pip install pytest pytest-asyncio pyyaml   # test tooling
+pytest -q                     # verify the checkout
+```
+
+To build distributable artifacts (sdist + wheel):
+
+```bash
+pip install build
+python -m build
+```
+
+Optional extra: `pip install -e '.[live]'` pulls in `websockets` for
+live/realtime sessions. Nothing else is required.
+
+## Dependency policy
+
+How lm15 selects, obtains, and tracks dependencies:
+
+- **Selection: default no.** The runtime is Python stdlib only — this
+  is a design guarantee (see the README footprint section), not an
+  accident. A new runtime dependency requires a maintainer decision
+  that the functionality is impossible or unreasonable to provide with
+  the stdlib, and that the candidate is actively maintained, widely
+  used, and itself light on transitive dependencies. The only current
+  example is the optional `websockets` extra for live sessions — it is
+  opt-in and the core never imports it.
+- **Obtainment.** Dependencies are declared in `pyproject.toml` and
+  installed from PyPI through standard tooling (pip/uv); CI installs
+  them the same way. Nothing is vendored, and no artifacts are
+  fetched outside the package manager.
+- **Tracking.** `pyproject.toml` is the single source of truth for
+  runtime requirements. Development and CI tooling (pytest, mkdocs)
+  is listed in the workflows that use it. GitHub dependency graph and
+  secret scanning watch the repository.
+
 ## Cross-language conformance: lm15-contract
 
 The sibling `lm15-contract` repository is where cross-language conformance
