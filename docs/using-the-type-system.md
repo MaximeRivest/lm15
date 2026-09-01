@@ -117,8 +117,11 @@ config = Config(reasoning=Reasoning(effort="medium", thinking_budget=1024))
 
 ## Read responses by variant
 
-`Response.text` is only set when the assistant message is pure text. For mixed
-content, use `message.first()` and `message.parts_of()` with concrete part
+`Message.text` is strict: it is only set when the message is pure text.
+`Response.text` is slightly more forgiving on the response's own message —
+citation and thinking parts are metadata around the visible answer, so it
+still joins the `TextPart`s when only those are mixed in. For anything
+richer, use `message.first()` and `message.parts_of()` with concrete part
 classes.
 
 ```python

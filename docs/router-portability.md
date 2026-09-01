@@ -30,7 +30,8 @@ language-neutrally so each port can implement it idiomatically.
    to preserve: a fine-tune id like `ft:gpt-4.1:org` requires the
    explicit `openai:ft:gpt-4.1:org`.
 2. **Provider strings** are the existing canonical ones: `openai`,
-   `openai-chat`, `anthropic`, `gemini`, `claude-code`, `openai-codex`
+   `openai-chat`, `anthropic`, `gemini`, `xai`, `claude-code`,
+   `openai-codex`
    (hyphenated is canonical; the underscore spelling is a permanent
    alias accepted at every rung and in the per-provider key map) —
    plus the Chat Completions **preset routes**: `groq`, `openrouter`,
@@ -70,7 +71,8 @@ language-neutrally so each port can implement it idiomatically.
          construction.
       3. *rule* — a flat, ordered prefix→provider table; ships with
          built-in defaults (`claude-`→anthropic; `gpt-`, `o1`, `o3`,
-         `o4`→openai; `gemini-`→gemini), caller-replaceable as plain data.
+         `o4`, `sora-`→openai; `gemini-`, `veo-`→gemini;
+         `grok-`→xai), caller-replaceable as plain data.
          No callbacks, no regexes, no plugins. A rule is `prefix` +
          `provider` plus an optional implementation-defined human `note`
          (rendered in `describe()`, excluded from fixtures: rules and

@@ -31,8 +31,9 @@ detail: the list of providers, the shortcuts, and the metadata.
 | provider | string | key you need | beyond chat |
 |---|---|---|---|
 | Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | files, batch |
-| OpenAI | `openai` | `OPENAI_API_KEY` | live voice, files, batch, images, audio |
-| Google Gemini | `gemini` | `GEMINI_API_KEY` | live voice, files, batch, images, audio |
+| OpenAI | `openai` | `OPENAI_API_KEY` | live voice, files, batch, images, speech, video |
+| Google Gemini | `gemini` | `GEMINI_API_KEY` | live voice, files, batch, images, speech, video |
+| xAI | `xai` | `XAI_API_KEY` or Grok subscription | images, video |
 | Groq | `groq` | `GROQ_API_KEY` | — |
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | — |
 | ollama (local) | `ollama` | none | — |
@@ -87,7 +88,8 @@ and can never be ambiguous:
 ```
 
 For well-known families you can drop the prefix; a small built-in rule
-table recognizes `claude-*`, `gpt-*`, `gemini-*`, `o1/o3/o4*`:
+table recognizes `claude-*`, `gpt-*`, `gemini-*`, `grok-*`,
+`o1/o3/o4*`, and the video families `sora-*` and `veo-*`:
 
 ```python
 "claude-haiku-4-5"                # resolves to anthropic on its own

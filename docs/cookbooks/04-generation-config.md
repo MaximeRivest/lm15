@@ -16,7 +16,8 @@ drives every provider; each adapter translates field names on the wire.
 ```python
 import json
 
-from lm15 import Config, LMRouter, Message, Request, config_to_dict
+from lm15 import Config, LMRouter, Message, Request
+from lm15.serde import config_to_dict
 
 router = LMRouter()
 config = Config(temperature=0.2, max_tokens=200)
@@ -138,8 +139,14 @@ gemini-3-flash-preview {'city': 'Tokyo', 'country': 'Japan'}
 `Config` is a frozen dataclass with typed universal fields: `max_tokens`,
 `temperature`, `top_p`, `top_k`, `stop`, `response_format`, plus
 `tool_choice`, `reasoning`, `cache`, and `extensions` covered in later
-recipes. Validation happens at construction — `temperature=-1` or
-`top_p=2` raises before any network call.
+recipes. Four smaller cross-provider knobs are typed too: `service_tier`
+(provider-named tiers), `user_id` (an opaque end-user identifier for
+abuse attribution), `store` (opt in/out of provider-side response
+storage), and `logprobs` (token log probabilities: `0` = chosen tokens
+only, `n` = also the top-n alternatives; providers without logprobs
+raise instead of silently dropping the field). Validation happens at
+construction — `temperature=-1` or `top_p=2` raises before any network
+call.
 
 Each provider adapter maps fields to its own wire names: `max_tokens`
 becomes `max_output_tokens` (OpenAI Responses), `max_tokens`

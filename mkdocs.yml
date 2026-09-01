@@ -49,6 +49,7 @@ plugins:
 
 not_in_nav: |
   cookbooks/STYLE.md
+  drafts/*.md
 
 nav:
   - Home: index.md
@@ -81,12 +82,14 @@ nav:
           - Audio, video & reasoning models: cookbooks/10-audio-video-reasoning.md
       - Beyond chat:
           - Prompt caching: cookbooks/11-caching.md
-          - Embeddings, batch & media generation: cookbooks/12-embeddings-batch-generation.md
-          - Live sessions (realtime): cookbooks/13-live-sessions.md
+          - Batch jobs: cookbooks/12-batch-jobs.md
+          - Media generation (images & speech): cookbooks/13-media-generation.md
+          - Video generation: cookbooks/14-video-generation.md
+          - Live sessions (realtime): cookbooks/15-live-sessions.md
       - Production:
-          - Local & OpenAI-compatible servers: cookbooks/14-local-and-compatible-servers.md
-          - Errors, retries & testing: cookbooks/15-errors-and-testing.md
-          - Provider passthrough: cookbooks/16-provider-passthrough.md
+          - Local & OpenAI-compatible servers: cookbooks/16-local-and-compatible-servers.md
+          - Errors, retries & testing: cookbooks/17-errors-and-testing.md
+          - Provider passthrough: cookbooks/18-provider-passthrough.md
   - Specification:
       - How lm15 is specified: how-lm15-is-specified.md
       - Serde rules: serde-rules.md

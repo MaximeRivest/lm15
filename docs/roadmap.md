@@ -5,23 +5,28 @@ release. Dates are intentions, not promises; everything here follows the
 same discipline as the code — see
 [How lm15 is specified](how-lm15-is-specified.md).
 
-## Where we are (June 2026)
+## Where we are (September 2026)
 
 - **1.0.0a1** is the current release. The chat core — canonical types,
   serde, errors, request building, response parsing, streaming — is frozen
-  by the cross-language contract and enforced mechanically (304 conformance
-  checks, spec drift gate, surface ratchet).
-- Non-chat endpoints (files, batch, image/audio generation) and
-  live sessions work and are live-tested, but remain **provisional**: their
-  shapes may still change before they are frozen.
+  by the language-neutral contract and enforced mechanically (477
+  conformance checks across twelve directions, spec drift gate, surface
+  ratchet).
+- Non-chat endpoints — files, batch, image and speech generation,
+  job-shaped video generation (Sora, Veo, grok-imagine) — and live
+  sessions (Gemini Live and OpenAI's GA Realtime protocol) work, are
+  live-tested, and are covered by contract checks, but remain
+  **provisional**: their shapes may still change before they are frozen.
 - **Shipped in the alpha** (additive, outside the frozen core, not yet
   contract-governed): the [model-string router](using-the-router.md)
   (`LMRouter`/`AsyncLMRouter`) and
   [tool derivation from functions](tools-from-functions.md)
   (`lm15.tool`/`derive_tool`). A cross-language porting spec is
   [proposed](router-portability.md), pending ratification.
-- Rust, Go, and TypeScript implementations pass the identical conformance
-  corpus. Julia is planned.
+- The earlier Rust, Go, TypeScript, and Julia implementations drifted
+  from the contract and were deliberately deleted; rebuilds from the
+  contract are underway, module by module (the auth module has landed in
+  all four), each module gated on its slice of the conformance corpus.
 
 ## Toward 1.0 stable
 
@@ -45,16 +50,20 @@ user experience judged as a whole before the final freeze. In order:
 
 Today, with identical canonical behavior and live-receipt fixtures:
 
-- OpenAI (Responses API) and OpenAI Codex
+- OpenAI (Responses API) and OpenAI Codex, including GA Realtime (live)
+  sessions, Sora video, images, and speech
 - Anthropic and Claude Code
-- Google Gemini, including Live (WebSocket) sessions
+- Google Gemini, including Live (WebSocket) sessions, Veo video, images,
+  and speech
+- xAI (Grok), including subscription OAuth, images, and grok-imagine
+  video
 - Any Chat Completions–compatible server through one dialect adapter with
   typed compatibility policies — Groq, OpenRouter, DeepSeek, vLLM, SGLang,
   Ollama
 
 Planned: a published, continuously tested compatibility matrix, and
 fixture-first coverage of additional hosted endpoints (Azure OpenAI,
-Bedrock, Vertex, Mistral, Together, Fireworks, xAI are the candidates).
+Bedrock, Vertex, Mistral, Together, Fireworks are the candidates).
 New providers always land as contract fixtures with live receipts first,
 code second.
 
@@ -80,9 +89,11 @@ package built on the frozen core, none of them contract-governed:
 
 ## Multi-language
 
-- Publish the Rust (crates.io), Go, and TypeScript (npm) implementations,
-  each gated on the same 304-check corpus.
-- Rebuild the Julia port against the contract.
+- Finish rebuilding the Rust, Go, TypeScript, and Julia implementations
+  from the contract, module by module, each module gated on its slice of
+  the 477-check corpus (auth has landed in all four).
+- Publish them (crates.io, Go module, npm) once they pass the full
+  corpus — never before.
 - The promise stays the same in every language: byte-identical wire
   requests, identical canonical parses, one spec.
 

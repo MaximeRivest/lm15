@@ -163,6 +163,22 @@ a slot is available or the pool wait times out.
 Idle connections are checked for staleness before reuse. If a server closes a
 keep-alive connection while idle, the transport drops it and opens a fresh one.
 
+## Proxies
+
+An explicit `proxy=` on the transport always wins; otherwise, with
+`trust_env=True` (the default), the standard environment variables
+(`HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`, minus `NO_PROXY`) are
+consulted per request. `trust_env=False` makes the transport hermetic.
+
+```python
+transport = StdlibTransport(proxy="http://proxy.corp:3128")
+transport = StdlibTransport(trust_env=False)   # ignore proxy env vars
+```
+
+Only plain-HTTP proxy URLs are supported. HTTPS targets are tunneled
+with CONNECT and the TLS handshake runs end-to-end to the origin — the
+proxy never sees inside the tunnel.
+
 ## Timeouts
 
 Transport constructors set default timeouts:
@@ -311,7 +327,9 @@ close() -> None
 __enter__ / __exit__
 ```
 
-A small fake transport is enough for tests:
+For testing provider LMs, use the shipped doubles in `lm15.testing`
+(`FakeTransport` / `FakeResponse`). Write your own only when you are
+building a real custom transport; a small fake shows the required shape:
 
 ```python
 from dataclasses import dataclass
@@ -363,7 +381,8 @@ The stdlib transports are deliberately minimal:
 
 - HTTP/1.1 only.
 - No HTTP/2.
-- No proxy support.
+- HTTP proxies only (`http://` proxy URLs; HTTPS targets tunneled with
+  CONNECT).
 - No content-encoding decompression; requests default to
   `Accept-Encoding: identity`.
 - No multipart helpers; LMs build multipart bytes when needed.

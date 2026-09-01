@@ -38,10 +38,10 @@ string — colons and all — is a bare model id.
 ```
 
 Known providers: `openai` (Responses API), `openai-chat` (Chat
-Completions), `anthropic`, `gemini`, `claude-code`, `openai-codex` — plus
-the Chat Completions preset providers `groq`, `openrouter`, `ollama`,
-`vllm`, and `sglang`, which route to `OpenAIChatLM(compat=<preset>)` with
-that server's default `base_url`.
+Completions), `anthropic`, `gemini`, `xai`, `claude-code`,
+`openai-codex` — plus the Chat Completions preset providers `groq`,
+`openrouter`, `ollama`, `vllm`, and `sglang`, which route to
+`OpenAIChatLM(compat=<preset>)` with that server's default `base_url`.
 
 ## How resolution works, step by step
 
@@ -67,8 +67,9 @@ reconfigure. First match wins; no fallback chains, no plugins.
    names every candidate and the explicit form that fixes it.
    Source: `"catalog"`.
 3. **Built-in rules.** A small prefix table, `lm15.router.DEFAULT_RULES`
-   (`claude-` → anthropic, `gpt-`/`o1`/`o3`/`o4` → openai, `gemini-` →
-   gemini). First match wins. The table is a convenience, not a registry
+   (`claude-` → anthropic, `gpt-`/`o1`/`o3`/`o4`/`sora-` → openai,
+   `gemini-`/`veo-` → gemini, `grok-` → xai). First match wins. The
+   table is a convenience, not a registry
    of truth: a brand-new model family needs a release, a catalog, or the
    `provider:` prefix. Source: `"rule"`.
 
@@ -112,7 +113,9 @@ through `CHAT_PRESET_ROUTES`).
 No key found → `MissingCredentialError`, which subclasses the existing
 `NotConfiguredError` so current handlers keep working. OAuth providers
 (`claude-code`, `openai-codex`) declare no env keys; the router calls
-their self-resolving constructors and `env_key` is `None`.
+their self-resolving constructors and `env_key` is `None`. `xai` is a
+hybrid: an explicit key or `XAI_API_KEY` wins, and when neither is set
+the router falls back to `XaiLM()`'s own subscription OAuth credential.
 
 `resolve()` only ever records *which* env var would be read (in
 `Resolution.env_key`), never the value. The full credential story —

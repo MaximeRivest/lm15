@@ -205,13 +205,15 @@ provider-named (`alloy`, `Kore`).
 - **OpenAI knobs** (`quality`, `background`, `n`) and xAI's
   quality/resolution tiers ride `extensions` untranslated.
 - **Video** (Sora, Veo, grok-imagine) is a job, not a call — it reuses
-  the batch ticket pattern and is not part of this surface yet.
+  the batch ticket pattern: [recipe 14](14-video-generation.md).
 
 ## See also
 
 - [09 — Images, PDFs & documents](09-images-and-documents.md) — the
   same Part types as inputs.
 - [10 — Audio, video & reasoning models](10-audio-video-reasoning.md)
-- [12 — Batch jobs](12-batch-jobs.md) — the other non-chat endpoint.
+- [12 — Batch jobs](12-batch-jobs.md) — the ticket pattern video reuses.
+- [14 — Video generation](14-video-generation.md) — the job-shaped
+  modality.
 - [18 — Provider passthrough](18-provider-passthrough.md) — reading
   `provider_data` and `extensions`.

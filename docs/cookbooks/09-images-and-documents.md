@@ -218,8 +218,9 @@ across all three. See [../using-the-router.md](../using-the-router.md).
   `fileData.fileUri`; public HTTP works on current Gemini models, but
   Files-API URIs are the documented path for repeated use.
 - **Responses contain media too.** Image generation returns the same
-  `ImagePart`s — `.images` on an `ImageGenerationResponse`, `.images` /
-  `.image_bytes` on a chat `Result` (recipe 13).
+  `ImagePart`s — `.images` on an `ImageGenerationResponse`, and
+  `response.message.parts_of(ImagePart)` on a chat `Response` from an
+  image-capable model (recipe 13).
 
 ## See also
 

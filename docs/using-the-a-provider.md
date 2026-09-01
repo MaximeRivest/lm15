@@ -7,10 +7,17 @@ vocabulary and one provider's HTTP or WebSocket API. They are the layer above
 The built-in LMs are:
 
 ```python
-from lm15.providers import AnthropicLM, GeminiLM, OpenAILM
+from lm15.providers import (
+    AnthropicLM, ClaudeCodeLM, GeminiLM, OpenAIChatLM, OpenAICodexLM,
+    OpenAILM, XaiLM,
+)
 ```
 
-Each LM exposes the same endpoint-oriented surface:
+`OpenAIChatLM` speaks the Chat Completions dialect (and, via compat
+presets, Groq, OpenRouter, ollama, vLLM, and SGLang); `ClaudeCodeLM`,
+`OpenAICodexLM`, and `XaiLM` add subscription-credential handling on
+top of the Anthropic and Chat Completions dialects. Each LM exposes
+the same endpoint-oriented surface:
 
 ```text
 complete(Request) -> Response
@@ -21,9 +28,11 @@ file_get(file_id) -> FileInfo
 file_list(limit, cursor) -> FilePage
 file_delete(file_id) -> None
 file_download(file_id) -> bytes
-batch(requests) -> BatchJob
+batch(requests) -> BatchJob            # plus batch_job(id), batches()
 image_generate(ImageGenerationRequest) -> ImageGenerationResponse
 speech_generate(SpeechGenerationRequest) -> SpeechGenerationResponse
+video_generate(VideoGenerationRequest) -> VideoJob   # plus video_job(id), video_jobs()
+list_models() -> tuple[ModelInfo, ...]
 ```
 
 Unsupported endpoints raise `UnsupportedFeatureError`.
@@ -289,42 +298,20 @@ I/O.
 ## Test an LM with a fake transport
 
 A provider LM only needs a transport object with `stream(request)` returning
-a context-managed response. This makes LMs easy to unit test.
+a context-managed response — and lm15 ships that double in `lm15.testing`,
+so you do not write it yourself:
 
 ```python
-from dataclasses import dataclass
+from lm15.testing import FakeResponse, FakeTransport
 
-@dataclass
-class FakeResponse:
-    status: int
-    body: bytes
-    headers: list[tuple[str, str]]
-    reason: str = "OK"
-    http_version: str = "HTTP/1.1"
-
-    def __enter__(self): return self
-    def __exit__(self, *args): pass
-    def __iter__(self): yield self.body
-    def read(self): return self.body
-
-class FakeTransport:
-    def __init__(self, response):
-        self.response = response
-        self.requests = []
-
-    def stream(self, request):
-        self.requests.append(request)
-        return self.response
+fake = FakeTransport([FakeResponse(200, b'{"id":"r","output":[]}')])
+lm = OpenAILM(api_key="test", transport=fake)
 ```
 
-Then inject it:
-
-```python
-lm = OpenAILM(
-    api_key="test",
-    transport=FakeTransport(FakeResponse(200, b'{"id":"r","output":[]} ', [])),
-)
-```
+The fake records every `TransportRequest` in `fake.requests`, so one
+fixture asserts both behavior and wire format. `lm15.testing.FakeLM` is
+the canonical-level double (script `Response` objects, no wire JSON) —
+see [recipe 17](cookbooks/17-errors-and-testing.md).
 
 ## Implement a new provider
 
@@ -337,13 +324,13 @@ class MyLM(BaseProviderLM):
     provider = "my-provider"
 
     def build_request(self, request, stream):
-        ...  # Request -> lm15.transports.Request
+        ...  # Request -> lm15.transports.TransportRequest
 
     def parse_response(self, request, response):
         ...  # buffered HTTP response -> lm15.types.Response
 
-    def parse_stream_event(self, request, raw_event):
-        ...  # SSEEvent -> StreamEvent | None
+    def parse_stream_events(self, request, raw_event):
+        ...  # SSEEvent -> iterator of StreamEvent
 
     def normalize_error(self, status, body):
         ...  # HTTP error -> ProviderError

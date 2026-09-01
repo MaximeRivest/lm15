@@ -186,7 +186,7 @@ the layer above.
 - **Replay.** `lm15.result.response_to_events(response)` converts a
   complete `Response` back into a stream — useful for testing stream
   consumers without a network (recipe
-  [15](17-errors-and-testing.md)).
+  [17](17-errors-and-testing.md)).
 
 ## See also
 

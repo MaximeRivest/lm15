@@ -9,14 +9,16 @@ Find yourself first — most people need exactly one section:
   you keep secrets — [explicit keys](#explicit-keys).
 - **Behind Azure or an enterprise setup where tokens expire?**
   [Rotating credentials](#rotating-credentials-token-providers).
-- **On a Claude or ChatGPT plan, no API account?**
-  [Subscriptions](#subscriptions-claude-code-codex-cli).
+- **On a Claude, ChatGPT, or SuperGrok plan, no API account?**
+  [Subscriptions](#subscriptions-claude-code-codex-cli-xai).
 - **Everything local?** [No key at all](#keyless-local-servers).
 
 One rule sits behind all of them, and it explains everything else on
 this page: **lm15 places the credential you provide on the wire, in
 the provider's dialect, and does nothing else.** It never fetches,
-refreshes, or stores tokens for you, and it depends on no auth SDKs —
+refreshes, or stores tokens for you (the one exception: the
+subscription adapters below refresh their own local OAuth credential
+when it expires), and it depends on no auth SDKs —
 [the design rationale](design-rationale.md#why-api_key-accepts-a-callable-and-lm15-still-has-no-auth-dependencies)
 explains why that restraint is the feature.
 
@@ -31,6 +33,7 @@ only in the router, explicitly and inspectably.
 | `openai`, `openai-chat` | `OPENAI_API_KEY` | platform.openai.com/api-keys |
 | `anthropic` | `ANTHROPIC_API_KEY` | console.anthropic.com |
 | `gemini` | `GEMINI_API_KEY`, then `GOOGLE_API_KEY` | aistudio.google.com/apikey |
+| `xai` | `XAI_API_KEY` (subscription OAuth fallback) | console.x.ai |
 | `groq` | `GROQ_API_KEY` | console.groq.com/keys |
 | `openrouter` | `OPENROUTER_API_KEY` | openrouter.ai/keys |
 | `ollama`, `vllm`, `sglang` | — (keyless, placeholder sent) | — |
@@ -100,7 +103,7 @@ def credential() -> str:
 router = LMRouter(RouterConfig(api_keys={"anthropic": credential}))
 ```
 
-## Subscriptions (Claude Code / Codex CLI)
+## Subscriptions (Claude Code / Codex CLI / xAI)
 
 If you use Claude Code or the Codex CLI, you already have working
 credentials on disk — no API platform account needed. These adapters
@@ -120,6 +123,33 @@ re-resolved on every request: tokens refreshed on disk — by the CLI, by
 another process, or by lm15's own expiry refresh — are picked up
 without rebuilding the client. Both adapters are also routable
 (`claude-code:...`, `openai-codex:...`).
+
+xAI sells subscription access too (SuperGrok / X Premium), but ships
+no CLI credential file — so lm15 runs the device-code login itself,
+once, and stores the credential locally:
+
+```python
+from lm15.auth import login
+
+login("xai")             # prints a URL + code; finishes in the browser
+```
+
+`login()` is the one door for every provider. It runs the flow lm15 owns
+(today: xAI) and, for everyone else, raises a typed error naming the
+exact fix — `claude` `/login` or `codex login` for the CLI-owned
+subscriptions, or the console URL where the provider's API key is
+created. (`login_xai()` remains as the concrete flow underneath.)
+
+After that, `XaiLM()` (and `grok-*` model strings through the router)
+work with no key: an explicit `api_key` or `XAI_API_KEY` always wins,
+and the stored subscription credential is the fallback. Refreshed
+tokens are written back atomically with owner-only permissions.
+
+**Money warning, stated plainly:** because a key always beats the stored
+login, a stray `XAI_API_KEY` in your environment silently moves you from
+subscription (prepaid) to per-token billing. If your xAI usage suddenly
+costs money, run `lm15.doctor.explain_auth("xai")` — it shows exactly
+which credential rung won and which were shadowed.
 
 ## Keyless local servers
 

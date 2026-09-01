@@ -18,8 +18,8 @@ policy and the default `base_url`:
 ```python
 import os
 
-from lm15 import LMRouter, Message, OpenAIChatCompat, OpenAIChatLM, Request, Result
-from lm15.compat import OPENAI_CHAT_PRESET_BASE_URLS
+from lm15 import LMRouter, Message, OpenAIChatLM, Request, ResponseStream
+from lm15.compat import OPENAI_CHAT_PRESET_BASE_URLS, OpenAIChatCompat
 
 groq = OpenAIChatLM(api_key=os.environ["GROQ_API_KEY"], compat="groq")
 print(groq.base_url)
@@ -63,9 +63,13 @@ openai      https://api.openai.com/v1
 ollama      http://localhost:11434/v1
 groq        https://api.groq.com/openai/v1
 openrouter  https://openrouter.ai/api/v1
+xai         https://api.x.ai/v1
 vllm        http://localhost:8000/v1
 sglang      http://localhost:30000/v1
 ```
+
+(`xai` is in the table because the first-class [xAI adapter](../providers-and-models.md)
+is built on the same Chat Completions dialect.)
 
 An explicit `base_url` always wins over the preset's default — the
 preset keeps supplying the wire-format policy. This is how you point
@@ -90,7 +94,7 @@ LMRouter().resolve("llama-3.3-70b-versatile")
 ```output
 Traceback (most recent call last):
   …
-lm15.router.UnknownModelError: could not route model 'llama-3.3-70b-versatile': no provider prefix, no catalog supplied, and none of the 6 built-in rules matched. Use an explicit provider prefix, …
+lm15.router.UnknownModelError: could not route model 'llama-3.3-70b-versatile': no provider prefix, no catalog supplied, and none of the 9 built-in rules matched. Use an explicit provider prefix, …
 ```
 
 The `openai-chat:` prefix exists (the `openai_chat` spelling is a
@@ -106,7 +110,7 @@ print(LMRouter().resolve("openai-chat:gpt-4.1-mini"))
 ```
 
 Everything else from the router recipes carries over to the direct LM —
-same `Request`, same `Result`. Streaming against Groq:
+same `Request`, same `ResponseStream`. Streaming against Groq:
 
 ```python
 req = Request(
@@ -156,7 +160,7 @@ ollama still want `max_tokens` where OpenAI now wants
 layer (`lm15/compat.py`).
 
 The router stays out of this on purpose. Its job is explainable
-name-to-provider resolution from three fixed rungs; a base URL and a
+name-to-provider resolution from four fixed rungs; a base URL and a
 key for *your* server is configuration, not resolution, so the
 documented path is one line of direct construction. See
 [Using the router](../using-the-router.md), "When to use direct LM
@@ -186,7 +190,7 @@ objects instead".
 ## See also
 
 - [01 — Your first request](01-first-request.md) — keys, router vs direct LMs
-- [05 — Streaming](05-streaming.md) — `Result` over typed stream events
+- [05 — Streaming](05-streaming.md) — `ResponseStream` over typed stream events
 - [17 — Errors, retries & testing](17-errors-and-testing.md)
 - [18 — Provider passthrough](18-provider-passthrough.md) — server-specific knobs
 - [Using the router](../using-the-router.md) — why `base_url` is not router syntax

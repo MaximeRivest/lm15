@@ -39,9 +39,10 @@ your project costs half a megabyte:
 
 **It is exact, and provably so.** The translation layer is not
 best-effort: every provider behavior is pinned by fixtures captured
-from real providers and enforced by a cross-language conformance
-contract — the same 304 checks that the Rust, Go, and TypeScript
-implementations pass identically. When lm15 says two providers behave
+from real providers and enforced by a language-neutral conformance
+contract — 477 machine-run checks covering requests, responses,
+streams, errors, serde, auth, files, batch, generation, video, and
+live sessions, on every commit. When lm15 says two providers behave
 the same, that is a tested claim, not a hope.
 [How lm15 is specified](how-lm15-is-specified.md) tells that story.
 
@@ -76,8 +77,9 @@ that materializes into the identical `Response`.
   [Providers & models](providers-and-models.md).
 - **Keys, rotating tokens, subscriptions:**
   [Authentication](authentication.md).
-- **"How do I do X?"** — sixteen [cookbook recipes](cookbooks/index.md),
+- **"How do I do X?"** — eighteen [cookbook recipes](cookbooks/index.md),
   from [first request](cookbooks/01-first-request.md) to
+  [video generation](cookbooks/14-video-generation.md) and
   [live sessions](cookbooks/15-live-sessions.md).
 - **"Why should I trust the translation?"**
   [How lm15 is specified](how-lm15-is-specified.md) — the contract,

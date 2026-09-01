@@ -201,9 +201,10 @@ which builds one `ToolResultPart` per entry.
   ```
   ```output
   ToolDerivationError: cannot derive 'lookup': parameter 'record' has
-  fixed-length tuple annotation tuple; only homogeneous tuple[X, ...] is
-  supported; override this parameter via ToolConfig(overrides=...) or
-  pass an explicit FunctionTool with hand-written parameters
+  fixed-length tuple annotation tuple[str, int]; only homogeneous
+  tuple[X, ...] is supported; override this parameter via
+  ToolConfig(overrides=...) or pass an explicit FunctionTool with
+  hand-written parameters
   ```
   `ToolConfig(overrides=(("record", {...}),))` patches one parameter;
   the hand-written `FunctionTool` remains the full escape hatch.

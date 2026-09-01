@@ -569,10 +569,10 @@ lm15 is a multi-repository project under the
 | --- | --- | --- |
 | [lm15-contract](https://github.com/lm15-dev/lm15-contract) | active | The authority: canonical spec, fixture corpus, goldens, and the language-neutral conformance harness. |
 | [lm15-python](https://github.com/lm15-dev/lm15-python) | active | This repository — the Python reference implementation. |
-| [lm15-ts](https://github.com/lm15-dev/lm15-ts) | active | TypeScript implementation. |
-| [lm15-go](https://github.com/lm15-dev/lm15-go) | active | Go implementation. |
-| [lm15-rs](https://github.com/lm15-dev/lm15-rs) | active | Rust implementation. |
-| [lm15-jl](https://github.com/lm15-dev/lm15-jl) | archived | Frozen pre-conformance Julia port. |
+| [lm15-ts](https://github.com/lm15-dev/lm15-ts) | rebuilding | TypeScript implementation, rebuilt from the contract module by module. |
+| [lm15-go](https://github.com/lm15-dev/lm15-go) | rebuilding | Go implementation, rebuilt from the contract module by module. |
+| [lm15-rs](https://github.com/lm15-dev/lm15-rs) | rebuilding | Rust implementation, rebuilt from the contract module by module. |
+| [lm15-jl](https://github.com/lm15-dev/lm15-jl) | rebuilding | Julia implementation, rebuilt from the contract module by module. |
 | [spec](https://github.com/lm15-dev/spec) | archived | Superseded by lm15-contract. |
 | [curl-fixtures](https://github.com/lm15-dev/curl-fixtures), [cross-sdk-curl-tests](https://github.com/lm15-dev/cross-sdk-curl-tests) | archived | Moved into the conformance corpus. |
 

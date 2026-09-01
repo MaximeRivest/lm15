@@ -56,7 +56,8 @@ list; you will always read a tuple.
 ## Async
 
 Async support ships as separate mirror classes — `AsyncOpenAILM`,
-`AsyncAnthropicLM`, `AsyncGeminiLM`, `AsyncOpenAIChatLM` — with the same
+`AsyncAnthropicLM`, `AsyncGeminiLM`, `AsyncOpenAIChatLM`,
+`AsyncClaudeCodeLM`, `AsyncOpenAICodexLM`, `AsyncXaiLM` — with the same
 constructor fields, the same canonical `Request` in, and the same canonical
 `Response`/stream events out as their sync siblings. `await` is the only
 user-visible difference: `complete()` is `async def`, `stream()` returns an
@@ -77,12 +78,13 @@ sync method that does need the network, `GeminiLM.resolve_prompt_cache`, is
 ported onto `AsyncGeminiLM` against the async transport; `complete()` and
 `stream()` invoke it first, mirroring the sync class.
 
-Endpoint status: `complete()` and `stream()` are the 1.0 async mirror. The
-non-chat endpoints (file upload, batch, image, audio, live)
-remain sync-only for now; the async classes implement them as methods that
-raise `UnsupportedFeatureError` ("use the sync adapter for this endpoint
-(async endpoints planned)") so the surface is honest rather than silently
-absent.
+Endpoint status: `complete()` and `stream()` came first; the non-chat
+endpoints (files, batch, image and speech generation, video jobs, and
+live sessions on the live-capable providers) now have native async
+implementations driving the same pure build/parse hooks as the sync
+classes. Endpoints a provider does not offer raise
+`UnsupportedFeatureError` in both mirrors, so the surface stays honest
+rather than silently absent.
 
 ## Why does a "no routing" library now ship a router?
 
@@ -90,8 +92,9 @@ Because every program that uses lm15 was writing the same eight lines —
 map a model name to a class, find the env var, construct, cache — and a
 mapping table is foundation-shaped, while *policy* routing (retries,
 fallbacks, cost-based selection) is not. `LMRouter` is deliberately the
-former and refuses to be the latter: three fixed resolution rungs
-(explicit `provider:` prefix, opt-in catalog, built-in prefix rules),
+former and refuses to be the latter: four fixed resolution rungs (an
+object rung for model values that carry their own provider, explicit
+`provider:` prefix, opt-in catalog, built-in prefix rules),
 first match wins, no callbacks, no fallback chains, no configurable rung
 order. `resolve()` is pure and its `Resolution` return value is the
 explanation — there is no hidden state to ask about.
@@ -113,7 +116,7 @@ The honest trade-offs:
   first-class, and the cookbook cases (ollama, vLLM, Azure, OpenRouter)
   stay on the direct path.
 
-Cross-language: the algorithm is pure data + three rungs precisely so
+Cross-language: the algorithm is pure data + four rungs precisely so
 Rust/Go/TS/Julia can port it idiomatically (a struct table, an exported
 slice, a sync `resolve()` everywhere). The porting spec is in
 [router-portability](router-portability.md) — a proposal until ratified.

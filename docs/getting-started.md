@@ -308,15 +308,17 @@ is on [Authentication](authentication.md):
   stale.
 - **Subscriptions** — logged into the Claude or Codex CLI?
   `ClaudeCodeLM()` / `OpenAICodexLM()` use those local credentials
-  directly.
+  directly. On a SuperGrok plan, `lm15.auth.login_xai()` sets up
+  `XaiLM()` the same way.
 - **Local servers** — `ollama:`, `vllm:`, and `sglang:` models need no
   key at all.
 
 ## Where next
 
-- Multimodal input, structured output, reasoning, caching, batch:
-  sixteen [cookbook recipes](cookbooks/index.md), each with
-  real captured output.
+- Multimodal input, structured output, reasoning, caching, batch,
+  media generation, live sessions: eighteen
+  [cookbook recipes](cookbooks/index.md), each with real captured
+  output.
 - The canonical types in depth:
   [Using the type system](using-the-type-system.md).
 - Why the API looks the way it does:

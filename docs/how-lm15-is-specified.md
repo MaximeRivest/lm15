@@ -34,10 +34,16 @@ its constitution,
   `true ≠ 1`, `1 ≠ 1.0`, absent ≠ `null` ≠ `""` ≠ `[]` ≠ `{}`. It never
   trusts the implementation under test.
 
-Every implementation — Python (this package), Rust, Go, TypeScript — must
-pass the identical corpus: **304 checks** (110 request, 102 response, 8
-stream, 16 error, 68 serde), zero failures. The same canonical request
-produces byte-identical wire requests in every language.
+Every implementation must pass the identical corpus: **477 checks**
+(117 request, 108 response, 9 stream, 18 error, 94 serde, 9 auth,
+14 models, 21 live, 23 files, 26 batch, 14 generation, 24 video),
+zero failures. Python — this package — is currently the only complete
+implementation: earlier Rust, Go, TypeScript, and Julia ports drifted
+from the contract and were deliberately deleted rather than left
+misleading; they are being rebuilt from the contract, module by module,
+and each module ships only when it passes its slice of the corpus. The
+same canonical request must produce byte-identical wire requests in
+every language.
 
 ## Who wins when things disagree
 
@@ -96,11 +102,14 @@ the old and new pin is part of the review.
 - **Cross-provider semantics you can rely on.** "Tool call arguments are
   always named `input`", "`usage.total_tokens: null` means the provider
   didn't report it, never a silent 0" — these aren't conventions of one
-  codebase; they are spec, tested on every commit, in four languages.
+  codebase; they are spec, tested on every commit.
 - **A frozen core.** The chat-core surface (types, serde, errors, request
   building, response parsing, streaming) is frozen for 1.0; all future
   change to it is additive, and the ratchet that enforces this is
   mechanical, not a promise.
-- **Polyglot consistency.** A request serialized by the Python library
-  parses identically in Rust, Go, and TypeScript — because all four are
-  held to the same 304 checks, not because they share code.
+- **Polyglot consistency, by construction.** The contract — not the
+  Python code — is the portable artifact. A port earns each capability
+  by passing the same checks Python passes, so when the Rust, Go,
+  TypeScript, and Julia rebuilds ship, a request serialized in one
+  language parses identically in the others because all of them are
+  held to the same corpus, not because they share code.

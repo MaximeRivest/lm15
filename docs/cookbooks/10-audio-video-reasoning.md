@@ -226,7 +226,7 @@ does not estimate.
 
 ## See also
 
-- [05 — Streaming](05-streaming.md) — `Result.events()` and typed deltas.
+- [05 — Streaming](05-streaming.md) — `ResponseStream.events()` and typed deltas.
 - [09 — Images, PDFs & documents](09-images-and-documents.md) — the
   other media parts, with broader provider support.
 - [15 — Live sessions (realtime)](15-live-sessions.md) — audio out, not

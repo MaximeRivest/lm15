@@ -1,6 +1,6 @@
 # lm15 cookbook
 
-Sixteen recipes. Every code block runs; every output block is a real
+Eighteen recipes. Every code block runs; every output block is a real
 capture. Style rules live in [STYLE.md](STYLE.md).
 
 ## Essentials

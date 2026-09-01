@@ -17,7 +17,8 @@ string.
 import json
 import pathlib
 
-from lm15 import LMRouter, Message, Request, messages_from_json, messages_to_json
+from lm15 import LMRouter, Message, Request
+from lm15.serde import messages_from_json, messages_to_json
 
 router = LMRouter()
 history = (Message.user("Pick a prime number between 80 and 90. Answer with the number only."),)

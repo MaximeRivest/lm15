@@ -104,7 +104,7 @@ router.resolve("qwen3.5:0.8b")
 ```output
 Traceback (most recent call last):
   …
-lm15.router.UnknownModelError: could not route model 'qwen3.5:0.8b': no provider prefix, no catalog supplied, and none of the 6 built-in rules matched. Use an explicit provider prefix — "provider:qwen3.5:0.8b" with provider one of: anthropic, claude-code, gemini, groq, ollama, openai, openai-chat, openai-codex, openrouter, sglang, vllm. Or pass a model catalog: …
+lm15.router.UnknownModelError: could not route model 'qwen3.5:0.8b': no provider prefix, no catalog supplied, and none of the 9 built-in rules matched. Use an explicit provider prefix — "provider:qwen3.5:0.8b" with provider one of: anthropic, claude-code, gemini, groq, ollama, openai, openai-chat, openai-codex, openrouter, sglang, vllm, xai. Or pass a model catalog: …
 ```
 
 The router is sugar, not a layer. The direct LM classes are first-class
@@ -151,10 +151,11 @@ A `Request` is a frozen dataclass: a model string and a tuple of
 `Message` objects (plus optional `Config`, tools, and more in later
 recipes). `router.complete(request)` does three things: resolve the
 model string, build (and cache) the provider LM, and call its
-`complete()`. Resolution walks three fixed rungs — explicit
-`provider:` prefix, optional catalog, built-in prefix rules — first
-match wins, no fallback chains. The full grammar and the catalog rung
-are in [Using the router](../using-the-router.md).
+`complete()`. Resolution walks four fixed rungs — a provider attribute
+carried by the model value itself, explicit `provider:` prefix,
+optional catalog, built-in prefix rules — first match wins, no
+fallback chains. The full grammar and the catalog rung are in
+[Using the router](../using-the-router.md).
 
 Credentials follow the provider's manifest: `OpenAILM` declares
 `OPENAI_API_KEY`, and that is the only place the router looks unless
@@ -174,7 +175,7 @@ one call in, one typed `Response` out.
   again.
 - **Direct LMs are for configuration, not preference.** Reach for them
   when you need a custom `base_url` or compat preset (ollama, vLLM —
-  recipe [14](16-local-and-compatible-servers.md)) or when you are a
+  recipe [16](16-local-and-compatible-servers.md)) or when you are a
   library taking an LM object from your caller.
 - **Async direct LMs exist too**: `AsyncOpenAILM`, `AsyncAnthropicLM`,
   `AsyncGeminiLM`, same constructors, awaitable `complete`.
