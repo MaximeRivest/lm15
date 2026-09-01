@@ -191,7 +191,9 @@ def openai_live_url_and_headers() -> None:
         lm.close()
     assert url == "wss://api.openai.com/v1/realtime?model=gpt-realtime"
     assert headers["Authorization"] == "Bearer sk-test"
-    assert headers["OpenAI-Beta"] == "realtime=v1"
+    # GA Realtime: the beta header hard-closes the socket (observed live
+    # 2026-09-01: close 4000 beta_api_shape_disabled).
+    assert "OpenAI-Beta" not in headers
 
 
 def anthropic_file_upload() -> None:
@@ -320,11 +322,14 @@ def openai_live_session_payload_shape() -> None:
         lm.close()
     assert payload["type"] == "session.update"
     session = payload["session"]
+    # GA session shape verified live 2026-09-01 (curl-fixtures/live-2026-09-01/).
+    assert session["type"] == "realtime"
     assert session["instructions"] == "you are helpful"
-    assert session["voice"] == "alloy"
-    assert session["modalities"] == ["text", "audio"]
-    assert session["output_audio_format"] == "pcm16"
-    assert session["input_audio_format"] == "pcm16"
+    assert session["output_modalities"] == ["audio"]
+    assert session["audio"]["output"]["voice"] == "alloy"
+    assert session["audio"]["output"]["format"] == {"type": "audio/pcm", "rate": 24000}
+    assert session["audio"]["input"]["format"] == {"type": "audio/pcm", "rate": 24000}
+    assert session["audio"]["input"]["turn_detection"] is None  # deterministic end_audio()
     assert session["tools"][0]["name"] == "lookup"
 
 

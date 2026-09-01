@@ -27,6 +27,7 @@ from ..sse import SSEEvent
 from ..transports import TransportRequest
 from ..types import (
     AudioDelta,
+    AudioFormat,
     AudioGenerationRequest,
     AudioGenerationResponse,
     AudioPart,
@@ -920,7 +921,7 @@ class OpenAILM(BaseProviderLM):
 
         response_create: dict[str, Any] = {"type": "response.create"}
         if (request.config.extensions or {}).get("output") == "audio":
-            response_create["response"] = {"modalities": ["text", "audio"]}
+            response_create["response"] = {"output_modalities": ["audio"]}  # GA name
         frames.append(response_create)
         return frames
 
@@ -933,7 +934,8 @@ class OpenAILM(BaseProviderLM):
             return []
         et = str(payload.get("type") or "")
 
-        if et in {"response.output_text.delta", "response.text.delta", "response.audio_transcript.delta"}:
+        if et in {"response.output_text.delta", "response.text.delta",
+                  "response.output_audio_transcript.delta", "response.audio_transcript.delta"}:
             delta = str(payload.get("delta") or payload.get("text") or "")
             return [StreamDeltaEvent(delta=TextDelta(text=delta))] if delta else []
         if et == "response.output_audio.delta":
@@ -955,8 +957,8 @@ class OpenAILM(BaseProviderLM):
         if et in {"response.done", "response.completed"}:
             response = payload.get("response", {}) if isinstance(payload.get("response"), dict) else {}
             usage_data = response.get("usage", {}) if isinstance(response, dict) else {}
-            u_in = usage_data.get("input_tokens_details") or {}
-            u_out = usage_data.get("output_tokens_details") or {}
+            u_in = usage_data.get("input_token_details") or usage_data.get("input_tokens_details") or {}
+            u_out = usage_data.get("output_token_details") or usage_data.get("output_tokens_details") or {}
             usage = Usage(
                 input_tokens=int(usage_data.get("input_tokens", 0) or 0),
                 output_tokens=int(usage_data.get("output_tokens", 0) or 0),
@@ -1003,21 +1005,45 @@ class OpenAILM(BaseProviderLM):
         return urllib.parse.urlunparse((scheme, parsed.netloc, path, "", query, ""))
 
     def _live_headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {resolve_credential(self.api_key)}", "OpenAI-Beta": "realtime=v1"}
+        # GA Realtime: the beta header now HARD-CLOSES the socket (4000
+        # `beta_api_shape_disabled`, observed live 2026-09-01).
+        return {"Authorization": f"Bearer {resolve_credential(self.api_key)}"}
+
+    @staticmethod
+    def _live_audio_format(fmt: AudioFormat) -> dict[str, Any]:
+        # GA wire format objects: {"type": "audio/pcm", "rate": N} (pcmu/
+        # pcma carry no rate). Canonical pcm16 maps to audio/pcm.
+        if fmt.encoding == "pcm16":
+            return {"type": "audio/pcm", "rate": fmt.sample_rate}
+        return {"type": f"audio/{fmt.encoding}"}
 
     def _live_session_update_payload(self, config: LiveConfig) -> dict[str, Any]:
-        session: dict[str, Any] = {}
+        # GA Realtime session shape (verified live 2026-09-01,
+        # curl-fixtures/live-2026-09-01/): session.type is required,
+        # `output_modalities` replaces `modalities`, and audio config
+        # nests under session.audio.{input,output}.
+        session: dict[str, Any] = {"type": "realtime"}
         if config.system:
             session["instructions"] = config.system if isinstance(config.system, str) else parts_to_text(config.system)
-        if config.voice:
-            session["voice"] = config.voice
-        if config.output_format is not None:
-            session["modalities"] = ["text", "audio"]
-            session["output_audio_format"] = config.output_format.encoding
+        audio: dict[str, Any] = {}
+        if config.output_format is not None or config.voice:
+            session["output_modalities"] = ["audio"]
+            output: dict[str, Any] = {}
+            if config.output_format is not None:
+                output["format"] = self._live_audio_format(config.output_format)
+            if config.voice:
+                output["voice"] = config.voice
+            audio["output"] = output
         else:
-            session["modalities"] = ["text"]
+            session["output_modalities"] = ["text"]
         if config.input_format is not None:
-            session["input_audio_format"] = config.input_format.encoding
+            # turn_detection null = server VAD OFF: a turn happens exactly
+            # when the caller sends end_audio() (commit + response.create),
+            # deterministic library behavior. Re-enable VAD through
+            # extensions when you want the server to segment speech.
+            audio["input"] = {"format": self._live_audio_format(config.input_format), "turn_detection": None}
+        if audio:
+            session["audio"] = audio
         if config.tools:
             session["tools"] = [
                 {"type": "function", "name": t.name, "description": t.description, "parameters": t.parameters}
@@ -1069,7 +1095,13 @@ class OpenAILM(BaseProviderLM):
             return []
         et = str(payload.get("type") or "")
         events: list[Any] = []
-        if et in {"response.output_text.delta", "response.text.delta", "response.audio_transcript.delta"}:
+        # GA server event names verified live 2026-09-01
+        # (curl-fixtures/live-2026-09-01/); legacy beta names kept where
+        # harmless. Audio-native turns speak through
+        # `response.output_audio_transcript.delta` — mapped to text so
+        # transcripts arrive uniformly across providers.
+        if et in {"response.output_text.delta", "response.text.delta",
+                  "response.output_audio_transcript.delta", "response.audio_transcript.delta"}:
             delta = str(payload.get("delta") or payload.get("text") or "")
             if delta:
                 events.append(LiveServerTextEvent(text=delta))
@@ -1081,34 +1113,47 @@ class OpenAILM(BaseProviderLM):
             delta = str(payload.get("delta") or "")
             if delta:
                 events.append(LiveServerToolCallDeltaEvent(input_delta=delta, id=str(payload.get("call_id") or payload.get("id") or "") or None, name=str(payload.get("name") or "") or None))
-        elif et in {"response.function_call_arguments.done", "response.output_item.done"}:
-            if et == "response.output_item.done":
-                item = payload.get("item", {}) if isinstance(payload.get("item"), dict) else {}
-                if item.get("type") != "function_call":
-                    item = {}
+        elif et == "response.output_item.done":
+            # The ONLY tool-call emission point. `function_call_arguments.done`
+            # also carries the full call, but mapping both double-fires the
+            # event and double-sends tool results (observed live 2026-09-01:
+            # both frames arrive for one call).
+            item = payload.get("item", {}) if isinstance(payload.get("item"), dict) else {}
+            if item.get("type") == "function_call":
                 call_id = str(item.get("call_id") or item.get("id") or "")
-                name = str(item.get("name") or "tool")
-                arguments = item.get("arguments")
-            else:
-                call_id = str(payload.get("call_id") or payload.get("id") or "")
-                name = str(payload.get("name") or "tool")
-                arguments = payload.get("arguments")
-            if call_id:
-                events.append(LiveServerToolCallEvent(id=call_id, name=name, input=parse_json_object(arguments)))
+                if call_id:
+                    events.append(LiveServerToolCallEvent(
+                        id=call_id, name=str(item.get("name") or "tool"),
+                        input=parse_json_object(item.get("arguments"))))
         elif et in {"response.done", "response.completed"}:
             response = payload.get("response", {}) if isinstance(payload.get("response"), dict) else {}
-            usage_data = response.get("usage", {}) if isinstance(response, dict) else {}
-            u_in = usage_data.get("input_tokens_details") or {}
-            u_out = usage_data.get("output_tokens_details") or {}
-            events.append(LiveServerTurnEndEvent(usage=Usage(
-                input_tokens=int(usage_data.get("input_tokens", 0) or 0),
-                output_tokens=int(usage_data.get("output_tokens", 0) or 0),
-                total_tokens=usage_data.get("total_tokens"),
-                reasoning_tokens=u_out.get("reasoning_tokens"),
-                cache_read_tokens=u_in.get("cached_tokens"),
-                input_audio_tokens=u_in.get("audio_tokens"),
-                output_audio_tokens=u_out.get("audio_tokens"),
-            )))
+            output = response.get("output") if isinstance(response.get("output"), list) else []
+            if str(response.get("status") or "") == "cancelled":
+                # GA signals barge-in via response.done status=cancelled
+                # (status_details.reason=client_cancelled); parallel to
+                # Gemini's interrupted frame. The cancelled turn's usage is
+                # dropped with it — stated, mirrors Gemini.
+                events.append(LiveServerInterruptedEvent())
+            elif any(isinstance(i, dict) and i.get("type") == "function_call" for i in output):
+                # A response that requests tool calls does NOT end the turn:
+                # the model is waiting for results, and the continuation
+                # arrives as a further wire response (observed live
+                # 2026-09-01). Gemini keeps the turn open here; emitting
+                # turn_end would break the shared tool-dispatch loop.
+                pass
+            else:
+                usage_data = response.get("usage", {}) if isinstance(response, dict) else {}
+                u_in = usage_data.get("input_token_details") or usage_data.get("input_tokens_details") or {}
+                u_out = usage_data.get("output_token_details") or usage_data.get("output_tokens_details") or {}
+                events.append(LiveServerTurnEndEvent(usage=Usage(
+                    input_tokens=int(usage_data.get("input_tokens", 0) or 0),
+                    output_tokens=int(usage_data.get("output_tokens", 0) or 0),
+                    total_tokens=usage_data.get("total_tokens"),
+                    reasoning_tokens=u_out.get("reasoning_tokens"),
+                    cache_read_tokens=u_in.get("cached_tokens"),
+                    input_audio_tokens=u_in.get("audio_tokens"),
+                    output_audio_tokens=u_out.get("audio_tokens"),
+                )))
         elif et in {"response.cancelled", "response.canceled"}:
             events.append(LiveServerInterruptedEvent())
         elif et in {"error", "response.error"}:
@@ -1119,6 +1164,12 @@ class OpenAILM(BaseProviderLM):
             else:
                 provider_code = str(payload.get("code") or payload.get("error_type") or "provider")
                 message = str(payload.get("message") or "")
+            if provider_code == "response_cancel_not_active":
+                # Benign barge-in race (captured live 2026-09-01): the
+                # response finished before the cancel arrived, or interrupt()
+                # was pressed twice. Gemini tolerates repeated interrupts;
+                # surfacing this as an error event breaks the parallel.
+                return events
             events.append(LiveServerErrorEvent(error=self._error_detail(provider_code, message)))
         return events
 

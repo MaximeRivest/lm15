@@ -155,9 +155,14 @@ event types: ['audio', 'text', 'audio', 'interrupted']
 
 ## How it works
 
-`lm.live()` opens a websocket to Gemini's BidiGenerateContent endpoint
-(the only provider with live support in lm15 today), sends the setup
-frame built from `LiveConfig`, and returns a `WebSocketLiveSession`.
+`lm.live()` opens a websocket — Gemini's BidiGenerateContent endpoint
+or OpenAI's GA Realtime endpoint (`gpt-realtime*` models; verified
+live 2026-09-01) — sends the setup frame built from `LiveConfig`, and
+returns a `WebSocketLiveSession`. The recipes above run unchanged on
+both providers; two OpenAI mapping rules keep the loops shared: a
+response that requests tool calls does not end the turn (the model is
+waiting for your result), and the barge-in race error from repeated
+`interrupt()` calls is swallowed as benign.
 The session is a thin codec: `send_*` methods encode typed
 `LiveClient*Event`s to wire JSON, iteration decodes wire frames into
 typed `LiveServer*Event`s — `text`, `audio`, `tool_call`,
@@ -195,6 +200,11 @@ in `LiveConfig`.
   ordinary `Part` content as one turn — prompt content, not the
   realtime channel. Audio parts are the exception: Gemini rejects
   inline audio in live turn content; use `send_audio()` as above.
+- **OpenAI audio input.** On OpenAI, setting `input_format` turns
+  server voice-activity detection OFF: a turn happens exactly when you
+  call `end_audio()` (deterministic). Re-enable VAD through
+  `extensions` when you want the server to segment speech; Gemini
+  always segments server-side.
 - **Async.** `AsyncGeminiLM.live()` raises `UnsupportedFeatureError`
   ("use the sync adapter") — async live is planned, not shipped. The
   sync session blocks on `recv()`; put it on a thread if you need an
