@@ -592,6 +592,18 @@ class OpenAILM(BaseProviderLM):
         if compat.routing is not None:
             payload["provider"] = compat.routing
 
+        # Promoted cross-provider knobs (changes/2026-09-01-extensions-burn-down):
+        # canonical spelling in, provider spelling out. user_id maps to
+        # safety_identifier — OpenAI's current end-user attribution field
+        # (`user` is the deprecated legacy spelling; still available verbatim
+        # through extensions).
+        if request.config.service_tier is not None:
+            payload["service_tier"] = request.config.service_tier
+        if request.config.user_id is not None:
+            payload["safety_identifier"] = request.config.user_id
+        if request.config.store is not None:
+            payload["store"] = request.config.store
+
         if request.config.extensions:
             reserved = {
                 "prompt_caching",

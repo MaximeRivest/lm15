@@ -1730,6 +1730,17 @@ class Config:
     tool_choice: ToolChoice | None = None
     reasoning: Reasoning | None = None
     cache: CacheConfig | None = None
+    # Cross-provider knobs promoted from extensions (2026-09-01 burn-down):
+    # service_tier is an OPEN string namespace — the tier concept is shared
+    # (OpenAI, Anthropic), the value vocabulary is provider-owned, like
+    # `voice`. user_id is an opaque end-user identifier for abuse
+    # attribution (OpenAI safety_identifier, Anthropic metadata.user_id).
+    # store opts a request out of (or into) provider-side response storage
+    # (OpenAI and Gemini, same wire key). Providers whose wire cannot carry
+    # a set knob RAISE — never silently drop.
+    service_tier: str | None = None
+    user_id: str | None = None
+    store: bool | None = None
     extensions: Extensions | None = None
 
     def __post_init__(self) -> None:
@@ -1758,6 +1769,10 @@ class Config:
             raise TypeError("reasoning must be a Reasoning")
         if self.cache is not None and not isinstance(self.cache, CacheConfig):
             raise TypeError("cache must be a CacheConfig")
+        _validate_optional_text(self.service_tier, field_name="Config.service_tier", allow_empty=False)
+        _validate_optional_text(self.user_id, field_name="Config.user_id", allow_empty=False)
+        if self.store is not None and not isinstance(self.store, bool):
+            raise TypeError("Config.store must be a bool or None")
         _validate_json_field(self, "response_format")
         _validate_extensions_field(self)
 

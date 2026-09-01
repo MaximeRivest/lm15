@@ -615,6 +615,25 @@ class GeminiLM(BaseProviderLM):
         if use_cache:
             self._apply_prompt_cache(request, payload)
 
+        # Promoted cross-provider knobs (changes/2026-09-01-extensions-burn-down):
+        # store maps verbatim (same wire key as OpenAI, verified live);
+        # service_tier and user_id have no Gemini wire field — raise, never
+        # silently drop.
+        if request.config.store is not None:
+            payload["store"] = request.config.store
+        if request.config.service_tier is not None:
+            raise UnsupportedFeatureError(
+                "gemini: config.service_tier is not supported — GenerateContent has no "
+                "service-tier field (OpenAI and Anthropic carry it)",
+                provider=self.provider,
+            )
+        if request.config.user_id is not None:
+            raise UnsupportedFeatureError(
+                "gemini: config.user_id is not supported — GenerateContent has no "
+                "end-user attribution field (OpenAI and Anthropic carry it)",
+                provider=self.provider,
+            )
+
         if extensions:
             passthrough = {k: v for k, v in extensions.items() if k not in {"prompt_caching", "output"}}
             payload.update(passthrough)

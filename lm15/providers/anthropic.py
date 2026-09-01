@@ -487,6 +487,19 @@ class AnthropicLM(BaseProviderLM):
             }
         if request.config.response_format:
             payload["output_config"] = _response_format_to_anthropic_output_config(request.config.response_format)
+        # Promoted cross-provider knobs (changes/2026-09-01-extensions-burn-down):
+        # user_id rides Anthropic's metadata.user_id; store has no Anthropic
+        # wire field — raise, never silently drop.
+        if request.config.service_tier is not None:
+            payload["service_tier"] = request.config.service_tier
+        if request.config.user_id is not None:
+            payload["metadata"] = {"user_id": request.config.user_id}
+        if request.config.store is not None:
+            raise UnsupportedFeatureError(
+                "anthropic: config.store is not supported — the Messages API has no "
+                "response-storage opt-out field (OpenAI and Gemini carry it)",
+                provider=self.provider,
+            )
         if request.config.extensions:
             passthrough = {k: v for k, v in request.config.extensions.items() if k != "prompt_caching"}
             payload.update(passthrough)

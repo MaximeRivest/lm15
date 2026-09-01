@@ -414,6 +414,9 @@ def config_to_dict(c: Config) -> dict[str, Any]:
         "tool_choice": tool_choice_to_dict(c.tool_choice) if c.tool_choice else None,
         "reasoning": reasoning_to_dict(c.reasoning) if c.reasoning else None,
         "cache": cache_config_to_dict(c.cache) if c.cache else None,
+        "service_tier": c.service_tier,
+        "user_id": c.user_id,
+        "store": c.store,  # False is data (opt-out), not emptiness — emitted
         "extensions": c.extensions,
     })
 
@@ -446,6 +449,9 @@ def config_from_dict(d: dict[str, Any]) -> Config:
         tool_choice=tool_choice_from_dict(tool_choice) if tool_choice is not None else None,
         reasoning=reasoning_from_dict(reasoning) if reasoning is not None else None,
         cache=cache_config_from_dict(cache) if cache is not None else None,
+        service_tier=d.get("service_tier"),
+        user_id=d.get("user_id"),
+        store=d.get("store"),
         extensions=d.get("extensions"),
     )
 
