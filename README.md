@@ -549,3 +549,33 @@ API reference, the specification pages, benchmarks, and the
 Fixture and conformance workflows, the doc-drift checker, the provider
 adapter development guide, and the useful-commands cheat sheet live in
 [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Reporting bugs and security issues
+
+- **Bugs and unexpected behavior**: open an issue on the
+  [issue tracker](https://github.com/lm15-dev/lm15-python/issues). Include
+  the lm15 version, the provider and endpoint involved, and a minimal
+  reproduction. Wire-level evidence (the exact request/response bytes)
+  makes triage much faster.
+- **Security vulnerabilities**: never open a public issue. Follow
+  [SECURITY.md](SECURITY.md) to report privately.
+
+## Project repositories
+
+lm15 is a multi-repository project under the
+[lm15-dev](https://github.com/lm15-dev) organization:
+
+| Repository | Status | Role |
+| --- | --- | --- |
+| [lm15-contract](https://github.com/lm15-dev/lm15-contract) | active | The authority: canonical spec, fixture corpus, goldens, and the language-neutral conformance harness. |
+| [lm15-python](https://github.com/lm15-dev/lm15-python) | active | This repository — the Python reference implementation. |
+| [lm15-ts](https://github.com/lm15-dev/lm15-ts) | active | TypeScript implementation. |
+| [lm15-go](https://github.com/lm15-dev/lm15-go) | active | Go implementation. |
+| [lm15-rs](https://github.com/lm15-dev/lm15-rs) | active | Rust implementation. |
+| [lm15-jl](https://github.com/lm15-dev/lm15-jl) | archived | Frozen pre-conformance Julia port. |
+| [spec](https://github.com/lm15-dev/spec) | archived | Superseded by lm15-contract. |
+| [curl-fixtures](https://github.com/lm15-dev/curl-fixtures), [cross-sdk-curl-tests](https://github.com/lm15-dev/cross-sdk-curl-tests) | archived | Moved into the conformance corpus. |
+
+`lm15-contract` is the source of truth for behavior; each implementation
+repo must pass its conformance harness at the SHA pinned in its
+`CONTRACT_PIN` file.
