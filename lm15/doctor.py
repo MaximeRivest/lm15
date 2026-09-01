@@ -27,9 +27,12 @@ from .auth import (
     CLAUDE_CODE_CREDENTIALS_PATH,
     CODEX_CLI_AUTH_PATH,
     LocalOAuthCredential,
+    _load_xai_with_source,
+    _xai_store_paths,
     read_claude_code_credential,
     read_codex_cli_credential,
 )
+from .errors import NotConfiguredError
 from .providers import Credential
 from .router import (
     ADAPTERS,
@@ -37,8 +40,8 @@ from .router import (
     RouterConfig,
     _api_keys_entry,
     _canonical_provider,
+    _credential_policy,
     _declared_env_keys,
-    _OAUTH_PROVIDERS,
     _routable,
 )
 
@@ -112,6 +115,12 @@ def _expiry_detail(credential: LocalOAuthCredential) -> str:
     return f"fresh, expires in {span}"
 
 
+def _usable_state(credential: LocalOAuthCredential, detail: str, shadowed: bool) -> str:
+    if "expired" in detail and not credential.refresh_token:
+        return "absent"
+    return "shadowed" if shadowed else "selected"
+
+
 def _oauth_step(provider: str, path_override: str | None) -> AuthStep:
     if provider == "claude-code":
         default_path, reader = CLAUDE_CODE_CREDENTIALS_PATH, read_claude_code_credential
@@ -123,8 +132,25 @@ def _oauth_step(provider: str, path_override: str | None) -> AuthStep:
     if credential is None:
         return AuthStep(kind="oauth-file", source=source, detail="missing or unreadable", state="absent")
     detail = _expiry_detail(credential)
-    state = "selected" if ("expired" not in detail or credential.refresh_token) else "absent"
-    return AuthStep(kind="oauth-file", source=source, detail=detail, state=state)
+    return AuthStep(kind="oauth-file", source=source, detail=detail, state=_usable_state(credential, detail, shadowed=False))
+
+
+def _xai_oauth_step(path_override: str | None, shadowed: bool) -> AuthStep:
+    """The final rung of xAI's key-then-oauth chain: the stored subscription
+    login (lm15's own store, then the Pi agent store)."""
+    paths = (Path(path_override).expanduser(),) if path_override else _xai_store_paths()
+    try:
+        credential, path = _load_xai_with_source(path_override)
+    except NotConfiguredError:
+        checked = " or ".join(str(p) for p in paths)
+        return AuthStep(kind="oauth-file", source=f"local OAuth credential {checked}", detail="missing or unreadable", state="absent")
+    detail = _expiry_detail(credential)
+    return AuthStep(
+        kind="oauth-file",
+        source=f"local OAuth credential {path}",
+        detail=detail,
+        state=_usable_state(credential, detail, shadowed=shadowed),
+    )
 
 
 def explain_auth(
@@ -134,6 +160,7 @@ def explain_auth(
     api_keys: Mapping[str, Credential] | None = None,
     claude_credentials_path: str | None = None,
     codex_auth_path: str | None = None,
+    xai_credentials_path: str | None = None,
 ) -> AuthReport:
     """Explain, rung by rung, how ``provider``'s credential resolves.
 
@@ -149,7 +176,8 @@ def explain_auth(
         known = sorted(set(ADAPTERS) | set(CHAT_PRESET_ROUTES))
         raise ValueError(f"Unknown provider {provider!r}. Known providers: {', '.join(known)}")
 
-    if canonical in _OAUTH_PROVIDERS:
+    policy = _credential_policy(canonical)
+    if policy == "oauth":
         override = claude_credentials_path if canonical == "claude-code" else codex_auth_path
         step = _oauth_step(canonical, override)
         return AuthReport(provider=canonical, steps=(step,), configured=step.state == "selected")
@@ -204,5 +232,10 @@ def explain_auth(
             )
         )
         selected = True
+
+    if policy == "key-then-oauth":
+        step = _xai_oauth_step(xai_credentials_path, shadowed=selected)
+        steps.append(step)
+        selected = selected or step.state == "selected"
 
     return AuthReport(provider=canonical, steps=tuple(steps), configured=selected)

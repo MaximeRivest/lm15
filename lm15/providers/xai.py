@@ -15,6 +15,12 @@ Credential resolution order:
 3. self-resolved subscription OAuth: lm15's own credential store, then the
    Pi agent store (``~/.pi/agent/auth.json``); refreshed tokens are written
    back to their source file (xAI rotates refresh tokens).
+
+Billing trade-off, stated: a configured key wins over a stored subscription
+login.  A stray ``XAI_API_KEY`` in the environment therefore silently moves
+you from subscription (prepaid) to per-token billing.  Explicit-beats-ambient
+is the resolution rule everywhere in lm15; run
+``lm15.doctor.explain_auth("xai")`` to see which rung won.
 """
 
 from __future__ import annotations
@@ -52,6 +58,7 @@ class XaiLM(OpenAIChatLM):
         supports=supports,
         auth_modes=("bearer", "xai-oauth"),
         env_keys=("XAI_API_KEY",),
+        credential_policy="key-then-oauth",
     )
 
     def __init__(

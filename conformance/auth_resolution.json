@@ -2,34 +2,52 @@
   "provenance": {
     "source": "hand-authored",
     "date": "2026-08-31",
-    "evidence": "changes/2026-08-31-auth-contract-draft.md; spec/auth.md AUTH-1, AUTH-7 (ratified 2026-08-31)"
+    "evidence": "changes/2026-08-31-auth-contract-draft.md; spec/auth.md AUTH-1, AUTH-7 (ratified 2026-08-31); changes/2026-09-01-credential-policy.md (xai key-then-oauth cases)"
   },
-  "description": "Credential-resolution chain fixtures (spec/auth.md AUTH-1) exercised through each implementation's explain_auth equivalent (AUTH-7). Language-neutral: 'steps' name source kinds, not display strings. The sentinel below is planted as every secret value; no rendered report may contain it (AUTH-5).",
+  "description": "Credential-resolution chain fixtures (spec/auth.md AUTH-1) exercised through each implementation's explain_auth equivalent (AUTH-7). Language-neutral: 'steps' name source kinds, not display strings. 'borrowed_file' is the provider's local OAuth credential file in its AUTH-8 wire format: a borrowed CLI store (claude-code, openai-codex) or the lm15-owned store (xai, key-then-oauth policy). The sentinel below is planted as every secret value; no rendered report may contain it (AUTH-5).",
   "sentinel": "SECRET-SENTINEL-DO-NOT-PRINT",
   "cases": [
     {
       "id": "env-selected",
       "provider": "anthropic",
-      "env": { "ANTHROPIC_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT" },
+      "env": {
+        "ANTHROPIC_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT"
+      },
       "api_keys_providers": [],
       "expect": {
         "configured": true,
         "steps": [
-          { "kind": "api_keys", "state": "absent" },
-          { "kind": "env:ANTHROPIC_API_KEY", "state": "selected" }
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:ANTHROPIC_API_KEY",
+            "state": "selected"
+          }
         ]
       }
     },
     {
       "id": "api-keys-shadows-env",
       "provider": "openai",
-      "env": { "OPENAI_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT" },
-      "api_keys_providers": ["openai"],
+      "env": {
+        "OPENAI_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT"
+      },
+      "api_keys_providers": [
+        "openai"
+      ],
       "expect": {
         "configured": true,
         "steps": [
-          { "kind": "api_keys", "state": "selected" },
-          { "kind": "env:OPENAI_API_KEY", "state": "shadowed" }
+          {
+            "kind": "api_keys",
+            "state": "selected"
+          },
+          {
+            "kind": "env:OPENAI_API_KEY",
+            "state": "shadowed"
+          }
         ]
       }
     },
@@ -41,8 +59,14 @@
       "expect": {
         "configured": false,
         "steps": [
-          { "kind": "api_keys", "state": "absent" },
-          { "kind": "env:GROQ_API_KEY", "state": "absent" }
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:GROQ_API_KEY",
+            "state": "absent"
+          }
         ]
       }
     },
@@ -54,55 +78,204 @@
       "expect": {
         "configured": true,
         "steps": [
-          { "kind": "api_keys", "state": "absent" },
-          { "kind": "placeholder", "state": "selected" }
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "placeholder",
+            "state": "selected"
+          }
         ]
       }
     },
     {
       "id": "oauth-fresh",
       "provider": "claude-code",
-      "borrowed_file": { "state": "fresh" },
+      "borrowed_file": {
+        "state": "fresh"
+      },
       "expect": {
         "configured": true,
-        "steps": [{ "kind": "oauth-file", "state": "selected" }]
+        "steps": [
+          {
+            "kind": "oauth-file",
+            "state": "selected"
+          }
+        ]
       }
     },
     {
       "id": "oauth-missing",
       "provider": "claude-code",
-      "borrowed_file": { "state": "missing" },
+      "borrowed_file": {
+        "state": "missing"
+      },
       "expect": {
         "configured": false,
-        "steps": [{ "kind": "oauth-file", "state": "absent" }]
+        "steps": [
+          {
+            "kind": "oauth-file",
+            "state": "absent"
+          }
+        ]
       }
     },
     {
       "id": "oauth-expired-with-refresh-token",
       "provider": "claude-code",
-      "borrowed_file": { "state": "expired-with-refresh" },
+      "borrowed_file": {
+        "state": "expired-with-refresh"
+      },
       "expect": {
         "configured": true,
-        "steps": [{ "kind": "oauth-file", "state": "selected" }]
+        "steps": [
+          {
+            "kind": "oauth-file",
+            "state": "selected"
+          }
+        ]
       }
     },
     {
       "id": "oauth-expired-no-refresh-token",
       "provider": "claude-code",
-      "borrowed_file": { "state": "expired-no-refresh" },
+      "borrowed_file": {
+        "state": "expired-no-refresh"
+      },
       "expect": {
         "configured": false,
-        "steps": [{ "kind": "oauth-file", "state": "absent" }]
+        "steps": [
+          {
+            "kind": "oauth-file",
+            "state": "absent"
+          }
+        ]
       }
     },
     {
       "id": "oauth-never-falls-back-to-env",
       "provider": "claude-code",
-      "env": { "ANTHROPIC_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT" },
-      "borrowed_file": { "state": "missing" },
+      "env": {
+        "ANTHROPIC_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT"
+      },
+      "borrowed_file": {
+        "state": "missing"
+      },
       "expect": {
         "configured": false,
-        "steps": [{ "kind": "oauth-file", "state": "absent" }]
+        "steps": [
+          {
+            "kind": "oauth-file",
+            "state": "absent"
+          }
+        ]
+      }
+    },
+    {
+      "id": "xai-key-shadows-oauth",
+      "provider": "xai",
+      "env": {
+        "XAI_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT"
+      },
+      "api_keys_providers": [],
+      "borrowed_file": {
+        "state": "fresh"
+      },
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:XAI_API_KEY",
+            "state": "selected"
+          },
+          {
+            "kind": "oauth-file",
+            "state": "shadowed"
+          }
+        ]
+      }
+    },
+    {
+      "id": "xai-oauth-fallback",
+      "provider": "xai",
+      "env": {},
+      "api_keys_providers": [],
+      "borrowed_file": {
+        "state": "fresh"
+      },
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:XAI_API_KEY",
+            "state": "absent"
+          },
+          {
+            "kind": "oauth-file",
+            "state": "selected"
+          }
+        ]
+      }
+    },
+    {
+      "id": "xai-oauth-expired-no-refresh",
+      "provider": "xai",
+      "env": {},
+      "api_keys_providers": [],
+      "borrowed_file": {
+        "state": "expired-no-refresh"
+      },
+      "expect": {
+        "configured": false,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:XAI_API_KEY",
+            "state": "absent"
+          },
+          {
+            "kind": "oauth-file",
+            "state": "absent"
+          }
+        ]
+      }
+    },
+    {
+      "id": "xai-nothing-configured",
+      "provider": "xai",
+      "env": {},
+      "api_keys_providers": [],
+      "borrowed_file": {
+        "state": "missing"
+      },
+      "expect": {
+        "configured": false,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:XAI_API_KEY",
+            "state": "absent"
+          },
+          {
+            "kind": "oauth-file",
+            "state": "absent"
+          }
+        ]
       }
     }
   ]

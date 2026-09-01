@@ -54,7 +54,7 @@ from pathlib import Path
 from typing import Any
 
 from ._authlock import CredentialLockTimeout, hold_file_lock, write_private_json_atomic
-from .errors import AuthError, NotConfiguredError
+from .errors import AuthError, NotConfiguredError, UnsupportedFeatureError
 
 __all__ = [
     "CredentialLockTimeout",
@@ -66,6 +66,7 @@ __all__ = [
     "load_claude_code_credential",
     "load_codex_cli_credential",
     "load_xai_credential",
+    "login",
     "login_xai",
     "poll_xai_device_login",
     "read_claude_code_credential",
@@ -824,3 +825,74 @@ def login_xai(
     credential = poll_xai_device_login(device)
     write_xai_credential(credential, auth_path)
     return credential
+
+
+# ─── Uniform login entry point ───────────────────────────────────
+#
+# One door, provider-dispatched.  Only providers with an lm15-owned flow
+# actually log in here (today: xai).  Every other provider fails typed,
+# naming the real path: the foreign CLI command that owns the flow, or the
+# console URL where keys are created.  These URLs are guidance strings, not
+# wire facts — they can drift, and drifting costs a stale hint, not broken
+# inference.
+
+_KEY_CONSOLE_URLS: dict[str, str] = {
+    "openai": "https://platform.openai.com/api-keys",
+    "openai-chat": "https://platform.openai.com/api-keys",
+    "anthropic": "https://console.anthropic.com",
+    "gemini": "https://aistudio.google.com/apikey",
+    "groq": "https://console.groq.com/keys",
+    "openrouter": "https://openrouter.ai/keys",
+    "xai": "https://console.x.ai",
+}
+
+_CLI_LOGIN_HINTS: dict[str, str] = {
+    "claude-code": CLAUDE_CODE_LOGIN_HINT,
+    "openai-codex": OPENAI_CODEX_LOGIN_HINT,
+}
+
+_KEYLESS_LOCAL_SERVERS = frozenset({"ollama", "vllm", "sglang"})
+
+
+def login(
+    provider: str,
+    *,
+    credentials_path: str | os.PathLike[str] | None = None,
+    echo: Any = print,
+) -> LocalOAuthCredential:
+    """Run the login flow lm15 owns for ``provider``; fail typed otherwise.
+
+    This is the uniform door: ``login("xai")`` runs the device-code flow and
+    returns the stored credential.  Providers whose login lives elsewhere
+    raise :class:`lm15.errors.UnsupportedFeatureError` naming the exact fix
+    — the foreign CLI command (Claude Code, Codex) or the console URL where
+    an API key is created.  Nothing here prompts, opens a browser, or
+    spends money except the one flow you explicitly asked for.
+    """
+    canonical = provider.replace("_", "-")
+    if canonical == "xai":
+        return login_xai(credentials_path, echo=echo)
+    if canonical in _CLI_LOGIN_HINTS:
+        raise UnsupportedFeatureError(
+            f"lm15 does not own the {canonical!r} login flow — the provider CLI does. "
+            f"{_CLI_LOGIN_HINTS[canonical]}",
+            provider=canonical,
+        )
+    if canonical in _KEYLESS_LOCAL_SERVERS:
+        raise UnsupportedFeatureError(
+            f"{canonical!r} is a keyless local server — there is nothing to log into. "
+            "The router sends the placeholder key the server expects.",
+            provider=canonical,
+        )
+    if canonical in _KEY_CONSOLE_URLS:
+        raise UnsupportedFeatureError(
+            f"{canonical!r} offers no OAuth login flow — only manually created API keys. "
+            f"Create one at {_KEY_CONSOLE_URLS[canonical]} and set it in the environment "
+            f"or RouterConfig(api_keys={{{canonical!r}: \"...\"}}).",
+            provider=canonical,
+        )
+    raise UnsupportedFeatureError(
+        f"lm15 has no login flow for {provider!r}. Supply an API key via the "
+        "environment or RouterConfig(api_keys=...).",
+        provider=canonical,
+    )

@@ -157,13 +157,19 @@ ASYNC_ADAPTERS: Mapping[str, type] = {
     "xai": AsyncXaiLM,
 }
 
-# Providers whose constructors self-resolve local OAuth credentials and
-# therefore take no api_key from the router.
-_OAUTH_PROVIDERS: frozenset[str] = frozenset({"claude-code", "openai-codex"})
+def _credential_policy(provider: str, adapters: Mapping[str, type] | None = None) -> str:
+    """The provider's declared ``ProviderManifest.credential_policy``.
 
-# Providers that take an ordinary api_key when one resolves (config /
-# XAI_API_KEY-style env), and self-resolve local OAuth when none does.
-_OAUTH_FALLBACK_PROVIDERS: frozenset[str] = frozenset({"xai"})
+    Chat-preset routes (groq, openrouter, local servers) have no manifest
+    of their own and are always ordinary ``"key"`` providers.  This is the
+    single source the router and doctor consult — there is deliberately no
+    hardcoded provider-name list that could drift from the manifests.
+    """
+    lookup = ADAPTERS if adapters is None else adapters
+    cls = lookup.get(provider)
+    if cls is None:
+        return "key"
+    return cls.manifest.credential_policy
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,14 +316,17 @@ class Resolution:
             parts.append(f"Chat Completions compat preset {self.compat!r}")
         parts.append(f"wire model {self.model!r}")
         route = CHAT_PRESET_ROUTES.get(self.provider)
+        policy = _credential_policy(self.provider)
         if self.env_key is not None:
             parts.append(f"key from ${self.env_key}")
-        elif self.provider in _OAUTH_PROVIDERS:
+        elif policy == "oauth":
             parts.append("local OAuth credential (no env key)")
         elif route is not None and route.default_key is not None:
             parts.append("key from explicit api_keys or the preset's local-server default")
         else:
             parts.append("key from explicit api_keys")
+        if policy == "key-then-oauth":
+            parts.append("else the stored local OAuth credential")
         return "; ".join(parts) + "."
 
     def __str__(self) -> str:
@@ -578,7 +587,8 @@ def _build_lm(resolution: Resolution, config: RouterConfig, adapters: Mapping[st
     extra: dict = {}
     if config.transport is not None:
         extra["transport"] = config.transport
-    if resolution.provider in _OAUTH_PROVIDERS:
+    policy = _credential_policy(resolution.provider, adapters)
+    if policy == "oauth":
         return cls(**extra)  # self-resolving local OAuth constructor
     api_key, _ = _api_keys_entry(config, resolution.provider)
     if api_key is None:
@@ -590,7 +600,7 @@ def _build_lm(resolution: Resolution, config: RouterConfig, adapters: Mapping[st
                 break
     if api_key is None and route is not None and route.default_key is not None:
         api_key = route.default_key
-    if not api_key and resolution.provider in _OAUTH_FALLBACK_PROVIDERS:
+    if not api_key and policy == "key-then-oauth":
         return cls(**extra)  # self-resolving local OAuth constructor
     if not api_key:
         env_keys = _declared_env_keys(resolution.provider, adapters)

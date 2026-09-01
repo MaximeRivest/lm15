@@ -484,6 +484,8 @@ def op_explain_auth(msg: JsonObject) -> JsonObject:
     if credentials_path is not None:
         if provider == "claude-code":
             kwargs["claude_credentials_path"] = str(credentials_path)
+        elif provider == "xai":
+            kwargs["xai_credentials_path"] = str(credentials_path)
         else:
             kwargs["codex_auth_path"] = str(credentials_path)
 

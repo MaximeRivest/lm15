@@ -58,6 +58,7 @@ class OpenAICodexLM(OpenAILM):
         supports=supports,
         auth_modes=("chatgpt-oauth", "bearer-oauth"),
         env_keys=(),
+        credential_policy="oauth",
     )
     capabilities: Capabilities = Capabilities(
         input_modalities=frozenset({"text", "image", "document", "binary"}),

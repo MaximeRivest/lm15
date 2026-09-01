@@ -22,23 +22,30 @@ SENTINEL = FIXTURE["sentinel"]
 CASES = FIXTURE["cases"]
 
 
-def _materialize_borrowed_file(tmp_path: Path, state: str) -> str | None:
+def _materialize_borrowed_file(tmp_path: Path, provider: str, state: str) -> str | None:
+    """Write the provider's local OAuth credential file in its AUTH-8 wire
+    format: the borrowed Claude Code store, or the lm15-owned store (xai)."""
     if state == "missing":
         return str(tmp_path / "does-not-exist.json")
-    now_ms = int(time.time() * 1000)
-    oauth: dict = {"accessToken": SENTINEL}
-    if state == "fresh":
-        oauth["expiresAt"] = now_ms + 3_600_000
-        oauth["refreshToken"] = SENTINEL
-    elif state == "expired-with-refresh":
-        oauth["expiresAt"] = 1
-        oauth["refreshToken"] = SENTINEL
-    elif state == "expired-no-refresh":
-        oauth["expiresAt"] = 1
-    else:  # pragma: no cover - fixture schema guard
+    if state not in ("fresh", "expired-with-refresh", "expired-no-refresh"):  # pragma: no cover - fixture schema guard
         raise ValueError(f"unknown borrowed_file state {state!r}")
+    now_ms = int(time.time() * 1000)
+    expiry_ms = now_ms + 3_600_000 if state == "fresh" else 1
+    has_refresh = state in ("fresh", "expired-with-refresh")
+    if provider == "claude-code":
+        oauth: dict = {"accessToken": SENTINEL, "expiresAt": expiry_ms}
+        if has_refresh:
+            oauth["refreshToken"] = SENTINEL
+        body: dict = {"claudeAiOauth": oauth}
+    elif provider == "xai":
+        entry: dict = {"type": "oauth", "access": SENTINEL, "expires": expiry_ms}
+        if has_refresh:
+            entry["refresh"] = SENTINEL
+        body = {"xai": entry}
+    else:  # pragma: no cover - fixture schema guard
+        raise ValueError(f"no materializer for provider {provider!r}")
     path = tmp_path / "credentials.json"
-    path.write_text(json.dumps({"claudeAiOauth": oauth}), encoding="utf-8")
+    path.write_text(json.dumps(body), encoding="utf-8")
     return str(path)
 
 
@@ -49,8 +56,11 @@ def test_auth_resolution_contract_case(case: dict, tmp_path: Path) -> None:
         kwargs["api_keys"] = {provider: SENTINEL for provider in case["api_keys_providers"]}
     borrowed = case.get("borrowed_file")
     if borrowed is not None:
-        assert case["provider"] == "claude-code", "fixture uses claude-code for oauth cases"
-        kwargs["claude_credentials_path"] = _materialize_borrowed_file(tmp_path, borrowed["state"])
+        provider = case["provider"]
+        assert provider in ("claude-code", "xai"), "fixture oauth cases cover claude-code and xai"
+        path = _materialize_borrowed_file(tmp_path, provider, borrowed["state"])
+        kwarg = "claude_credentials_path" if provider == "claude-code" else "xai_credentials_path"
+        kwargs[kwarg] = path
 
     report = explain_auth(case["provider"], **kwargs)
 
