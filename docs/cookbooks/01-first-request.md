@@ -174,7 +174,7 @@ one call in, one typed `Response` out.
   again.
 - **Direct LMs are for configuration, not preference.** Reach for them
   when you need a custom `base_url` or compat preset (ollama, vLLM —
-  recipe [14](14-local-and-compatible-servers.md)) or when you are a
+  recipe [14](15-local-and-compatible-servers.md)) or when you are a
   library taking an LM object from your caller.
 - **Async direct LMs exist too**: `AsyncOpenAILM`, `AsyncAnthropicLM`,
   `AsyncGeminiLM`, same constructors, awaitable `complete`.
@@ -188,4 +188,4 @@ one call in, one typed `Response` out.
 - [04 — Controlling generation](04-generation-config.md)
 - [05 — Streaming](05-streaming.md)
 - [Using the router](../using-the-router.md) — grammar, catalogs, credentials
-- [15 — Errors, retries & testing](15-errors-and-testing.md)
+- [16 — Errors, retries & testing](16-errors-and-testing.md)

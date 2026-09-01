@@ -189,9 +189,9 @@ Promoting a blessed key to canonical later is an additive spec change.
   included. Prefer canonical fields; reach for `extensions` only for
   what they cannot say.
 - **Other endpoints.** `BatchRequest`, `ImageGenerationRequest`,
-  `AudioGenerationRequest`, and `LiveConfig` carry the same
+  `SpeechGenerationRequest`, and `LiveConfig` carry the same
   `extensions` field, and their responses the same `provider_data`
-  (see [recipe 12](12-batch-media-generation.md)).
+  (see recipes [12](12-batch-jobs.md) and [13](13-media-generation.md)).
 
 ## See also
 

@@ -23,7 +23,7 @@ file_delete(file_id) -> None
 file_download(file_id) -> bytes
 batch(requests) -> BatchJob
 image_generate(ImageGenerationRequest) -> ImageGenerationResponse
-audio_generate(AudioGenerationRequest) -> AudioGenerationResponse
+speech_generate(SpeechGenerationRequest) -> SpeechGenerationResponse
 ```
 
 Unsupported endpoints raise `UnsupportedFeatureError`.

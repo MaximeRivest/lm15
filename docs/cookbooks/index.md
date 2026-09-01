@@ -36,16 +36,18 @@ capture. Style rules live in [STYLE.md](STYLE.md).
 
 - [11 — Prompt caching](11-caching.md) — Cache breakpoints that cut cost
   on long prefixes, with real usage numbers before and after.
-- [12 — Batch & media generation](12-batch-media-generation.md)
-  — The non-chat endpoints: async batches, image and audio generation.
-- [13 — Live sessions (realtime)](13-live-sessions.md) — Bidirectional
+- [12 — Batch jobs](12-batch-jobs.md) — Submit hundreds of requests as
+  a ticket; collect the answers later at about half price.
+- [13 — Media generation (images & speech)](13-media-generation.md)
+  — Images and speech out of the same Part types you send in.
+- [14 — Live sessions (realtime)](14-live-sessions.md) — Bidirectional
   sessions over websockets: events in, audio and text out.
 
 ## Production
 
-- [14 — Local & OpenAI-compatible servers](14-local-and-compatible-servers.md)
+- [15 — Local & OpenAI-compatible servers](15-local-and-compatible-servers.md)
   — Ollama, vLLM, and friends via `OpenAIChatLM` with `base_url` and compat.
-- [15 — Errors, retries & testing](15-errors-and-testing.md) — The typed
+- [16 — Errors, retries & testing](16-errors-and-testing.md) — The typed
   error tree, why retry policy is yours, and testing without a network.
-- [16 — Provider passthrough](16-provider-passthrough.md) — Reaching
+- [17 — Provider passthrough](17-provider-passthrough.md) — Reaching
   provider-only knobs without forking your code off lm15's types.

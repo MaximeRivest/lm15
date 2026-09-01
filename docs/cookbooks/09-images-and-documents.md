@@ -219,12 +219,12 @@ across all three. See [../using-the-router.md](../using-the-router.md).
   Files-API URIs are the documented path for repeated use.
 - **Responses contain media too.** Image generation returns the same
   `ImagePart`s — `.images` on an `ImageGenerationResponse`, `.images` /
-  `.image_bytes` on a chat `Result` (recipe 12).
+  `.image_bytes` on a chat `Result` (recipe 13).
 
 ## See also
 
 - [02 — Multi-turn conversations](02-conversations.md)
 - [10 — Audio, video & reasoning models](10-audio-video-reasoning.md)
-- [12 — Batch & media generation](12-batch-media-generation.md)
-- [15 — Errors, retries & testing](15-errors-and-testing.md)
+- [13 — Media generation (images & speech)](13-media-generation.md)
+- [16 — Errors, retries & testing](16-errors-and-testing.md)
 - [../using-the-router.md](../using-the-router.md)

@@ -1,6 +1,6 @@
 # Cookbook style guide
 
-The editorial constitution for the 16-recipe lm15 cookbook. Every recipe
+The editorial constitution for the 17-recipe lm15 cookbook. Every recipe
 page MUST conform. When in doubt, this file wins over precedent in
 older docs (the retired monolithic cookbooks were raw material to mine,
 not style to copy).
@@ -65,7 +65,7 @@ steps" prose paragraphs — that is what **See also** is for.
 5. Model text output varies run to run; that is fine and honest. Do not
    "tidy" model prose. Do not cherry-pick reruns to get a cuter answer.
 6. Output blocks are fenced as ```output (not ```text, not bare).
-7. Errors shown deliberately (recipe 15) follow the same rules: real
+7. Errors shown deliberately (recipe 16) follow the same rules: real
    traceback, trimmed to the exception line plus the 1–3 frames that
    teach, `…` for the rest.
 
@@ -86,7 +86,7 @@ prefix='gpt-' — OpenAI GPT family …; key from $OPENAI_API_KEY.
 
 - **Front door is the router.** Recipes use `LMRouter` /
   `AsyncLMRouter` by default. Direct LM construction appears only where
-  it is the documented path: custom `base_url`/compat (recipe 14),
+  it is the documented path: custom `base_url`/compat (recipe 15),
   passthrough specifics, library-embedding notes in Variations.
 - **Tools come from `lm15.tool()`.** Recipe 06 leads with
   `tool(fn)`/`derive(fn)`; hand-written `FunctionTool` is shown once as
@@ -102,13 +102,13 @@ prefix='gpt-' — OpenAI GPT family …; key from $OPENAI_API_KEY.
 - **Models.** Default to cheap: `gpt-4.1-mini` (OpenAI),
   `gemini-3-flash-preview` (Gemini), `claude-sonnet-4-5` (Anthropic)
   only where the recipe needs Anthropic-specific behavior. Local ollama
-  appears only in recipe 14 and is guarded by a reachability note, not
+  appears only in recipe 15 and is guarded by a reachability note, not
   try/except.
 - **Tuples idiom.** lm15 surfaces are frozen and tuple-valued; write
   them that way: `messages=(Message.user("Hi"),)` — trailing comma on
   1-tuples, `tools=(weather,)`, never lists.
 - **No try/except around demo code**, unless the recipe is *teaching*
-  the error (recipe 15, ambiguity in recipe 16's edge notes). A recipe
+  the error (recipe 16, ambiguity in recipe 17's edge notes). A recipe
   that needs defensive wrapping is a recipe with a broken example.
 - No type annotations on demo locals; full hints on functions passed to
   `tool()` (they are the input). No `if __name__ == "__main__"`. No
@@ -140,7 +140,7 @@ means it is two recipes — split a Variation out or cut.
 ## File layout
 
 - Pages live in `docs/cookbooks/`, named `NN-slug.md` (see
-  [index.md](index.md) for the canonical 16).
+  [index.md](index.md) for the canonical 17).
 - `index.md` lists all recipes grouped Essentials / Tools / Modalities /
   Beyond chat / Production, one-line hook each, ≤ 90 chars per hook.
 - Cross-links between recipes are relative (`05-streaming.md`); links

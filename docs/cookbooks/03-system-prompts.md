@@ -107,7 +107,7 @@ content is instructions, not transcript. On the wire:
 
 `Message.developer()` is a fourth role alongside `user`, `assistant`,
 and `tool`. OpenAI keeps it as `role: "developer"` (configurable via
-compat — older Chat Completions servers want `"system"`; recipe 14).
+compat — older Chat Completions servers want `"system"`; recipe 15).
 Anthropic and Gemini providers convert it to a user message whose text
 is prefixed with `[developer]\n`. That is a convention, not an API
 guarantee: on those providers a developer message has whatever authority
@@ -140,7 +140,7 @@ request, your messages verbatim — what you build is what is sent.
 - **Fail-fast validation.** `Request(system="")` raises `ValueError`
   and protocol parts (tool calls, citations) in `system` raise
   `TypeError` — both at construction, before any network call
-  (recipe 15).
+  (recipe 16).
 - **System parts are text-only in practice.** All three providers
   flatten system parts to text before sending. Images or documents in
   instructions belong in a `user` or `developer` message instead
@@ -151,5 +151,5 @@ request, your messages verbatim — what you build is what is sent.
 - [02 — Multi-turn conversations](02-conversations.md)
 - [04 — Controlling generation](04-generation-config.md)
 - [11 — Prompt caching](11-caching.md)
-- [14 — Local & OpenAI-compatible servers](14-local-and-compatible-servers.md)
+- [15 — Local & OpenAI-compatible servers](15-local-and-compatible-servers.md)
 - [Using the router](../using-the-router.md)

@@ -174,12 +174,12 @@ other providers.
   preferred.
 - **Async mirror.** Identical `Config`, `await AsyncLMRouter().complete(request)`.
 - **Provider-only knobs** (`seed`, `frequency_penalty`, …) go in
-  `Config(extensions=…)` — [recipe 16](16-provider-passthrough.md).
+  `Config(extensions=…)` — [recipe 17](17-provider-passthrough.md).
 
 ## See also
 
 - [03 — System & developer prompts](03-system-prompts.md)
 - [05 — Streaming](05-streaming.md)
 - [08 — Structured output](08-structured-output.md) — `response_format` in depth
-- [16 — Provider passthrough](16-provider-passthrough.md)
+- [17 — Provider passthrough](17-provider-passthrough.md)
 - [Using the router](../using-the-router.md)

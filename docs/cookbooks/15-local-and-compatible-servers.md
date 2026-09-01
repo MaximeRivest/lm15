@@ -187,6 +187,6 @@ objects instead".
 
 - [01 — Your first request](01-first-request.md) — keys, router vs direct LMs
 - [05 — Streaming](05-streaming.md) — `Result` over typed stream events
-- [15 — Errors, retries & testing](15-errors-and-testing.md)
-- [16 — Provider passthrough](16-provider-passthrough.md) — server-specific knobs
+- [16 — Errors, retries & testing](16-errors-and-testing.md)
+- [17 — Provider passthrough](17-provider-passthrough.md) — server-specific knobs
 - [Using the router](../using-the-router.md) — why `base_url` is not router syntax

@@ -222,6 +222,6 @@ either.
 
 - [01 — Your first request](01-first-request.md) — key loading, `MissingCredentialError`
 - [05 — Streaming](05-streaming.md) — the events a streaming fake must produce
-- [14 — Local & OpenAI-compatible servers](14-local-and-compatible-servers.md) — custom transports and `base_url`
-- [16 — Provider passthrough](16-provider-passthrough.md)
+- [15 — Local & OpenAI-compatible servers](15-local-and-compatible-servers.md) — custom transports and `base_url`
+- [17 — Provider passthrough](17-provider-passthrough.md)
 - [Using the router](../using-the-router.md) — credential resolution order

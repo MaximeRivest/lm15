@@ -229,7 +229,7 @@ does not estimate.
 - [05 — Streaming](05-streaming.md) — `Result.events()` and typed deltas.
 - [09 — Images, PDFs & documents](09-images-and-documents.md) — the
   other media parts, with broader provider support.
-- [13 — Live sessions (realtime)](13-live-sessions.md) — audio out, not
+- [14 — Live sessions (realtime)](14-live-sessions.md) — audio out, not
   just in.
 - [../using-the-type-system.md](../using-the-type-system.md) — parts,
   `Reasoning`, and `Usage` in full.

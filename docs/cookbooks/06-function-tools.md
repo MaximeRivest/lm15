@@ -218,6 +218,6 @@ which builds one `ToolResultPart` per entry.
 
 - [07 — Built-in provider tools](07-builtin-tools.md)
 - [08 — Structured output](08-structured-output.md)
-- [15 — Errors, retries & testing](15-errors-and-testing.md)
+- [16 — Errors, retries & testing](16-errors-and-testing.md)
 - [Tools from functions](../tools-from-functions.md) — full derivation rules
 - [Using the router](../using-the-router.md)
