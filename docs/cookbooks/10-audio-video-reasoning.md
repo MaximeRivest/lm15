@@ -143,6 +143,19 @@ Usage(input_tokens=32, output_tokens=79, total_tokens=111, …, reasoning_tokens
 Compare with the audio call above: 368 reasoning tokens there, none
 here. (And the model still dodges the trap — it is a famous riddle.)
 
+Every adapter puts the explicit off on the wire in its provider's native
+form — or fails loudly (mapping rule MAP-5). OpenAI gets
+`reasoning: {"effort": "none"}` (gpt-5.1 honors it with zero reasoning
+tokens; older models whose floor is `"minimal"` reject it with a clear
+400). Chat-dialect servers with `reasoning_effort` (Groq, vLLM, SGLang)
+get `reasoning_effort: "none"`; OpenRouter gets
+`reasoning: {"enabled": false}`; DeepSeek, Qwen and Z.AI get their
+native disable fields. Anthropic sends nothing — thinking is opt-in
+there, so absence is the off switch. xAI raises
+`UnsupportedFeatureError`: Grok reasoning models have no off switch, and
+the server silently ignores disable-shaped fields. What never happens is
+a silent no-op that bills you for reasoning you turned off.
+
 Thinking streams. `ThinkingDelta` events arrive before `TextDelta`
 events, distinguished by `delta.type`:
 

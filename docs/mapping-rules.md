@@ -85,6 +85,35 @@ event, chat-completions and Gemini streams began with a bare delta — so any
 consumer that keyed on the start event worked on one provider and broke on
 the next. One vocabulary means the trace shape is provider-independent.
 
+## MAP-5 — Explicit reasoning-off reaches the wire or fails loudly
+
+`Config(reasoning=Reasoning(effort="off"))` is an explicit instruction, not
+a default (the tri-state is defined in spec/types.md §Reasoning). Every
+adapter must translate it into the provider's native disable mechanism:
+
+- OpenAI Responses dialect: `reasoning: {"effort": "none"}`
+- Chat Completions `reasoning_effort` servers (incl. Groq, vLLM, SGLang):
+  `reasoning_effort: "none"`
+- OpenRouter: `reasoning: {"enabled": false}`
+- DeepSeek: `thinking: {"type": "disabled"}`
+- Qwen/DashScope, Z.AI: `enable_thinking: false`
+- Gemini: `thinkingConfig: {"thinkingBudget": 0}`
+- Anthropic and Claude Code: omit `thinking` — thinking is opt-in there,
+  so absence IS the native off switch.
+- xAI: RAISES `UnsupportedFeatureError`. Grok reasoning models have no
+  off switch and api.x.ai silently ignores disable-shaped fields.
+
+When the selected model cannot honor the disable (gpt-5-mini's floor is
+`"minimal"`; gemini-2.5-pro rejects budget 0), the provider's 400 surfaces
+unchanged. An adapter must never omit the field and let the model reason at
+its default — that is a silent paid no-op.
+
+**Why:** live testing (2026-09-01) showed omission was not off:
+gpt-5-mini spent 64 hidden reasoning tokens, Groq gpt-oss-20b spent 45,
+and grok-4.6 spent 158 while accepting `thinking: {"type": "disabled"}`
+without effect. Reasoning tokens are billed output; an explicit off that
+silently does nothing charges the caller for what they disabled.
+
 ---
 
 History: MAP-1 and MAP-2 were implicit in the reference adapters; they were
@@ -93,3 +122,6 @@ flagged anthropic.container, openai.code_interpreter (MAP-1) and
 gemini.max_output_tokens (MAP-2) — see
 `lm15-contract/goldens/REVIEW-2026-06-10.md`. MAP-3 was written on 2026-06-10
 after live vLLM/SGLang/ollama testing showed the multi-end merge losing usage.
+MAP-5 was written on 2026-09-01 after a reasoning-off audit found four
+adapters silently omitting the disable (see
+`lm15-contract/changes/2026-09-01-reasoning-off.md`).

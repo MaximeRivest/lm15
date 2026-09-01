@@ -416,7 +416,17 @@ class OpenAIChatLM(BaseProviderLM):
                         "preserve_thinking": True,
                     }
             else:
-                if compat.thinking_format == "deepseek":
+                # Explicit off must reach the wire; omission lets
+                # reasoning-by-default models spend hidden reasoning tokens
+                # (verified live 2026-09-01 on Groq: gpt-oss-20b spent 45
+                # reasoning tokens when the field was omitted).  Servers
+                # whose models cannot disable reasoning reject "none" with
+                # a clear 400 — loud failure over a silent paid no-op.
+                if compat.thinking_format == "reasoning_effort":
+                    payload["reasoning_effort"] = "none"
+                elif compat.thinking_format == "openrouter":
+                    payload["reasoning"] = {"enabled": False}
+                elif compat.thinking_format == "deepseek":
                     payload["thinking"] = {"type": "disabled"}
                 elif compat.thinking_format in {"qwen", "zai"}:
                     payload["enable_thinking"] = False

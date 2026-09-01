@@ -660,3 +660,79 @@ def test_gemini_reasoning_effort_maps_to_thinking_budget() -> None:
         "includeThoughts": True, "thinkingBudget": 999,
     }
     assert thinking_config(Reasoning(effort="off")) == {"thinkingBudget": 0}
+
+
+# ─── MAP-5: explicit reasoning-off reaches the wire or fails loudly ────────
+#
+# Live audit 2026-09-01: omitting the field let reasoning-by-default models
+# spend hidden (billed) reasoning tokens on requests that asked for off.
+
+
+def _reasoning_off_request(model: str = "test-model") -> Request:
+    return Request(
+        model=model,
+        messages=(Message.user("12*13?"),),
+        config=Config(reasoning=Reasoning(effort="off")),
+    )
+
+
+def test_openai_responses_reasoning_off_sends_effort_none() -> None:
+    lm = OpenAILM(api_key="sk-test", transport=_FakeTransport())
+    payload = json.loads(lm.build_request(_reasoning_off_request("gpt-5.1"), stream=False).body)
+    assert payload["reasoning"] == {"effort": "none"}
+
+
+def test_openai_chat_reasoning_off_sends_reasoning_effort_none() -> None:
+    from lm15.providers.openai_chat import OpenAIChatLM
+
+    for preset in ("openai", "groq", "vllm", "sglang"):
+        lm = OpenAIChatLM(
+            api_key="sk-test", transport=_FakeTransport(),
+            compat=preset, base_url="https://example.test/v1",
+        )
+        payload = json.loads(lm.build_request(_reasoning_off_request(), stream=False).body)
+        assert payload["reasoning_effort"] == "none", preset
+        assert "thinking" not in payload, preset
+
+
+def test_openrouter_reasoning_off_sends_enabled_false() -> None:
+    from lm15.providers.openai_chat import OpenAIChatLM
+
+    chat = OpenAIChatLM(
+        api_key="sk-test", transport=_FakeTransport(),
+        compat="openrouter", base_url="https://example.test/v1",
+    )
+    payload = json.loads(chat.build_request(_reasoning_off_request(), stream=False).body)
+    assert payload["reasoning"] == {"enabled": False}
+
+    # The Responses adapter resolves its compat from the base URL.
+    responses = OpenAILM(
+        api_key="sk-test", transport=_FakeTransport(),
+        base_url="https://openrouter.ai/api/v1",
+    )
+    payload = json.loads(responses.build_request(_reasoning_off_request(), stream=False).body)
+    assert payload["reasoning"] == {"enabled": False}
+
+
+def test_deepseek_qwen_zai_reasoning_off_unchanged() -> None:
+    from lm15.providers.openai_chat import OpenAIChatLM
+
+    expectations = {
+        "deepseek": ("thinking", {"type": "disabled"}),
+        "qwen": ("enable_thinking", False),
+        "zai": ("enable_thinking", False),
+    }
+    for preset, (field, value) in expectations.items():
+        lm = OpenAIChatLM(
+            api_key="sk-test", transport=_FakeTransport(),
+            compat=preset, base_url="https://example.test/v1",
+        )
+        payload = json.loads(lm.build_request(_reasoning_off_request(), stream=False).body)
+        assert payload[field] == value, preset
+
+
+def test_anthropic_reasoning_off_omits_thinking() -> None:
+    # Anthropic thinking is opt-in; absence IS the native off switch.
+    lm = AnthropicLM(api_key="sk-test", transport=_FakeTransport())
+    payload = json.loads(lm.build_request(_reasoning_off_request("claude-sonnet-4-5"), stream=False).body)
+    assert "thinking" not in payload

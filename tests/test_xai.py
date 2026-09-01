@@ -247,3 +247,20 @@ def test_async_mirror_shares_credential_resolution(tmp_path):
     assert alm.provider == "xai"
     assert alm.base_url == "https://api.x.ai/v1"
     assert alm._inner.api_key == "k"
+
+
+def test_reasoning_off_raises_unsupported():
+    # Grok reasoning models have no off switch; api.x.ai accepts
+    # thinking={"type": "disabled"} but ignores it (live 2026-09-01:
+    # grok-4.6 still spent 158 reasoning tokens).  A silent paid no-op
+    # on an explicit disable must fail loudly instead (MAP-5).
+    from lm15.types import Config, Message, Reasoning, Request
+
+    lm = XaiLM(api_key="xai-test")
+    request = Request(
+        model="grok-4.6",
+        messages=(Message.user("12*13?"),),
+        config=Config(reasoning=Reasoning(effort="off")),
+    )
+    with pytest.raises(UnsupportedFeatureError, match="reasoning cannot be disabled"):
+        lm.build_request(request, stream=False)

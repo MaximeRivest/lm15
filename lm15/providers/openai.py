@@ -600,7 +600,22 @@ class OpenAILM(BaseProviderLM):
                         "preserve_thinking": True,
                     }
             else:
-                if compat.reasoning_format == "deepseek":
+                # Explicit off must reach the wire.  Sending nothing lets
+                # reasoning-by-default models (gpt-5 family, o-series) burn
+                # hidden reasoning tokens the caller asked to disable —
+                # verified live 2026-09-01: gpt-5-mini spent 64 reasoning
+                # tokens on a request with effort="off" when the field was
+                # omitted.  Models whose floor is "minimal" reject
+                # "none" with a clear 400; that loud failure is deliberate
+                # (a silent default-effort run spends money on hidden
+                # reasoning tokens the caller asked to disable).
+                if compat.reasoning_format == "responses_reasoning":
+                    payload["reasoning"] = {"effort": "none"}
+                elif compat.reasoning_format == "reasoning_effort":
+                    payload["reasoning_effort"] = "none"
+                elif compat.reasoning_format == "openrouter":
+                    payload["reasoning"] = {"enabled": False}
+                elif compat.reasoning_format == "deepseek":
                     payload["thinking"] = {"type": "disabled"}
                 elif compat.reasoning_format in {"qwen", "zai"}:
                     payload["enable_thinking"] = False

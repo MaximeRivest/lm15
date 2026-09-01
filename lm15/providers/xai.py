@@ -41,7 +41,7 @@ from ..errors import ProviderError, UnsupportedFeatureError, with_credential_hin
 from ..features import EndpointSupport, ProviderManifest
 from ..protocols import Capabilities
 from ..transports import TransportRequest
-from ..types import ImageGenerationRequest, ImageGenerationResponse, ImagePart, Usage, VideoGenerationRequest, VideoJobInfo, VideoPart
+from ..types import ImageGenerationRequest, ImageGenerationResponse, ImagePart, Request, Usage, VideoGenerationRequest, VideoJobInfo, VideoPart
 from .base import Credential, HttpResponse, SyncTransport, default_transport
 from .common import make_json_request
 from .openai_chat import OpenAIChatLM
@@ -104,6 +104,24 @@ class XaiLM(OpenAIChatLM):
             provider="xai",
             capabilities=XAI_CAPABILITIES,
         )
+
+    def _payload(self, request: Request, stream: bool) -> dict[str, Any]:
+        # Grok reasoning models have no off switch.  The inherited deepseek
+        # wire shape (thinking={"type": "disabled"}) is accepted by
+        # api.x.ai but silently ignored — verified live 2026-09-01:
+        # grok-4.6 still spent 158 reasoning tokens.  A silent paid no-op
+        # on an explicit disable is worse than an error, so raise.  For
+        # non-reasoning Grok variants, omit the reasoning config
+        # (Config(reasoning=None)) — they never reason anyway.
+        reasoning = request.config.reasoning
+        if reasoning is not None and reasoning.is_off:
+            raise UnsupportedFeatureError(
+                "xai: reasoning cannot be disabled — Grok reasoning models have no "
+                "off switch, and xAI silently ignores disable fields on the wire. "
+                "Omit the reasoning config, or pick a non-reasoning Grok model.",
+                provider=self.provider,
+            )
+        return super()._payload(request, stream)
 
     def _image_generate_request(self, request: ImageGenerationRequest) -> TransportRequest:
         base = self.base_url.rstrip("/")

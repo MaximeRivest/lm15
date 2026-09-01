@@ -1619,8 +1619,12 @@ class Reasoning:
     reasoning off."  This tri-state is intentional because some providers
     and models have their own defaults.
 
-    Not all providers support every knob. The LM maps to the
-    closest available mechanism and reports degradation via warnings.
+    Not all providers support every knob. Each LM maps the config to
+    its provider's closest native mechanism and never silently drops an
+    explicit setting: when a model cannot honor it (for example
+    effort="off" on a model that always reasons, or a Gemini model that
+    rejects thinkingBudget=0), the request fails loudly — lm15 raises
+    UnsupportedFeatureError, or the provider's own error surfaces.
     """
 
     effort: ReasoningEffort = "off"
