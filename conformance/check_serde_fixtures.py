@@ -15,7 +15,6 @@ REPO_ROOT = ROOT.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from lm15 import serde  # noqa: E402
 from conformance.sources import contract_path  # noqa: E402
 
 # One copy: the serde vector is read from the lm15-contract checkout
@@ -37,39 +36,9 @@ class SerdeResult:
 JsonToObj = Callable[[JsonObject], Any]
 ObjToJson = Callable[[Any], JsonObject]
 
-KIND_SERDE: dict[str, tuple[JsonToObj, ObjToJson]] = {
-    "part": (serde.part_from_dict, serde.part_to_dict),
-    "message": (serde.message_from_dict, serde.message_to_dict),
-    "tool": (serde.tool_from_dict, serde.tool_to_dict),
-    "tool_choice": (serde.tool_choice_from_dict, serde.tool_choice_to_dict),
-    "reasoning": (serde.reasoning_from_dict, serde.reasoning_to_dict),
-    "config": (serde.config_from_dict, serde.config_to_dict),
-    "cache_config": (serde.cache_config_from_dict, serde.cache_config_to_dict),
-    "continuation_state": (serde.continuation_from_dict, serde.continuation_to_dict),
-    "error_detail": (serde.error_detail_from_dict, serde.error_detail_to_dict),
-    "delta": (serde.delta_from_dict, serde.delta_to_dict),
-    "usage": (serde.usage_from_dict, serde.usage_to_dict),
-    "stream_event": (serde.stream_event_from_dict, serde.stream_event_to_dict),
-    "request": (serde.request_from_dict, serde.request_to_dict),
-    "response": (serde.response_from_dict, serde.response_to_dict),
-    "model_info": (serde.model_info_from_dict, serde.model_info_to_dict),
-    "audio_format": (serde.audio_format_from_dict, serde.audio_format_to_dict),
-    "live_config": (serde.live_config_from_dict, serde.live_config_to_dict),
-    "live_client_event": (serde.live_client_event_from_dict, serde.live_client_event_to_dict),
-    "live_server_event": (serde.live_server_event_from_dict, serde.live_server_event_to_dict),
-    "batch_request": (serde.batch_request_from_dict, serde.batch_request_to_dict),
-    "batch_job": (serde.batch_job_from_dict, serde.batch_job_to_dict),
-    "batch_entry": (serde.batch_entry_from_dict, serde.batch_entry_to_dict),
-    "file_upload_request": (serde.file_upload_request_from_dict, serde.file_upload_request_to_dict),
-    "file_info": (serde.file_info_from_dict, serde.file_info_to_dict),
-    "file_page": (serde.file_page_from_dict, serde.file_page_to_dict),
-    "image_generation_request": (serde.image_generation_request_from_dict, serde.image_generation_request_to_dict),
-    "image_generation_response": (serde.image_generation_response_from_dict, serde.image_generation_response_to_dict),
-    "speech_generation_request": (serde.speech_generation_request_from_dict, serde.speech_generation_request_to_dict),
-    "speech_generation_response": (serde.speech_generation_response_from_dict, serde.speech_generation_response_to_dict),
-    "video_generation_request": (serde.video_generation_request_from_dict, serde.video_generation_request_to_dict),
-    "video_job": (serde.video_job_from_dict, serde.video_job_to_dict),
-}
+# One table: the vet shim's kind registry is the reference's serde surface
+# (harness/PROTOCOL.md "Serde kinds"); a second copy here drifted once.
+from lm15.vet import KIND_SERDE  # noqa: E402
 
 
 def load_cases() -> list[JsonObject]:
