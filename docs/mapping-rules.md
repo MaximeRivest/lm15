@@ -66,6 +66,25 @@ streaming_vllm/streaming_sglang draft goldens before this rule). With exactly
 one final end event, "the end event" and "the stream's finish_reason and
 usage" are the same thing by construction, in every port.
 
+**Terminal frames that say nothing say nothing.** A bare terminator (`[DONE]`
+on either OpenAI dialect, Anthropic `message_stop`) maps to an end event with
+`finish_reason=None` and `usage=None`. It must not claim `stop`: the merge
+rule lets a later non-`None` value replace an earlier one, so a `[DONE]`
+carrying `stop` would overwrite the `tool_call` that `response.completed`
+had already established. The event trace would then contradict the
+materialized `Response`.
+
+**Usage counters at the wire boundary (INV-029).** An adapter never invents
+`0` for a counter the provider did not send; absent stays `None` and
+`Usage` auto-sums `total_tokens` only when both primaries are present. One
+stated exception: Gemini's proto3-JSON wire omits zero-valued fields, so
+inside a present `usageMetadata` an absent `promptTokenCount` or
+`candidatesTokenCount` is a reported `0` (pinned by the reviewed golden
+`gemini.max_output_tokens`: `candidatesTokenCount` absent, `totalTokenCount`
+= prompt + thoughts). When `usageMetadata` itself is absent, every counter
+is `None`. Secondary Gemini counters (cache, thoughts) stay verbatim: absent
+is "not reported".
+
 ---
 
 ## MAP-4 — A stream opens with exactly one start event

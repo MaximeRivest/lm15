@@ -890,8 +890,8 @@ class OpenAILM(BaseProviderLM):
         input_details = usage_data.get("input_tokens_details") or {}
         output_details = usage_data.get("output_tokens_details") or {}
         usage = Usage(
-            input_tokens=int(usage_data.get("input_tokens", 0) or 0),
-            output_tokens=int(usage_data.get("output_tokens", 0) or 0),
+            input_tokens=usage_data.get("input_tokens"),
+            output_tokens=usage_data.get("output_tokens"),
             total_tokens=usage_data.get("total_tokens"),
             reasoning_tokens=output_details.get("reasoning_tokens"),
             cache_read_tokens=input_details.get("cached_tokens"),
@@ -929,7 +929,10 @@ class OpenAILM(BaseProviderLM):
         if not raw_event.data:
             return None
         if raw_event.data == "[DONE]":
-            return StreamEndEvent(finish_reason="stop")
+            # A bare terminator: it carries no finish reason and no usage.
+            # response.completed already said how the turn ended; claiming
+            # "stop" here would overwrite "tool_call" in the coalesced end.
+            return StreamEndEvent()
         payload = json.loads(raw_event.data)
         et = str(payload.get("type") or "")
 
@@ -1017,8 +1020,8 @@ class OpenAILM(BaseProviderLM):
             input_details = usage_data.get("input_tokens_details") or {}
             output_details = usage_data.get("output_tokens_details") or {}
             usage = Usage(
-                input_tokens=int(usage_data.get("input_tokens", 0) or 0),
-                output_tokens=int(usage_data.get("output_tokens", 0) or 0),
+                input_tokens=usage_data.get("input_tokens"),
+                output_tokens=usage_data.get("output_tokens"),
                 total_tokens=usage_data.get("total_tokens"),
                 reasoning_tokens=output_details.get("reasoning_tokens"),
                 cache_read_tokens=input_details.get("cached_tokens"),
@@ -1168,8 +1171,8 @@ class OpenAILM(BaseProviderLM):
             u_in = usage_data.get("input_token_details") or usage_data.get("input_tokens_details") or {}
             u_out = usage_data.get("output_token_details") or usage_data.get("output_tokens_details") or {}
             usage = Usage(
-                input_tokens=int(usage_data.get("input_tokens", 0) or 0),
-                output_tokens=int(usage_data.get("output_tokens", 0) or 0),
+                input_tokens=usage_data.get("input_tokens"),
+                output_tokens=usage_data.get("output_tokens"),
                 total_tokens=usage_data.get("total_tokens"),
                 reasoning_tokens=u_out.get("reasoning_tokens"),
                 cache_read_tokens=u_in.get("cached_tokens"),
@@ -1365,8 +1368,8 @@ class OpenAILM(BaseProviderLM):
                 u_in = usage_data.get("input_token_details") or usage_data.get("input_tokens_details") or {}
                 u_out = usage_data.get("output_token_details") or usage_data.get("output_tokens_details") or {}
                 events.append(LiveServerTurnEndEvent(usage=Usage(
-                    input_tokens=int(usage_data.get("input_tokens", 0) or 0),
-                    output_tokens=int(usage_data.get("output_tokens", 0) or 0),
+                    input_tokens=usage_data.get("input_tokens"),
+                    output_tokens=usage_data.get("output_tokens"),
                     total_tokens=usage_data.get("total_tokens"),
                     reasoning_tokens=u_out.get("reasoning_tokens"),
                     cache_read_tokens=u_in.get("cached_tokens"),

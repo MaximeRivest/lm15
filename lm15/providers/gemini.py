@@ -235,6 +235,36 @@ def _response_format_to_gemini_config(format_config: dict[str, Any]) -> dict[str
     return {"responseMimeType": "application/json", _gemini_schema_field(schema): schema}
 
 
+def _gemini_usage(usage_payload: Any, *, output_keys: tuple[str, ...]) -> Usage:
+    """Map a Gemini ``usageMetadata`` object to canonical Usage (INV-029).
+
+    Gemini's proto3-JSON wire omits zero-valued fields, so inside a present
+    ``usageMetadata`` an absent primary counter means "0", not "not
+    reported" (pinned: lm15-contract goldens/gemini/max_output_tokens.json,
+    where ``candidatesTokenCount`` is absent and ``totalTokenCount`` equals
+    prompt + thoughts).  When ``usageMetadata`` itself is missing nothing
+    was reported and every counter stays None.  Secondary counters are
+    conditional on a feature (cache, thinking) and stay verbatim: absent is
+    "not reported".  ``output_keys`` lists the wire names for output tokens
+    in priority order (``candidatesTokenCount`` on generateContent,
+    ``responseTokenCount`` on Live).
+    """
+    if not isinstance(usage_payload, dict) or not usage_payload:
+        return Usage()
+    output_tokens: Any = 0
+    for key in output_keys:
+        if key in usage_payload:
+            output_tokens = usage_payload[key]
+            break
+    return Usage(
+        input_tokens=usage_payload.get("promptTokenCount", 0),
+        output_tokens=output_tokens,
+        total_tokens=usage_payload.get("totalTokenCount"),
+        cache_read_tokens=usage_payload.get("cachedContentTokenCount"),
+        reasoning_tokens=usage_payload.get("thoughtsTokenCount"),
+    )
+
+
 def _finish_reason(reason: str | None, *, has_tool_call: bool = False) -> str:
     if has_tool_call:
         return "tool_call"
@@ -851,14 +881,7 @@ class GeminiLM(BaseProviderLM):
         parts.extend(_gemini_citations(candidate, full_text))
         if not parts:
             parts = [TextPart(text="")]
-        usage_payload = data.get("usageMetadata") or {}
-        usage = Usage(
-            input_tokens=int(usage_payload.get("promptTokenCount", 0) or 0),
-            output_tokens=int(usage_payload.get("candidatesTokenCount", usage_payload.get("responseTokenCount", 0)) or 0),
-            total_tokens=usage_payload.get("totalTokenCount"),
-            cache_read_tokens=usage_payload.get("cachedContentTokenCount"),
-            reasoning_tokens=usage_payload.get("thoughtsTokenCount"),
-        )
+        usage = _gemini_usage(data.get("usageMetadata"), output_keys=("candidatesTokenCount", "responseTokenCount"))
         has_tool = any(isinstance(part, ToolCallPart) for part in parts)
         message_continuation: tuple[ContinuationState, ...] = ()
         if data.get("responseId"):
@@ -974,14 +997,7 @@ class GeminiLM(BaseProviderLM):
             yield StreamEndEvent(finish_reason="stop", usage=self._usage_from_payload(payload), provider_data=payload)
 
     def _usage_from_payload(self, payload: dict[str, Any]) -> Usage:
-        usage_payload = payload.get("usageMetadata") or {}
-        return Usage(
-            input_tokens=int(usage_payload.get("promptTokenCount", 0) or 0),
-            output_tokens=int(usage_payload.get("candidatesTokenCount", usage_payload.get("responseTokenCount", 0)) or 0),
-            total_tokens=usage_payload.get("totalTokenCount"),
-            cache_read_tokens=usage_payload.get("cachedContentTokenCount"),
-            reasoning_tokens=usage_payload.get("thoughtsTokenCount"),
-        )
+        return _gemini_usage(payload.get("usageMetadata"), output_keys=("candidatesTokenCount", "responseTokenCount"))
 
     # ─── Streaming via Gemini Live for live models ──────────────────
 
@@ -1264,14 +1280,7 @@ class GeminiLM(BaseProviderLM):
         usage_payload = payload.get("usageMetadata")
         if not isinstance(usage_payload, dict) and isinstance(server, dict):
             usage_payload = server.get("usageMetadata")
-        usage_payload = usage_payload if isinstance(usage_payload, dict) else {}
-        return Usage(
-            input_tokens=int(usage_payload.get("promptTokenCount", 0) or 0),
-            output_tokens=int(usage_payload.get("responseTokenCount", usage_payload.get("candidatesTokenCount", 0)) or 0),
-            total_tokens=usage_payload.get("totalTokenCount"),
-            cache_read_tokens=usage_payload.get("cachedContentTokenCount"),
-            reasoning_tokens=usage_payload.get("thoughtsTokenCount"),
-        )
+        return _gemini_usage(usage_payload, output_keys=("responseTokenCount", "candidatesTokenCount"))
 
     def _encode_live_client_event(self, event: LiveClientEvent) -> list[dict[str, Any]]:
         if isinstance(event, LiveClientTurnEvent):

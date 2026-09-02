@@ -128,8 +128,8 @@ def _usage_from_chat(usage_data: dict[str, Any]) -> Usage:
     prompt_details = usage_data.get("prompt_tokens_details") or {}
     completion_details = usage_data.get("completion_tokens_details") or {}
     return Usage(
-        input_tokens=int(usage_data.get("prompt_tokens", 0) or 0),
-        output_tokens=int(usage_data.get("completion_tokens", 0) or 0),
+        input_tokens=usage_data.get("prompt_tokens"),
+        output_tokens=usage_data.get("completion_tokens"),
         total_tokens=usage_data.get("total_tokens"),
         reasoning_tokens=completion_details.get("reasoning_tokens"),
         cache_read_tokens=prompt_details.get("cached_tokens"),

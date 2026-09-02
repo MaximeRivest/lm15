@@ -664,12 +664,11 @@ class AnthropicLM(BaseProviderLM):
             parts = [TextPart(text="")]
 
         usage_payload = data.get("usage", {}) or {}
-        input_tokens = int(usage_payload.get("input_tokens", 0) or 0)
-        output_tokens = int(usage_payload.get("output_tokens", 0) or 0)
+        # INV-029: absent counters stay None; Usage sums the total itself
+        # only when both primaries are present.
         usage = Usage(
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            total_tokens=input_tokens + output_tokens,
+            input_tokens=usage_payload.get("input_tokens"),
+            output_tokens=usage_payload.get("output_tokens"),
             cache_read_tokens=usage_payload.get("cache_read_input_tokens"),
             cache_write_tokens=usage_payload.get("cache_creation_input_tokens"),
             reasoning_tokens=_reasoning_tokens(usage_payload),
@@ -773,12 +772,9 @@ class AnthropicLM(BaseProviderLM):
             usage_payload = payload.get("usage", {}) if isinstance(payload.get("usage"), dict) else {}
             usage = None
             if usage_payload:
-                input_tokens = int(usage_payload.get("input_tokens", 0) or 0)
-                output_tokens = int(usage_payload.get("output_tokens", 0) or 0)
                 usage = Usage(
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    total_tokens=input_tokens + output_tokens,
+                    input_tokens=usage_payload.get("input_tokens"),
+                    output_tokens=usage_payload.get("output_tokens"),
                     cache_read_tokens=usage_payload.get("cache_read_input_tokens"),
                     cache_write_tokens=usage_payload.get("cache_creation_input_tokens"),
                     reasoning_tokens=_reasoning_tokens(usage_payload),

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+**Honest usage counters and a silent `[DONE]`** (INV-029, MAP-3):
+
+- Adapters no longer write `0` for `input_tokens`/`output_tokens` the
+  provider did not report; absent stays `None` and `total_tokens` is
+  summed only when both primaries are present. Callers that summed
+  usage across calls and relied on the invented zeros will now see
+  `None` where the provider said nothing. Gemini is the one stated
+  exception: proto3-JSON omits zero-valued fields, so an absent primary
+  inside a present `usageMetadata` is a reported `0` (pinned by the
+  reviewed golden `gemini.max_output_tokens`); a missing `usageMetadata`
+  is all `None`.
+- The Responses dialect's bare `[DONE]` terminator no longer claims
+  `finish_reason="stop"`. Before, on the Codex backend it overwrote the
+  `tool_call` from `response.completed` in the coalesced end event, so
+  the event trace contradicted the materialized `Response`.
+
 **Auth hardening + login primitives + doctor** (contract
 `lm15-contract/spec/auth.md`, ratified 2026-08-31; fixtures
 `auth/resolution.json`):
