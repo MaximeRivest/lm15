@@ -59,8 +59,16 @@ def test_openai_stable_renders_system_as_marked_developer_message() -> None:
     assert body["input"][0] == {"role": "developer", "content": [
         {"type": "input_text", "text": "SYS", "prompt_cache_breakpoint": {"mode": "explicit"}}]}
     assert body["input"][1]["role"] == "user"
-    # No system: nothing to mark, nothing sent (automatic tier).
-    assert "prompt_cache_breakpoint" not in json.dumps(_body(lm, _req("gpt-5.6-sol", CacheConfig(prefix="stable"), system=None)))
+    # The mark and explicit mode go together on 5.6+: without the mode the
+    # warm call still writes the suffix at 1.25x (review probe 3, 2026-09-02).
+    assert body["prompt_cache_options"] == {"mode": "explicit"}
+    # No system: nothing to mark, nothing sent (automatic tier) — and no
+    # explicit mode either, which with no mark would cache nothing at all.
+    bare = _body(lm, _req("gpt-5.6-sol", CacheConfig(prefix="stable"), system=None))
+    assert "prompt_cache_breakpoint" not in json.dumps(bare) and "prompt_cache_options" not in bare
+    # Pre-5.6 has no prompt_cache_options; the mark alone.
+    old = _body(lm, _req("gpt-5.4-mini", CacheConfig(prefix="stable")))
+    assert "prompt_cache_options" not in old and "prompt_cache_breakpoint" in json.dumps(old)
 
 
 def test_openai_history_sends_nothing_implicit_mode_already_trails() -> None:
@@ -70,11 +78,12 @@ def test_openai_history_sends_nothing_implicit_mode_already_trails() -> None:
     assert body["instructions"] == "SYS"
 
 
-def test_openai_long_retention_by_model_class() -> None:
+def test_openai_long_retention_every_model_class() -> None:
+    # 5.6 used to raise on a doc line about a different field; live
+    # 2026-09-02 (review probe 2) gpt-5.6-sol accepts and echoes 24h.
     lm = OpenAILM(api_key="k", transport=FakeTransport([]))
     assert _body(lm, _req("gpt-5.4-mini", CacheConfig(retention="long")))["prompt_cache_retention"] == "24h"
-    with pytest.raises(UnsupportedFeatureError, match="retention='long'"):
-        _body(lm, _req("gpt-5.6-sol", CacheConfig(retention="long")))
+    assert _body(lm, _req("gpt-5.6-sol", CacheConfig(retention="long")))["prompt_cache_retention"] == "24h"
 
 
 def test_openai_key_maps_resource_raises() -> None:
@@ -92,6 +101,7 @@ def test_chat_dialect_off_stable_and_compat_gate() -> None:
     body = _body(lm, _req("gpt-5.6-sol", CacheConfig(prefix="stable")))
     assert body["messages"][0] == {"role": "system", "content": [
         {"type": "text", "text": "SYS", "prompt_cache_breakpoint": {"mode": "explicit"}}]}
+    assert body["prompt_cache_options"] == {"mode": "explicit"}
     groq = OpenAIChatLM(api_key="k", transport=FakeTransport([]), compat="groq")
     body = _body(groq, _req("openai/gpt-oss-20b", CacheConfig(prefix="stable", key="k")))
     assert body["messages"][0]["content"] == "SYS" and "prompt_cache_key" not in body  # cache_control none -> nothing

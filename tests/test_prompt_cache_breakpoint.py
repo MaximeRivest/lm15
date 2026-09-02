@@ -49,10 +49,11 @@ def test_responses_breakpoint_on_last_text_block_of_prefix_message() -> None:
     first = body["input"][0]["content"][-1]
     assert first["type"] == "input_text"
     assert first["prompt_cache_breakpoint"] == {"mode": "explicit"}
-    # Only the prefix message carries it; no request-level option is added
-    # (OpenAI's implicit mode stays the server default).
+    # Only the prefix message carries the mark.
     assert "prompt_cache_breakpoint" not in json.dumps(body["input"][1:])
-    assert "prompt_cache_options" not in body
+    # The mark travels with explicit mode on 5.6+ (MAP-6 rule 4, amended
+    # 2026-09-02): without it the warm call still wrote the suffix.
+    assert body["prompt_cache_options"] == {"mode": "explicit"}
 
 
 def test_responses_no_breakpoint_without_prefix_index() -> None:

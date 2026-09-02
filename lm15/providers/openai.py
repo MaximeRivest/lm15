@@ -177,6 +177,16 @@ def _cache_breakpoint_index(request: Request, cache_control: str) -> int | None:
     return min(cache_cfg.prefix_until_index, len(request.messages) - 1)
 
 
+def _has_explicit_breakpoint(request: Request, cache_control: str) -> bool:
+    """True when this request places a prompt_cache_breakpoint (prefix="stable"
+    or prefix_until_index) — the cases where explicit mode belongs with it."""
+    # prefix="stable" places its mark on the system prompt; with no system
+    # there is no mark, and explicit mode with no mark would cache nothing.
+    return _cache_breakpoint_index(request, cache_control) is not None or (
+        _cache_stable_prefix(request, cache_control) and bool(request.system)
+    )
+
+
 def _cache_stable_prefix(request: Request, cache_control: str) -> bool:
     """``prefix="stable"``: mark the end of system + tools (MAP-6 A2)."""
     cache_cfg = request.config.cache
@@ -200,14 +210,20 @@ def _cache_common_payload(request: Request, payload: dict, cache_control: str, p
     if cache_cfg.key:
         payload["prompt_cache_key"] = cache_cfg.key
     if cache_cfg.retention == "long":
-        if openai_model_has_cache_options(request.model):
-            raise UnsupportedFeatureError(
-                f"{provider}: cache.retention='long' is not available on the gpt-5.6+ "
-                "model class — prompt_cache_options.ttl accepts only '30m' (the default). "
-                "Older OpenAI models take prompt_cache_retention='24h'; Anthropic takes a 1h TTL",
-                provider=provider,
-            )
+        # Every OpenAI model class takes prompt_cache_retention="24h". The
+        # gpt-5.6 class used to RAISE here on a doc line about
+        # prompt_cache_options.ttl (30m only) — a different field. Live
+        # 2026-09-02 (review probe 2): gpt-5.6-sol answers 200 and echoes
+        # prompt_cache_retention: "24h"; every pinned 5.6 body already
+        # echoes 24h as its default. Sending it is honest and harmless.
         payload["prompt_cache_retention"] = "24h"
+    if openai_model_has_cache_options(request.model) and _has_explicit_breakpoint(request, cache_control):
+        # A placed breakpoint means "cache up to here". Without explicit
+        # mode the 5.6 class also writes the volatile suffix at 1.25x on
+        # every warm call (pinned: openai.prompt_cache_breakpoint wrote 18
+        # after reading 3066). With mode=explicit the warm call writes 0
+        # (review probe 3, 2026-09-02). The mark and the mode go together.
+        payload["prompt_cache_options"] = {"mode": "explicit"}
     if cache_cfg.resource is not None:
         raise UnsupportedFeatureError(
             f"{provider}: cache.resource is not supported — this provider has no stored-cache "

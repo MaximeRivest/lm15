@@ -744,9 +744,16 @@ class AnthropicLM(BaseProviderLM):
         if et == "content_block_start":
             block = payload.get("content_block", {}) if isinstance(payload.get("content_block"), dict) else {}
             if block.get("type") == "tool_use":
+                # A streamed tool_use block opens with input: {} and the
+                # arguments arrive as input_json_delta fragments; the empty
+                # object is a placeholder, not a fragment. Serialising it
+                # produced "{}" + '{"city": ...}' — unparseable — the day
+                # the first streaming tool call was pinned (2026-09-02). A
+                # non-empty input on the start frame is kept verbatim.
+                start_input = block.get("input")
                 yield StreamDeltaEvent(
                     delta=ToolCallDelta(
-                        input=json.dumps(block.get("input", {}), separators=(",", ":")) if isinstance(block.get("input"), dict) else str(block.get("input") or ""),
+                        input=json.dumps(start_input, separators=(",", ":")) if isinstance(start_input, dict) and start_input else ("" if isinstance(start_input, dict) else str(start_input or "")),
                         part_index=int(payload.get("index", 0) or 0),
                         id=str(block.get("id") or "") or None,
                         name=str(block.get("name") or "") or None,

@@ -238,3 +238,25 @@ def test_coalescer_error_only_stream_has_no_start() -> None:
         StreamErrorEvent(error=ErrorDetail(code="provider", message="boom")),
     ])))
     assert [e.type for e in out] == ["error"]
+
+
+def test_anthropic_streamed_tool_use_input_assembles_from_deltas() -> None:
+    # Pinned live 2026-09-02 (anthropic.streaming_tool_call): the block
+    # opens with input: {} and the arguments arrive as input_json_delta.
+    frames = [
+        ("message_start", {"type": "message_start", "message": {"id": "msg_1", "type": "message", "role": "assistant", "model": "claude-haiku-4-5", "content": [], "usage": {"input_tokens": 573, "output_tokens": 1}}}),
+        ("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "toolu_01", "name": "get_weather", "input": {}}}),
+        ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": ""}}),
+        ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{\"city\": \""}}),
+        ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "Gatineau\"}"}}),
+        ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+        ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 57}}),
+        ("message_stop", {"type": "message_stop"}),
+    ]
+    sse = "".join(f"event: {e}\ndata: {json.dumps(p)}\n\n" for e, p in frames).encode()
+    lm = AnthropicLM(api_key="sk-test", transport=_FakeTransport([_FakeStreamResponse(status=200, body=sse)]))
+    resp = ResponseStream(lm.stream(_REQ), _REQ).response
+    (call,) = resp.tool_calls
+    assert call.name == "get_weather" and call.id == "toolu_01"
+    assert call.input == {"city": "Gatineau"}
+    assert resp.finish_reason == "tool_call"

@@ -10,6 +10,20 @@ said otherwise). Endpoint support lives in `lm.supports` / `lm.manifest`,
 pinned by `spec/support-matrix.json`; modalities and prices are per model
 on `ModelInfo`. Callers reading `lm.capabilities` get `AttributeError`.
 
+**Caching on gpt-5.6+: two amendments from live probes** (MAP-6 rules 4
+and 5). `retention="long"` no longer raises on the 5.6 class; it sends
+`prompt_cache_retention: "24h"` like every other class (the server
+accepts and echoes it; every 5.6 body already echoed 24h as default). A
+placed breakpoint (`prefix="stable"`, `prefix_until_index`) now travels
+with `prompt_cache_options: {mode: "explicit"}` on 5.6+: without it the
+warm call still wrote the volatile suffix at 1.25x; with it the warm call
+writes 0 and the cold write is exactly the marked prefix.
+
+**Anthropic streamed tool calls assembled an unparseable input.** The
+`content_block_start.input: {}` placeholder was serialised and glued in
+front of the `input_json_delta` fragments. Fixed; the first streaming
+tool-call body in the corpus caught it.
+
 **Auth by composition** (contract AUTH-10, proposed). An adapter is a
 dialect bound to an `AccessPolicy` value (`lm15.access`; `ProviderManifest`
 is the same class under its earlier name): credential policy, auth header,

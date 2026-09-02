@@ -171,16 +171,26 @@ it has; the outcome is always visible in `Usage.cache_read_tokens` /
    marks the last block of the last message (Anthropic); on OpenAI 5.6+
    implicit mode already does exactly that, so nothing is sent.
    `prefix_until_index=N` marks the last block of message N (Anthropic:
-   any block; OpenAI: a text block, else RAISE). Providers without marks
+   any block; OpenAI: a text block, else RAISE). On the OpenAI 5.6+ class
+   a placed mark travels with `prompt_cache_options: {mode: "explicit"}`:
+   without the mode the warm call still wrote the volatile suffix at
+   1.25x (pinned 18 tokens after reading 3066); with it the warm call
+   writes 0 and the cold write shrinks to exactly the marked prefix
+   (3088 → 3070). Amended 2026-09-02 on the independent review's probe
+   3; no mark, no mode (explicit mode with no mark caches nothing).
+   Providers without marks
    (Gemini, xAI, Groq, older OpenAI, compat servers with
    `cache_control="none"`) send nothing. The fallback is permitted by two
    conditions, both required: it spends nothing, and its outcome is
    observable in usage. It must not be extended to fields that fail
    either condition.
 5. **`retention="long"`** names a specific mechanism: Anthropic `ttl:
-   "1h"` (2x write); OpenAI <5.6 `prompt_cache_retention: "24h"`;
-   OpenAI 5.6+ (30m is the only value) and Gemini (lifetime belongs to
-   the stored object) RAISE.
+   "1h"` (2x write); OpenAI, every class, `prompt_cache_retention:
+   "24h"`; Gemini (lifetime belongs to the stored object) RAISES. The
+   5.6+ class used to RAISE on a doc line about `prompt_cache_options.ttl`
+   (30m only) — a different field. Every pinned 5.6 body already echoes
+   `prompt_cache_retention: "24h"` as its default, and sending it answers
+   200 with the same echo (review probe 2, 2026-09-02). Amended.
 6. **`key`** is a best-effort affinity hint: OpenAI and OpenRouter
    `prompt_cache_key`; Anthropic and Gemini RAISE.
 7. **`resource`** is a `CacheInfo.id` from the resource tier. The adapter
@@ -243,7 +253,10 @@ cells) and 17 sources (lm15-contract/research/reasoning/).
    on the adaptive class it is the total (provider semantics).
 7. **`summary`** is visibility: `None` = provider default; `"auto"` =
    show the thinking where a knob exists (OpenAI `summary: auto`; Gemini
-   `includeThoughts: true`; Groq preset `reasoning_format: parsed`) and
+   `includeThoughts: true`; Groq preset `reasoning_format: parsed` —
+   receipted 2026-09-02 on qwen3.6-27b: the default leaks a raw
+   `<think>` block into `content`, `parsed` returns `message.reasoning`
+   and clean content) and
    is satisfied silently where thinking is always returned (Anthropic,
    xAI); `"concise"`/`"detailed"` verbatim on OpenAI Responses, RAISE
    elsewhere. Gemini gets `includeThoughts` only when asked.
@@ -277,7 +290,9 @@ canonical shape.
 
 1. **xAI ignores allowlists.** `tool_choice.allowed` subsets RAISE on
    xAI; a single name with `mode="required"` maps to the forced-function
-   form, which held.
+   form, which held. The single cell of 2026-09-02 was repeated five
+   times with fresh nonces on the review's request: 5/5 called the
+   disallowed tool (`research/review-2026-09-02/`).
 2. **Gemini has no parallel knob.** `parallel=False` RAISES on Gemini
    (two calls came back regardless). The MAP-6 fallback exception does
    not apply: the outcome is not observable from usage.
@@ -353,8 +368,10 @@ after the independent review found it lived only in code):
    and by `xai.streaming`; a wire fact dropped by rule, stated here).
 
 **Why:** an unnamed call is not actionable (MAP-1), and every shipped
-dialect names a call on its first fragment, so a missing name is an adapter
-defect, not model behaviour. The previous rule filled the name from
+dialect names a call on its first fragment — pinned 2026-09-02 as four
+stream cases, `<dialect>.streaming_tool_call` on OpenAI Responses, OpenAI
+Chat, Anthropic, and Gemini — so a missing name is an adapter defect, not
+model behaviour. The previous rule filled the name from
 `Request.tools` by position — one declared tool, else the tool at the
 part's rank among all parts, else the literal `"tool"`. That guess flipped
 when the model emitted text before the call, and an agent loop dispatching

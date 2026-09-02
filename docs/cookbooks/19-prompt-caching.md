@@ -70,7 +70,7 @@ Every provider caches in up to three tiers, measured live on 2026-09-01 (the rec
 - **A mark on a block.** Anthropic, and OpenAI from gpt-5.6 on. Reliable above the model's minimum (1,024 to 4,096 tokens). Writes cost 1.25×, reads 0.1×.
 - **A stored object.** Gemini today. Reliable, billed per token-hour while it exists, pinned to one model, and it owns your system prompt and tools, so the request may not repeat them.
 
-`CacheConfig` names an intent, and each adapter maps it to the best tier it has. `prefix="stable"` marks the end of system and tools; `prefix="history"` marks the last message; `prefix_until_index=N` marks message N. Providers with no marks fall back to their automatic tier. That fallback is allowed because it costs nothing and the outcome is visible in `Usage.cache_read_tokens`. Fields that name a specific mechanism raise where it does not exist: `retention="long"`, `key`, `resource`.
+`CacheConfig` names an intent, and each adapter maps it to the best tier it has. `prefix="stable"` marks the end of system and tools; `prefix="history"` marks the last message; `prefix_until_index=N` marks message N. Providers with no marks fall back to their automatic tier. That fallback is allowed because it costs nothing and the outcome is visible in `Usage.cache_read_tokens`. Fields that name a specific mechanism raise where it does not exist: `retention="long"` (Gemini), `key` (Anthropic, Gemini), `resource` (everyone but Gemini).
 
 ```python
 try:
