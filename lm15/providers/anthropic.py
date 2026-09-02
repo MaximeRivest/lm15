@@ -67,7 +67,7 @@ from .base import (
     default_transport,
     resolve_credential,
 )
-from .common import anthropic_source, iso_utc, make_json_request, model_infos_from_entries, multipart_form_body, parts_to_text
+from .common import EFFORT_THINKING_BUDGETS, anthropic_source, iso_utc, make_json_request, model_infos_from_entries, multipart_form_body, parts_to_text
 
 # Canonical builtin tool name → Anthropic tool format
 _ANTHROPIC_BUILTIN_MAP: dict[str, str] = {
@@ -134,26 +134,39 @@ def _reasoning_tokens(usage_payload: dict) -> int | None:
     return None
 
 
+_ADAPTIVE_CLASS_MARKERS = ("sonnet-5", "opus-5", "sonnet-4-6", "opus-4-6", "opus-4-7", "opus-4-8", "fable", "mythos", "haiku-5")
+
+
+def anthropic_adaptive_class(model: str) -> bool:
+    """True for models that take `thinking: {type: adaptive}` + `output_config.effort`.
+
+    MAP-7 rule 10: a model-name table, receipted 2026-09-02 (Sonnet 5 accepts
+    adaptive and rejects `enabled`; Sonnet 4.5 and Haiku 4.5 do the reverse).
+    A table that rots: a new model outside it is treated as the manual class
+    and the server answers with a clear 400 ("thinking.type.enabled is not
+    supported for this model"); `extensions={"thinking": ...}` overrides.
+    """
+    lowered = model.lower()
+    return any(marker in lowered for marker in _ADAPTIVE_CLASS_MARKERS)
+
+
 def _reasoning_thinking_budget(request: Request) -> int | None:
+    """Manual class only: the budget on the wire (MAP-7 rules 3 and 5)."""
     reasoning = request.config.reasoning
     if reasoning is None or reasoning.is_off:
         return None
-    return reasoning.thinking_budget or _DEFAULT_ANTHROPIC_THINKING_BUDGET
+    if reasoning.thinking_budget is not None:
+        return reasoning.thinking_budget
+    return EFFORT_THINKING_BUDGETS[reasoning.effort]
 
 
 def _max_tokens_for_anthropic(request: Request, thinking_budget: int | None) -> int:
+    """Manual class: max_tokens includes thinking, so the wire ceiling is the
+    budget plus the visible cap.  Adaptive class (thinking_budget None):
+    Config.max_tokens is the total ceiling — provider semantics, stated in
+    spec/types.md."""
     if thinking_budget is None:
         return request.config.max_tokens or _DEFAULT_ANTHROPIC_VISIBLE_TOKENS
-
-    reasoning = request.config.reasoning
-    if reasoning is not None and reasoning.total_budget is not None:
-        if reasoning.total_budget <= thinking_budget:
-            raise ValueError(
-                "Anthropic requires Reasoning.total_budget to be greater than "
-                "Reasoning.thinking_budget because max_tokens includes thinking tokens"
-            )
-        return reasoning.total_budget
-
     visible_budget = request.config.max_tokens or _DEFAULT_ANTHROPIC_VISIBLE_TOKENS
     return thinking_budget + visible_budget
 
@@ -486,7 +499,30 @@ class AnthropicLM(BaseProviderLM):
                         marker["ttl"] = "1h"
                     last_block.setdefault("cache_control", marker)
 
-        thinking_budget = _reasoning_thinking_budget(request)
+        reasoning = request.config.reasoning
+        adaptive = reasoning is not None and not reasoning.is_off and anthropic_adaptive_class(request.model)
+        if reasoning is not None and not reasoning.is_off:
+            if reasoning.summary in ("concise", "detailed"):
+                raise UnsupportedFeatureError(
+                    f"anthropic: reasoning.summary={reasoning.summary!r} is an OpenAI detail level; "
+                    "the Messages API returns thinking blocks whenever thinking runs (use 'auto' or None)",
+                    provider=self.provider,
+                )
+            if adaptive:
+                if reasoning.thinking_budget is not None:
+                    raise UnsupportedFeatureError(
+                        f"anthropic: reasoning.thinking_budget is not supported on {request.model} — "
+                        "this model class takes thinking.type 'adaptive' with output_config.effort; "
+                        "budget_tokens is rejected by the API (live 2026-09-02)",
+                        provider=self.provider,
+                    )
+                if reasoning.effort == "minimal":
+                    raise UnsupportedFeatureError(
+                        "anthropic: reasoning.effort='minimal' has no level on this model class "
+                        "(output_config.effort is low|medium|high|xhigh|max); 'low' is the floor",
+                        provider=self.provider,
+                    )
+        thinking_budget = None if adaptive else _reasoning_thinking_budget(request)
         payload: dict[str, Any] = {
             "model": request.model,
             "messages": messages,
@@ -522,13 +558,19 @@ class AnthropicLM(BaseProviderLM):
         tool_choice = self._tool_choice_payload(request)
         if tool_choice is not None:
             payload["tool_choice"] = tool_choice
-        if thinking_budget is not None:
+        if adaptive:
+            # MAP-7 rule 2 on the adaptive class (live 2026-09-02, Sonnet 5):
+            # the model decides when to think; effort steers depth.
+            payload["thinking"] = {"type": "adaptive"}
+            payload["output_config"] = {"effort": reasoning.effort}
+        elif thinking_budget is not None:
             payload["thinking"] = {
                 "type": "enabled",
                 "budget_tokens": thinking_budget,
             }
         if request.config.response_format:
-            payload["output_config"] = _response_format_to_anthropic_output_config(request.config.response_format)
+            output_config = _response_format_to_anthropic_output_config(request.config.response_format)
+            payload["output_config"] = {**payload.get("output_config", {}), **output_config}
         # Promoted cross-provider knobs (changes/2026-09-01-extensions-burn-down):
         # user_id rides Anthropic's metadata.user_id; store has no Anthropic
         # wire field — raise, never silently drop.

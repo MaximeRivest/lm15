@@ -299,7 +299,6 @@ def test_reasoning_serde_uses_current_fields_and_reads_legacy_budget() -> None:
         reasoning=Reasoning(
             effort="high",
             thinking_budget=12,
-            total_budget=100,
             summary="auto",
         )
     )
@@ -307,9 +306,12 @@ def test_reasoning_serde_uses_current_fields_and_reads_legacy_budget() -> None:
     assert config_to_dict(config)["reasoning"] == {
         "effort": "high",
         "thinking_budget": 12,
-        "total_budget": 100,
         "summary": "auto",
     }
+    # Pre-MAP-7 spellings read leniently (INV-043): total_budget is dropped,
+    # "adaptive" (which meant "absent") reads as medium.
+    old = config_from_dict({"reasoning": {"effort": "adaptive", "thinking_budget": 12, "total_budget": 100}})
+    assert old.reasoning == Reasoning(effort="medium", thinking_budget=12)
 
     # Legacy payloads with enabled=False + budget collapse to effort="off";
     # the budget is dropped because reasoning is disabled.
@@ -394,7 +396,9 @@ def test_usage_preserves_provider_reported_total() -> None:
 
 def test_numeric_budgets_and_usage_cannot_be_negative() -> None:
     with pytest.raises(ValueError, match="thinking_budget"):
-        Reasoning(thinking_budget=0)
+        Reasoning(effort="low", thinking_budget=0)
+    with pytest.raises(TypeError):  # effort is required (decision E, MAP-7)
+        Reasoning()  # type: ignore[call-arg]
 
     with pytest.raises(ValueError, match="input_tokens"):
         Usage(input_tokens=-1)
@@ -486,7 +490,7 @@ def test_reasoning_off_rejects_budgets() -> None:
     with pytest.raises(ValueError, match="effort='off'"):
         Reasoning(effort="off", thinking_budget=10)
     with pytest.raises(ValueError, match="effort='off'"):
-        Reasoning(effort="off", total_budget=20)
+        Reasoning(effort="off", summary="auto")
 
 
 def test_generated_media_optional_strings_reject_empty() -> None:

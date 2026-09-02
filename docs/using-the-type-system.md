@@ -106,8 +106,10 @@ request = Request(
 you — `lm15.tool(fn)` produces the same `FunctionTool` from a typed
 Python function; see [Tools from functions](tools-from-functions.md).
 
-Reasoning is explicit and optional: `Config(reasoning=None)` means "do not send
-a preference"; `Config(reasoning=Reasoning())` explicitly turns reasoning off.
+Reasoning is explicit and optional: `Config(reasoning=None)` means "the model
+decides"; `Config(reasoning=Reasoning(effort="off"))` explicitly turns reasoning
+off. `effort` is required, so a bare `Reasoning()` is a `TypeError` — there
+is no accidental off.
 
 ```python
 from lm15.types import Config, Reasoning

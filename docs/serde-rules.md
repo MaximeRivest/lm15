@@ -56,7 +56,7 @@ any language.
      float-typed under the same rule)
 2. **Int fields always serialize as JSON ints** (`2`, never `2.0`):
    - `Config.max_tokens`, `Config.top_k`
-   - `Reasoning.thinking_budget`, `.total_budget`
+   - `Reasoning.thinking_budget`
    - `CacheConfig.prefix_until_index`
    - every `Usage` token counter
    - `InferenceModelInfo.context_window`, `.max_output_tokens`

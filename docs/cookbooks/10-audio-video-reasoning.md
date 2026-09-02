@@ -193,14 +193,18 @@ Responses mapping emits `input_audio` for `AudioPart` — but only its
 audio-native models accept it, and there is no `VideoPart` mapping at
 all. Anthropic accepts neither (see Variations for the real error).
 
-`Reasoning` lives on `Config`. `effort` is a portable ladder — `"off"`,
-`"adaptive"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"` —
-and each provider takes the part it understands. `thinking_budget` is a
-hard token cap; `total_budget` caps thinking plus visible output (on
-Anthropic it becomes `max_tokens`, and must exceed `thinking_budget` —
-lm15 raises `ValueError` otherwise). `summary` is OpenAI-only.
+`Reasoning` lives on `Config`. `effort` is the one dial and is required
+— `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`,
+`"max"`. Every provider has this dial with these words; each model
+accepts a subset and rejects the rest with a clear 400, and lm15 raises
+where a word has no native level rather than downgrade it. Leaving
+`reasoning` unset lets the model decide, on every provider.
+`thinking_budget` is a token cap on providers that count thinking
+separately (Anthropic's 4.5 line, Gemini); on providers without one it
+raises. `summary="auto"` asks to see the thinking where a knob exists.
 `Reasoning(effort="off")` with a budget or summary is a `ValueError` at
-construction: lm15 refuses to silently discard config.
+construction: lm15 refuses to silently discard config. The full
+per-provider table is MAP-7 in [mapping rules](../mapping-rules.md).
 
 On the way back, thinking appears as `ThinkingPart` in
 `response.message.parts` — a real trace (Anthropic, Gemini) or a

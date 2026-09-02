@@ -349,3 +349,21 @@ def multipart_related_body(
         f"--{boundary}--\r\n".encode("utf-8"),
     ]
     return f"multipart/related; boundary={boundary}", b"".join(chunks)
+
+
+# ─── MAP-7: the one effort→budget grading table ──────────────────────
+#
+# Budget-only model classes (Anthropic 4.5 and earlier, Gemini 2.5) have
+# no effort level on the wire; the universal dial is expressed as a
+# thinking-token budget through this single, stated table.  Receipted on
+# both providers 2026-09-02 (research/reasoning).  Provider floors and
+# ceilings are the provider's: Anthropic rejects < 1024, Gemini 2.5 Flash
+# rejects > 24576 — loudly.
+EFFORT_THINKING_BUDGETS: dict[str, int] = {
+    "minimal": 1024,
+    "low": 2048,
+    "medium": 8192,
+    "high": 16384,
+    "xhigh": 24576,
+    "max": 32768,
+}

@@ -430,7 +430,31 @@ class OpenAIChatLM(BaseProviderLM):
         if request.config.reasoning:
             reasoning = request.config.reasoning
             if not reasoning.is_off:
-                effort = {"adaptive": "medium", "xhigh": "high"}.get(reasoning.effort, reasoning.effort)
+                # MAP-7: verbatim effort; no budget on this wire; summary
+                # levels are Responses-only; "auto" maps to the dialect's
+                # visibility knob where one exists (Groq include_reasoning).
+                if reasoning.thinking_budget is not None:
+                    raise UnsupportedFeatureError(
+                        f"{self.provider}: reasoning.thinking_budget is not supported — the Chat "
+                        "Completions wire has no thinking token budget; use effort",
+                        provider=self.provider,
+                    )
+                if reasoning.summary in ("concise", "detailed"):
+                    raise UnsupportedFeatureError(
+                        f"{self.provider}: reasoning.summary={reasoning.summary!r} is an OpenAI Responses "
+                        "detail level; the Chat Completions wire has none (use 'auto')",
+                        provider=self.provider,
+                    )
+                effort = reasoning.effort
+                if compat.builtin_tools == "groq" and reasoning.summary == "auto":
+                    # Groq's visibility knob (MAP-7 rule 7): "parsed" returns
+                    # the trace as message.reasoning.  Live 2026-09-02: Qwen
+                    # 3.6's default leaks a raw <think> block into
+                    # message.content; this is the wire's fix.  Qwen's dial
+                    # accepts only none|default, so an effort word still
+                    # fails loudly there — extensions={"reasoning_format":
+                    # "parsed"} with reasoning absent is the documented door.
+                    payload["reasoning_format"] = "parsed"
                 if compat.thinking_format == "reasoning_effort":
                     payload["reasoning_effort"] = effort
                 elif compat.thinking_format == "openrouter":

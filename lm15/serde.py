@@ -362,7 +362,6 @@ def reasoning_to_dict(r: Reasoning) -> dict[str, Any]:
     return _clean_mapping({
         "effort": r.effort,
         "thinking_budget": r.thinking_budget,
-        "total_budget": r.total_budget,
         "summary": r.summary,
     })
 
@@ -372,12 +371,16 @@ def reasoning_from_dict(d: dict[str, Any]) -> Reasoning:
     effort = d.get("effort", default_effort)
     # Legacy payloads could combine enabled=false with a budget.  In the
     # current type system, off reasoning has no budgets, so discard them.
+    # `total_budget` (removed 2026-09-02, MAP-7) and `adaptive` (now
+    # "absent") are legacy spellings: the first is dropped on read, the
+    # second reads as medium — INV-043 leniency for pre-MAP-7 payloads.
+    if effort == "adaptive":
+        effort = "medium"
     if effort == "off":
         return Reasoning(effort="off")
     return Reasoning(
         effort=effort,
         thinking_budget=d.get("thinking_budget", d.get("budget")),
-        total_budget=d.get("total_budget"),
         summary=d.get("summary"),
     )
 

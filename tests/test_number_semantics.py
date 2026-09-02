@@ -88,9 +88,8 @@ def test_config_max_tokens_non_integral_float_rejected():
 
 
 def test_reasoning_budgets_coerce_and_reject():
-    r = Reasoning(effort="medium", thinking_budget=1024.0, total_budget=2048.0)
+    r = Reasoning(effort="medium", thinking_budget=1024.0)
     assert type(r.thinking_budget) is int
-    assert type(r.total_budget) is int
     with pytest.raises((TypeError, ValueError)):
         Reasoning(effort="medium", thinking_budget=10.5)
 

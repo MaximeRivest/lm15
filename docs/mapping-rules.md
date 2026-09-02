@@ -188,6 +188,65 @@ research/caching/). Provider agnosticism is defined as: the same code
 runs everywhere, does the best thing the provider offers, and shows the
 result — not identical bytes saved everywhere.
 
+## MAP-7 — Reasoning: one dial, two spellings, no silent drops
+
+Measured 2026-09-02 across OpenAI, Anthropic, Gemini, xAI, Groq (134
+cells) and 17 sources (lm15-contract/research/reasoning/).
+
+1. **Absent `config.reasoning` sends nothing**: the model decides. Every
+   provider's default is adaptive now; "adaptive" is not a level.
+2. **`effort` is the one dial**, required, vocabulary `off, minimal, low,
+   medium, high, xhigh, max`. Providers with levels get the word
+   verbatim (OpenAI; Anthropic adaptive class as `output_config.effort`;
+   Gemini 3.x as `thinkingLevel`; xAI and Groq as `reasoning_effort`).
+   Model-unsupported words fail with the server's 400. Words with no
+   native level on a provider RAISE client-side: Anthropic `minimal`,
+   Gemini 3.x `xhigh`/`max`.
+3. **Budget-only model classes express effort as a budget** through one
+   grading table — minimal 1024, low 2048, medium 8192, high 16384,
+   xhigh 24576, max 32768 — Anthropic's manual class (4.5 and earlier:
+   `budget_tokens`) and Gemini 2.5 (`thinkingBudget`). The design's one
+   invented mapping; stated, receipted on both.
+4. **`effort="off"`** sends the native disable (OpenAI `none`; Anthropic
+   omits `thinking`; Gemini 2.5 `thinkingBudget: 0`; compat disable
+   forms) and RAISES where the provider cannot disable or accepts the
+   disable without honouring it: xAI, Gemini 3.x (3.7 Flash took
+   `thinkingBudget: 0` and spent 58 tokens). MAP-5, extended.
+5. **`thinking_budget`** maps where the wire has a budget (Anthropic
+   manual class; Gemini, both classes) and RAISES elsewhere (OpenAI,
+   Anthropic adaptive class, xAI, the chat dialect). On budget classes
+   the budget is the spelling and `effort` stays the intent; they are
+   not a conflict.
+6. **`total_budget` is gone.** `Config.max_tokens` is the ceiling: on
+   Anthropic's manual class the adapter adds the thinking budget to it;
+   on the adaptive class it is the total (provider semantics).
+7. **`summary`** is visibility: `None` = provider default; `"auto"` =
+   show the thinking where a knob exists (OpenAI `summary: auto`; Gemini
+   `includeThoughts: true`; Groq preset `reasoning_format: parsed`) and
+   is satisfied silently where thinking is always returned (Anthropic,
+   xAI); `"concise"`/`"detailed"` verbatim on OpenAI Responses, RAISE
+   elsewhere. Gemini gets `includeThoughts` only when asked.
+8. **Replay.** Native when the continuation state is present: Anthropic
+   signed blocks, Gemini signatures (required on 3.x function calls —
+   400 without), OpenAI reasoning items (`openai:reasoning_item` with
+   `id` and `encrypted_content`, replayed as `{"type": "reasoning",
+   "summary": [...]}` — `summary` is required even when empty, 400
+   without). Without state, a `ThinkingPart` is replayed as assistant
+   text on every provider (decision G); the chat dialect's
+   `thinking_replay` default is `as_text`.
+9. **An OpenAI reasoning item with no summary is an empty `ThinkingPart`**
+   carrying its replay state, never dropped. `Usage.reasoning_tokens`
+   comes from every provider's exact field.
+10. **Model-class detection** (Anthropic adaptive vs manual; Gemini 2.5
+    vs 3.x) is by model-name table — a table that rots; the server 400s
+    loudly when wrong; `extensions` overrides.
+
+**Why:** the reference knew one Anthropic class and one Gemini class, so
+every `Reasoning` on Sonnet 5 was a 400 and every one on Gemini 3.x used
+a deprecated field; it silently dropped budgets, summaries, and OpenAI
+reasoning items; and it downgraded `xhigh` to `high`. The design pass
+record: lm15-contract/changes/2026-09-02-reasoning-design.md.
+
 ---
 
 History: MAP-1 and MAP-2 were implicit in the reference adapters; they were
@@ -199,4 +258,4 @@ after live vLLM/SGLang/ollama testing showed the multi-end merge losing usage.
 MAP-5 was written on 2026-09-01 after a reasoning-off audit found four
 adapters silently omitting the disable (see
 `lm15-contract/changes/2026-09-01-reasoning-off.md`). MAP-6 was written on
-2026-09-01/02 from the first design pass (`lm15-contract/playbooks/design-pass.md`).
+2026-09-01/02 from the first design pass, MAP-7 on 2026-09-02 from the second (`lm15-contract/playbooks/design-pass.md`).

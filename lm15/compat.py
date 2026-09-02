@@ -417,7 +417,7 @@ class ResolvedOpenAIChatCompat:
         "qwen_chat_template",
         "zai",
     ] = "reasoning_effort"
-    thinking_replay: Literal["native", "as_text", "omit"] = "omit"
+    thinking_replay: Literal["native", "as_text", "omit"] = "as_text"
     assistant_reasoning_content: Literal["include_empty", "omit"] = "omit"
     strict_tools: Literal["include", "omit"] = "omit"
     builtin_tools: Literal["reject", "groq"] = "reject"
@@ -433,7 +433,7 @@ _CHAT_AUTO_DEFAULTS: dict[str, str] = {
     "tool_result_name": "omit",
     "assistant_after_tool_result": "omit",
     "thinking_format": "reasoning_effort",
-    "thinking_replay": "omit",
+    "thinking_replay": "as_text",  # decision G (2026-09-01): unsigned thinking is replayed as text, never dropped
     "assistant_reasoning_content": "omit",
     "strict_tools": "omit",
     "builtin_tools": "reject",

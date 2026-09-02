@@ -6,6 +6,11 @@
       "value": {
         "type": "text",
         "text": "hello"
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -23,6 +28,11 @@
             }
           }
         ]
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -33,6 +43,11 @@
         "media_type": "image/png",
         "url": "https://example.com/cat.png",
         "detail": "low"
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -42,6 +57,11 @@
         "type": "audio",
         "media_type": "audio/wav",
         "data": "aGk="
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -51,6 +71,11 @@
         "type": "video",
         "media_type": "video/mp4",
         "file_id": "file_video"
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -60,6 +85,11 @@
         "type": "document",
         "media_type": "application/pdf",
         "url": "https://example.com/doc.pdf"
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -72,6 +102,11 @@
         "input": {
           "query": "weather"
         }
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -88,6 +123,11 @@
           }
         ],
         "is_error": true
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -97,6 +137,11 @@
         "type": "thinking",
         "text": "reasoning",
         "redacted": true
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -105,6 +150,11 @@
       "value": {
         "type": "refusal",
         "text": "no"
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -115,6 +165,11 @@
         "text": "Example",
         "url": "https://example.com",
         "title": "Example title"
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -133,6 +188,11 @@
             "url": "https://example.com/cat.png"
           }
         ]
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -150,6 +210,11 @@
             }
           }
         ]
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -172,6 +237,11 @@
             }
           }
         ]
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -192,6 +262,11 @@
             "query"
           ]
         }
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -203,6 +278,11 @@
         "config": {
           "context_size": "low"
         }
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -212,6 +292,11 @@
         "type": "function",
         "name": "noop",
         "parameters": {}
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-11",
+        "evidence": "spec/invariants.md INV-033 (parameters is required-with-shape: explicit {} round-trips verbatim) + lm15-python2/docs/serde-rules.md (omission rule 3: opaque payloads never mutated); changes/2026-06-11-inv033-parameters-always-emitted.md; canonical-only fixture, no wire receipt required per AUTHORITY.md"
       }
     },
     {
@@ -223,6 +308,11 @@
           "lookup"
         ],
         "parallel": false
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -230,8 +320,12 @@
       "kind": "reasoning",
       "value": {
         "effort": "medium",
-        "thinking_budget": 128,
-        "total_budget": 256
+        "thinking_budget": 128
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09; 2026-09-02: total_budget removed from Reasoning (MAP-7 rule 6, changes/2026-09-02-reasoning-design.md) — the vector drops the field with that citation"
       }
     },
     {
@@ -260,6 +354,11 @@
         "extensions": {
           "store": false
         }
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -269,6 +368,11 @@
         "code": "unsupported_model",
         "message": "missing model",
         "provider_code": "model_not_found"
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -278,6 +382,11 @@
         "type": "text",
         "text": "hi",
         "part_index": 0
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -287,6 +396,11 @@
         "type": "thinking",
         "text": "hmm",
         "part_index": 1
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -297,6 +411,11 @@
         "data": "aGk=",
         "media_type": "audio/wav",
         "part_index": 0
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -307,6 +426,11 @@
         "url": "https://example.com/image.png",
         "media_type": "image/png",
         "part_index": 0
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -318,6 +442,11 @@
         "id": "call_1",
         "name": "lookup",
         "part_index": 0
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -329,6 +458,11 @@
         "url": "https://example.com",
         "title": "Example",
         "part_index": 2
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -342,6 +476,11 @@
           "signature": "abc"
         },
         "part_index": 1
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -356,6 +495,11 @@
         "reasoning_tokens": 3,
         "input_audio_tokens": 4,
         "output_audio_tokens": 5
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -365,6 +509,11 @@
         "type": "start",
         "id": "resp_1",
         "model": "m"
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -377,6 +526,11 @@
           "text": "hi",
           "part_index": 0
         }
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -393,6 +547,11 @@
         "provider_data": {
           "provider": "test"
         }
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -404,6 +563,11 @@
           "code": "transport",
           "message": "socket closed"
         }
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -436,6 +600,11 @@
         "config": {
           "max_tokens": 32
         }
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -464,6 +633,11 @@
           "output_tokens": 1,
           "total_tokens": 2
         }
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -473,6 +647,11 @@
         "encoding": "pcm16",
         "sample_rate": 24000,
         "channels": 1
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -505,6 +684,11 @@
         "extensions": {
           "turn_detection": false
         }
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -519,6 +703,11 @@
           }
         ],
         "turn_complete": true
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -528,6 +717,11 @@
         "type": "audio",
         "data": "aGk=",
         "media_type": "audio/pcm;rate=16000"
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -537,6 +731,11 @@
         "type": "image",
         "data": "aGk=",
         "media_type": "image/jpeg"
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -545,6 +744,11 @@
       "value": {
         "type": "text",
         "text": "hello"
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -559,6 +763,11 @@
             "text": "ok"
           }
         ]
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -566,6 +775,11 @@
       "kind": "live_client_event",
       "value": {
         "type": "interrupt"
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -573,6 +787,11 @@
       "kind": "live_client_event",
       "value": {
         "type": "end_audio"
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -582,6 +801,11 @@
         "type": "audio",
         "data": "aGk=",
         "media_type": "audio/pcm;rate=24000"
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -590,6 +814,11 @@
       "value": {
         "type": "text",
         "text": "hello"
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -602,6 +831,11 @@
         "input": {
           "query": "weather"
         }
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -612,6 +846,11 @@
         "id": "call_1",
         "name": "lookup",
         "input_delta": "{\"query\""
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -619,6 +858,11 @@
       "kind": "live_server_event",
       "value": {
         "type": "interrupted"
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -631,6 +875,11 @@
           "output_tokens": 2,
           "total_tokens": 3
         }
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -642,6 +891,11 @@
           "code": "provider",
           "message": "bad"
         }
+      },
+      "provenance": {
+        "source": "migrated-apr29",
+        "date": "2026-06-09",
+        "evidence": "lm15-python2/conformance@812a2cb (consolidated corpus, live-validated 2026-04-29 via curl-fixtures pipeline); copied to lm15-contract 2026-06-09"
       }
     },
     {
@@ -681,6 +935,11 @@
             "currency": "USD"
           }
         }
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-10",
+        "evidence": "lm15-python2/docs/model-hydration.md (canonical ModelInfo JSON, field-by-field schema); changes/2026-06-10-model-hydration-vectors.md"
       }
     },
     {
@@ -690,6 +949,11 @@
         "id": "tiny-1",
         "provider": "exampleai",
         "api_family": "openai-chat"
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-10",
+        "evidence": "lm15-python2/docs/model-hydration.md (canonical ModelInfo JSON, field-by-field schema); changes/2026-06-10-model-hydration-vectors.md"
       }
     },
     {
@@ -715,6 +979,11 @@
             "currency": "USD"
           }
         }
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-10",
+        "evidence": "lm15-python2/docs/model-hydration.md (canonical ModelInfo JSON, field-by-field schema); changes/2026-06-10-model-hydration-vectors.md"
       }
     },
     {
@@ -727,6 +996,11 @@
         "extensions": {
           "vendor_defaults": {}
         }
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-10",
+        "evidence": "lm15-python2/docs/model-hydration.md (canonical ModelInfo JSON, field-by-field schema); changes/2026-06-10-model-hydration-vectors.md"
       }
     },
     {
@@ -762,6 +1036,11 @@
             }
           }
         }
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-10",
+        "evidence": "lm15-python2/docs/model-hydration.md (canonical ModelInfo JSON, field-by-field schema); changes/2026-06-10-model-hydration-vectors.md"
       }
     },
     {
@@ -776,6 +1055,11 @@
           "key": "session-42",
           "prefix_until_index": 3
         }
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-10",
+        "evidence": "lm15-python2/docs/serde-rules.md (omission rule) + lm15-python2@60cc874 (cache_config/continuation_state serde, Config.cache wiring); canonical-only fixtures, no wire receipt required per AUTHORITY.md"
       }
     },
     {
@@ -785,6 +1069,11 @@
         "cache": {
           "mode": "off"
         }
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-10",
+        "evidence": "lm15-python2/docs/serde-rules.md (omission rule) + lm15-python2@60cc874 (cache_config/continuation_state serde, Config.cache wiring); canonical-only fixtures, no wire receipt required per AUTHORITY.md"
       }
     },
     {
@@ -795,6 +1084,11 @@
         "retention": "short",
         "key": "tenant-a",
         "prefix_until_index": 0
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-10",
+        "evidence": "lm15-python2/docs/serde-rules.md (omission rule) + lm15-python2@60cc874 (cache_config/continuation_state serde, Config.cache wiring); canonical-only fixtures, no wire receipt required per AUTHORITY.md"
       }
     },
     {
@@ -802,6 +1096,11 @@
       "kind": "cache_config",
       "value": {
         "mode": "auto"
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-10",
+        "evidence": "lm15-python2/docs/serde-rules.md (omission rule) + lm15-python2@60cc874 (cache_config/continuation_state serde, Config.cache wiring); canonical-only fixtures, no wire receipt required per AUTHORITY.md"
       }
     },
     {
@@ -813,6 +1112,11 @@
         "data": {
           "id": "resp_123"
         }
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-10",
+        "evidence": "lm15-python2/docs/serde-rules.md (omission rule) + lm15-python2@60cc874 (cache_config/continuation_state serde, Config.cache wiring); canonical-only fixtures, no wire receipt required per AUTHORITY.md"
       }
     },
     {
@@ -825,12 +1129,22 @@
           "name": "cachedContents/xyz",
           "ttl": "300s"
         }
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-10",
+        "evidence": "lm15-python2/docs/serde-rules.md (omission rule) + lm15-python2@60cc874 (cache_config/continuation_state serde, Config.cache wiring); canonical-only fixtures, no wire receipt required per AUTHORITY.md"
       }
     },
     {
       "id": "usage.nothing_reported",
       "kind": "usage",
-      "value": {}
+      "value": {},
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-10",
+        "evidence": "lm15-python2/docs/serde-rules.md (omission rule: typed serializers omit their own empty optional fields; Usage counters are int|null, null = not reported, distinct from reported 0); changes/2026-06-10-usage-none-vs-zero.md; canonical-only fixtures, no wire receipt required per AUTHORITY.md"
+      }
     },
     {
       "id": "usage.reported_zeros",
@@ -839,6 +1153,11 @@
         "input_tokens": 0,
         "output_tokens": 0,
         "total_tokens": 0
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-10",
+        "evidence": "lm15-python2/docs/serde-rules.md (omission rule: typed serializers omit their own empty optional fields; Usage counters are int|null, null = not reported, distinct from reported 0); changes/2026-06-10-usage-none-vs-zero.md; canonical-only fixtures, no wire receipt required per AUTHORITY.md"
       }
     },
     {
@@ -846,6 +1165,11 @@
       "kind": "usage",
       "value": {
         "input_tokens": 7
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-10",
+        "evidence": "lm15-python2/docs/serde-rules.md (omission rule: typed serializers omit their own empty optional fields; Usage counters are int|null, null = not reported, distinct from reported 0); changes/2026-06-10-usage-none-vs-zero.md; canonical-only fixtures, no wire receipt required per AUTHORITY.md"
       }
     },
     {
@@ -854,6 +1178,11 @@
       "value": {
         "temperature": 1.0,
         "top_p": 1.0
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-10",
+        "evidence": "lm15-python2/docs/serde-rules.md (Number rule: every numeric field has a declared JSON number type; float fields always serialize as JSON floats, int fields as JSON ints, constructors coerce same-valued cross-type input); changes/2026-06-10-number-rule.md; canonical-only fixtures, no wire receipt required per AUTHORITY.md"
       }
     },
     {
@@ -862,6 +1191,11 @@
       "value": {
         "max_tokens": 64,
         "top_k": 2
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-10",
+        "evidence": "lm15-python2/docs/serde-rules.md (Number rule: every numeric field has a declared JSON number type; float fields always serialize as JSON floats, int fields as JSON ints, constructors coerce same-valued cross-type input); changes/2026-06-10-number-rule.md; canonical-only fixtures, no wire receipt required per AUTHORITY.md"
       }
     },
     {
@@ -884,11 +1218,21 @@
             "currency": "USD"
           }
         }
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-06-10",
+        "evidence": "lm15-python2/docs/serde-rules.md (Number rule: every numeric field has a declared JSON number type; float fields always serialize as JSON floats, int fields as JSON ints, constructors coerce same-valued cross-type input); changes/2026-06-10-number-rule.md; canonical-only fixtures, no wire receipt required per AUTHORITY.md"
       }
     },
     {
       "id": "batch_request.minimal",
       "kind": "batch_request",
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-08-31",
+        "evidence": "changes/2026-08-31-batch-lifecycle.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live batch captures 2026-08-31 (Anthropic Message Batches, Gemini Batch Mode)"
+      },
       "value": {
         "model": "omega-4",
         "requests": [
@@ -912,6 +1256,11 @@
     {
       "id": "batch_request.full",
       "kind": "batch_request",
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-08-31",
+        "evidence": "changes/2026-08-31-batch-lifecycle.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live batch captures 2026-08-31 (Anthropic Message Batches, Gemini Batch Mode)"
+      },
       "value": {
         "model": "omega-4",
         "requests": [
@@ -953,6 +1302,11 @@
     {
       "id": "batch_job.minimal",
       "kind": "batch_job",
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-08-31",
+        "evidence": "changes/2026-08-31-batch-lifecycle.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live batch captures 2026-08-31 (Anthropic Message Batches, Gemini Batch Mode)"
+      },
       "value": {
         "id": "batch_abc",
         "status": "queued"
@@ -961,6 +1315,11 @@
     {
       "id": "batch_job.full",
       "kind": "batch_job",
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-08-31",
+        "evidence": "changes/2026-08-31-batch-lifecycle.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live batch captures 2026-08-31 (Anthropic Message Batches, Gemini Batch Mode)"
+      },
       "value": {
         "id": "msgbatch_abc",
         "status": "completed",
@@ -974,6 +1333,11 @@
     {
       "id": "batch_entry.succeeded",
       "kind": "batch_entry",
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-08-31",
+        "evidence": "changes/2026-08-31-batch-lifecycle.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live batch captures 2026-08-31 (Anthropic Message Batches, Gemini Batch Mode)"
+      },
       "value": {
         "index": 0,
         "outcome": "succeeded",
@@ -1001,6 +1365,11 @@
     {
       "id": "batch_entry.errored",
       "kind": "batch_entry",
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-08-31",
+        "evidence": "changes/2026-08-31-batch-lifecycle.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live batch captures 2026-08-31 (Anthropic Message Batches, Gemini Batch Mode)"
+      },
       "value": {
         "index": 1,
         "outcome": "errored",
@@ -1014,6 +1383,11 @@
     {
       "id": "batch_entry.expired",
       "kind": "batch_entry",
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-08-31",
+        "evidence": "changes/2026-08-31-batch-lifecycle.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live batch captures 2026-08-31 (Anthropic Message Batches, Gemini Batch Mode)"
+      },
       "value": {
         "index": 2,
         "outcome": "expired"
@@ -1022,6 +1396,11 @@
     {
       "id": "file_upload_request.bytes",
       "kind": "file_upload_request",
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-08-31",
+        "evidence": "changes/2026-08-31-files-lifecycle.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live file captures 2026-08-31 (OpenAI Files, Anthropic Files GA, Gemini Files) in lm15-dev/curl-fixtures/files-2026-08-31/"
+      },
       "value": {
         "filename": "notes.txt",
         "bytes_data": "aGVsbG8=",
@@ -1031,6 +1410,11 @@
     {
       "id": "file_upload_request.path",
       "kind": "file_upload_request",
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-08-31",
+        "evidence": "changes/2026-08-31-files-lifecycle.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live file captures 2026-08-31 (OpenAI Files, Anthropic Files GA, Gemini Files) in lm15-dev/curl-fixtures/files-2026-08-31/"
+      },
       "value": {
         "filename": "clip.mp4",
         "media_type": "video/mp4",
@@ -1043,6 +1427,11 @@
     {
       "id": "file_info.minimal",
       "kind": "file_info",
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-08-31",
+        "evidence": "changes/2026-08-31-files-lifecycle.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live file captures 2026-08-31 (OpenAI Files, Anthropic Files GA, Gemini Files) in lm15-dev/curl-fixtures/files-2026-08-31/"
+      },
       "value": {
         "id": "file_1",
         "readiness": "ready"
@@ -1051,6 +1440,11 @@
     {
       "id": "file_info.full",
       "kind": "file_info",
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-08-31",
+        "evidence": "changes/2026-08-31-files-lifecycle.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live file captures 2026-08-31 (OpenAI Files, Anthropic Files GA, Gemini Files) in lm15-dev/curl-fixtures/files-2026-08-31/"
+      },
       "value": {
         "id": "file_abc",
         "filename": "notes.txt",
@@ -1068,6 +1462,11 @@
     {
       "id": "file_info.pending",
       "kind": "file_info",
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-08-31",
+        "evidence": "changes/2026-08-31-files-lifecycle.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live file captures 2026-08-31 (OpenAI Files, Anthropic Files GA, Gemini Files) in lm15-dev/curl-fixtures/files-2026-08-31/"
+      },
       "value": {
         "id": "https://generativelanguage.googleapis.com/v1beta/files/abc",
         "filename": "clip.mp4",
@@ -1079,6 +1478,11 @@
     {
       "id": "file_page.with_cursor",
       "kind": "file_page",
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-08-31",
+        "evidence": "changes/2026-08-31-files-lifecycle.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live file captures 2026-08-31 (OpenAI Files, Anthropic Files GA, Gemini Files) in lm15-dev/curl-fixtures/files-2026-08-31/"
+      },
       "value": {
         "items": [
           {
@@ -1093,6 +1497,11 @@
     {
       "id": "file_page.last",
       "kind": "file_page",
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-08-31",
+        "evidence": "changes/2026-08-31-files-lifecycle.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live file captures 2026-08-31 (OpenAI Files, Anthropic Files GA, Gemini Files) in lm15-dev/curl-fixtures/files-2026-08-31/"
+      },
       "value": {
         "items": [
           {
@@ -1109,6 +1518,11 @@
       "value": {
         "model": "gpt-image-1-mini",
         "prompt": "A red circle"
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-09-01",
+        "evidence": "changes/2026-09-01-media-generation.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live generation captures 2026-09-01 (OpenAI images+edits+speech, Gemini image+speech, xAI images+edits) in lm15-dev/curl-fixtures/genmedia-2026-09-01/ and xai-2026-09-01/"
       }
     },
     {
@@ -1133,6 +1547,11 @@
         "extensions": {
           "quality": "low"
         }
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-09-01",
+        "evidence": "changes/2026-09-01-media-generation.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live generation captures 2026-09-01 (OpenAI images+edits+speech, Gemini image+speech, xAI images+edits) in lm15-dev/curl-fixtures/genmedia-2026-09-01/ and xai-2026-09-01/"
       }
     },
     {
@@ -1146,6 +1565,11 @@
             "data": "aGVsbG8="
           }
         ]
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-09-01",
+        "evidence": "changes/2026-09-01-media-generation.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live generation captures 2026-09-01 (OpenAI images+edits+speech, Gemini image+speech, xAI images+edits) in lm15-dev/curl-fixtures/genmedia-2026-09-01/ and xai-2026-09-01/"
       }
     },
     {
@@ -1170,6 +1594,11 @@
         "provider_data": {
           "responseId": "resp_1"
         }
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-09-01",
+        "evidence": "changes/2026-09-01-media-generation.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live generation captures 2026-09-01 (OpenAI images+edits+speech, Gemini image+speech, xAI images+edits) in lm15-dev/curl-fixtures/genmedia-2026-09-01/ and xai-2026-09-01/"
       }
     },
     {
@@ -1178,6 +1607,11 @@
       "value": {
         "model": "gpt-4o-mini-tts",
         "prompt": "Hello."
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-09-01",
+        "evidence": "changes/2026-09-01-media-generation.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live generation captures 2026-09-01 (OpenAI images+edits+speech, Gemini image+speech, xAI images+edits) in lm15-dev/curl-fixtures/genmedia-2026-09-01/ and xai-2026-09-01/"
       }
     },
     {
@@ -1191,6 +1625,11 @@
         "extensions": {
           "speed": 1
         }
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-09-01",
+        "evidence": "changes/2026-09-01-media-generation.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live generation captures 2026-09-01 (OpenAI images+edits+speech, Gemini image+speech, xAI images+edits) in lm15-dev/curl-fixtures/genmedia-2026-09-01/ and xai-2026-09-01/"
       }
     },
     {
@@ -1202,6 +1641,11 @@
           "media_type": "audio/mpeg",
           "data": "aGVsbG8="
         }
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-09-01",
+        "evidence": "changes/2026-09-01-media-generation.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live generation captures 2026-09-01 (OpenAI images+edits+speech, Gemini image+speech, xAI images+edits) in lm15-dev/curl-fixtures/genmedia-2026-09-01/ and xai-2026-09-01/"
       }
     },
     {
@@ -1223,6 +1667,11 @@
         "provider_data": {
           "modelVersion": "gemini-2.5-flash-preview-tts"
         }
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-09-01",
+        "evidence": "changes/2026-09-01-media-generation.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live generation captures 2026-09-01 (OpenAI images+edits+speech, Gemini image+speech, xAI images+edits) in lm15-dev/curl-fixtures/genmedia-2026-09-01/ and xai-2026-09-01/"
       }
     },
     {
@@ -1231,6 +1680,11 @@
       "value": {
         "model": "grok-imagine-video",
         "prompt": "A red ball bounces once"
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-09-01",
+        "evidence": "changes/2026-09-01-video-generation.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live video captures 2026-09-01 (Sora, Veo, grok-imagine) in lm15-dev/curl-fixtures/video-2026-09-01/ and xai-2026-09-01/"
       }
     },
     {
@@ -1243,6 +1697,11 @@
         "extensions": {
           "size": "720x1280"
         }
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-09-01",
+        "evidence": "changes/2026-09-01-video-generation.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live video captures 2026-09-01 (Sora, Veo, grok-imagine) in lm15-dev/curl-fixtures/video-2026-09-01/ and xai-2026-09-01/"
       }
     },
     {
@@ -1251,6 +1710,11 @@
       "value": {
         "id": "video_1",
         "status": "queued"
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-09-01",
+        "evidence": "changes/2026-09-01-video-generation.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live video captures 2026-09-01 (Sora, Veo, grok-imagine) in lm15-dev/curl-fixtures/video-2026-09-01/ and xai-2026-09-01/"
       }
     },
     {
@@ -1265,6 +1729,11 @@
         "provider_data": {
           "status": "done"
         }
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-09-01",
+        "evidence": "changes/2026-09-01-video-generation.md; values generated by the ratified reference serde (lm15-python) and strict-roundtrip-verified; shapes corroborated by live video captures 2026-09-01 (Sora, Veo, grok-imagine) in lm15-dev/curl-fixtures/video-2026-09-01/ and xai-2026-09-01/"
       }
     },
     {
@@ -1272,6 +1741,11 @@
       "kind": "config",
       "value": {
         "logprobs": 0
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-09-01",
+        "evidence": "shapes verified against live OpenAI captures (bodies/openai.top_logprobs, bodies/openai_chat.logprobs) and the Gemini generate-content LogprobsResult schema (token_id); changes/2026-09-01-logprobs-and-builtin-tool-forcing.md"
       }
     },
     {
@@ -1280,6 +1754,11 @@
       "value": {
         "max_tokens": 16,
         "logprobs": 3
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-09-01",
+        "evidence": "shapes verified against live OpenAI captures (bodies/openai.top_logprobs, bodies/openai_chat.logprobs) and the Gemini generate-content LogprobsResult schema (token_id); changes/2026-09-01-logprobs-and-builtin-tool-forcing.md"
       }
     },
     {
@@ -1317,6 +1796,11 @@
             ]
           }
         ]
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-09-01",
+        "evidence": "shapes verified against live OpenAI captures (bodies/openai.top_logprobs, bodies/openai_chat.logprobs) and the Gemini generate-content LogprobsResult schema (token_id); changes/2026-09-01-logprobs-and-builtin-tool-forcing.md"
       }
     },
     {
@@ -1358,6 +1842,11 @@
             ]
           }
         ]
+      },
+      "provenance": {
+        "source": "hand-authored",
+        "date": "2026-09-01",
+        "evidence": "shapes verified against live OpenAI captures (bodies/openai.top_logprobs, bodies/openai_chat.logprobs) and the Gemini generate-content LogprobsResult schema (token_id); changes/2026-09-01-logprobs-and-builtin-tool-forcing.md"
       }
     }
   ]

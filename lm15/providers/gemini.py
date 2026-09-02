@@ -105,7 +105,7 @@ from .base import (
     default_transport,
     resolve_credential,
 )
-from .common import build_url, iso_utc, make_json_request, model_infos_from_entries, multipart_related_body, parse_json_object, parts_to_text
+from .common import EFFORT_THINKING_BUDGETS, build_url, iso_utc, make_json_request, model_infos_from_entries, multipart_related_body, parse_json_object, parts_to_text
 
 # Canonical builtin tool name → Gemini tool key
 _GEMINI_BUILTIN_MAP: dict[str, str] = {
@@ -118,17 +118,17 @@ GEMINI_PROVIDER_EXECUTED_PART_KEYS = {
     "codeExecutionResult",
 }
 
-# Effort levels graded into thinkingBudget values that every 2.5-family
-# model accepts (flash-lite floor 512, flash ceiling 24576). "adaptive"
-# maps to -1, Gemini's own dynamic-thinking mode.
-_EFFORT_THINKING_BUDGETS: dict[str, int] = {
-    "adaptive": -1,
-    "minimal": 512,
-    "low": 2048,
-    "medium": 8192,
-    "high": 16384,
-    "xhigh": 24576,
-}
+def gemini_level_class(model: str) -> bool:
+    """True for the Gemini 3.x class: `thinkingLevel`, no full off (MAP-7 rule 10).
+
+    Model-name table, receipted 2026-09-02: 2.5 models reject thinkingLevel,
+    3.x models take it; 3.7 Flash accepts thinkingBudget: 0 and still spends
+    thinking tokens.  A table that rots; `extensions` overrides.
+    """
+    lowered = model.lower()
+    return lowered.startswith("models/gemini-3") or lowered.startswith("gemini-3")
+
+
 
 
 def _attach_unmapped(provider_data: dict[str, Any], unmapped: list[dict[str, str]]) -> dict[str, Any]:
@@ -674,17 +674,42 @@ class GeminiLM(BaseProviderLM):
         if request.config.response_format:
             generation_config.update(_response_format_to_gemini_config(request.config.response_format))
         if request.config.reasoning is not None:
-            if request.config.reasoning.is_off:
+            reasoning = request.config.reasoning
+            level_class = gemini_level_class(request.model)
+            if reasoning.is_off:
+                if level_class:
+                    # MAP-7 rule 4 / MAP-5: Gemini 3.x cannot fully disable
+                    # thinking; 3.7 Flash accepts thinkingBudget 0 and still
+                    # spent 58 tokens (live 2026-09-02) — a silent paid no-op.
+                    raise UnsupportedFeatureError(
+                        f"gemini: reasoning cannot be disabled on {request.model} — the Gemini 3 "
+                        "class has no full off switch (thinkingBudget 0 is accepted but not honoured); "
+                        "use effort='low' or a 2.5 model",
+                        provider=self.provider,
+                    )
                 generation_config["thinkingConfig"] = {"thinkingBudget": 0}
             else:
-                thinking: dict[str, Any] = {"includeThoughts": True}
-                budget = request.config.reasoning.thinking_budget
-                if budget is None:
-                    # Without a budget, models that default to no thinking
-                    # silently ignore the effort level — grade it instead.
-                    budget = _EFFORT_THINKING_BUDGETS.get(request.config.reasoning.effort)
-                if budget is not None:
-                    thinking["thinkingBudget"] = budget
+                if reasoning.summary in ("concise", "detailed"):
+                    raise UnsupportedFeatureError(
+                        f"gemini: reasoning.summary={reasoning.summary!r} is an OpenAI detail level; "
+                        "GenerateContent has includeThoughts only (use 'auto')",
+                        provider=self.provider,
+                    )
+                thinking: dict[str, Any] = {}
+                if reasoning.summary is not None:
+                    thinking["includeThoughts"] = True  # MAP-7 rule 7: only when asked
+                if reasoning.thinking_budget is not None:
+                    thinking["thinkingBudget"] = reasoning.thinking_budget  # 3.x: accepted, docs warn
+                elif level_class:
+                    if reasoning.effort in ("xhigh", "max"):
+                        raise UnsupportedFeatureError(
+                            f"gemini: reasoning.effort={reasoning.effort!r} has no thinkingLevel on the "
+                            "Gemini 3 class (minimal|low|medium|high); 'high' is the ceiling",
+                            provider=self.provider,
+                        )
+                    thinking["thinkingLevel"] = reasoning.effort
+                else:
+                    thinking["thinkingBudget"] = EFFORT_THINKING_BUDGETS[reasoning.effort]
                 generation_config["thinkingConfig"] = thinking
         if generation_config:
             payload["generationConfig"] = generation_config

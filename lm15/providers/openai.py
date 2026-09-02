@@ -28,6 +28,7 @@ from ..protocols import Capabilities
 from ..sse import SSEEvent
 from ..transports import TransportRequest
 from ..types import (
+    continuation_data,
     VideoGenerationRequest,
     VideoJobInfo,
     VideoPart,
@@ -572,6 +573,22 @@ class OpenAILM(BaseProviderLM):
                         content_parts.append({"type": "output_text", "text": part.text})
                     elif isinstance(part, RefusalPart):
                         content_parts.append({"type": "refusal", "refusal": part.text})
+                    elif isinstance(part, ThinkingPart):
+                        state = continuation_data(part, "openai", "reasoning_item")
+                        if state:
+                            # Native replay (MAP-7 rule 8): the reasoning item
+                            # goes back as its own input item, before the
+                            # message it preceded.
+                            item = {"type": "reasoning", **{k: v for k, v in state.items() if k in ("id", "encrypted_content")}}
+                            # `summary` is required on a replayed item, even
+                            # empty (HTTP 400 "Missing required parameter:
+                            # input[1].summary", live 2026-09-02).
+                            item["summary"] = [{"type": "summary_text", "text": part.text}] if part.text else []
+                            items.append(item)
+                        elif part.text:
+                            # No native state: replay as assistant text
+                            # (decision G, 2026-09-01) rather than drop it.
+                            content_parts.append({"type": "output_text", "text": part.text})
             else:
                 content_parts = [
                     part_to_openai_input(part)
@@ -701,7 +718,24 @@ class OpenAILM(BaseProviderLM):
         if request.config.reasoning:
             reasoning = request.config.reasoning
             if not reasoning.is_off:
-                effort = {"adaptive": "medium", "xhigh": "high"}.get(reasoning.effort, reasoning.effort)
+                # MAP-7: the word goes verbatim; models reject unsupported
+                # levels with a 400 that lists the supported set (live
+                # 2026-09-02: gpt-5.6-sol rejects minimal, gpt-5.4-mini
+                # rejects max).  No budget exists on this wire.
+                if reasoning.thinking_budget is not None:
+                    raise UnsupportedFeatureError(
+                        f"{self.provider}: reasoning.thinking_budget is not supported — this wire "
+                        "has no thinking token budget; use effort (Anthropic's manual class and "
+                        "Gemini take a budget)",
+                        provider=self.provider,
+                    )
+                effort = reasoning.effort
+                if reasoning.summary in ("concise", "detailed") and compat.reasoning_format != "responses_reasoning":
+                    raise UnsupportedFeatureError(
+                        f"{self.provider}: reasoning.summary={reasoning.summary!r} is an OpenAI Responses "
+                        "detail level; this wire has no summary levels (use 'auto')",
+                        provider=self.provider,
+                    )
                 if compat.reasoning_format == "responses_reasoning":
                     reasoning_payload: dict[str, Any] = {"effort": effort}
                     if reasoning.summary is not None:
@@ -844,13 +878,24 @@ class OpenAILM(BaseProviderLM):
                     )
                 )
             elif item_type == "reasoning":
+                # MAP-7 rule 8: the reasoning item is replay state.  Its
+                # summary (when requested) is the visible text; its id and
+                # encrypted_content ride as continuation so the next turn
+                # can send the item back verbatim (live 2026-09-02:
+                # encrypted_content is present on every reasoning item).
                 summary = item.get("summary")
                 if isinstance(summary, list):
                     text = "\n".join(str(x.get("text") if isinstance(x, dict) else x) for x in summary)
                 else:
                     text = str(summary or item.get("text") or "")
-                if text:
-                    parts.append(ThinkingPart(text=text))
+                state: dict[str, Any] = {}
+                if item.get("id"):
+                    state["id"] = str(item["id"])
+                if item.get("encrypted_content"):
+                    state["encrypted_content"] = str(item["encrypted_content"])
+                continuation = (ContinuationState(provider="openai", kind="reasoning_item", data=state),) if state else ()
+                if text or continuation:
+                    parts.append(ThinkingPart(text=text, continuation=continuation))
             elif item_type in OPENAI_PROVIDER_EXECUTED_ITEMS:
                 continue
             else:

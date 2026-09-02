@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import pytest
 from dataclasses import dataclass
 from typing import Iterator
 
 from lm15.providers import AnthropicLM, GeminiLM, OpenAILM
+from lm15.errors import UnsupportedFeatureError
 from lm15.transports import StdlibTransport
 from lm15.types import (
     BuiltinTool,
@@ -635,37 +637,29 @@ def test_anthropic_stream_message_delta_maps_thinking_tokens() -> None:
     assert events[0].usage.reasoning_tokens == 7
 
 
-def test_gemini_reasoning_effort_maps_to_thinking_budget() -> None:
-    # Without a budget, includeThoughts alone lets budget-0 models skip
-    # thinking entirely; effort levels must grade into thinkingBudget.
+def test_gemini_reasoning_effort_maps_by_model_class() -> None:
+    # MAP-7: the 2.5 class expresses effort as a budget through the shared
+    # grading table (includeThoughts only when summary asks); the 3.x
+    # class takes thinkingLevel verbatim and cannot be switched off.
     lm = GeminiLM(api_key="sk-gem", transport=_FakeTransport())
 
-    def thinking_config(reasoning: Reasoning) -> dict:
-        request = Request(
-            model="gemini-test",
-            messages=(Message.user("12*13?"),),
-            config=Config(reasoning=reasoning),
-        )
+    def thinking_config(model: str, reasoning: Reasoning) -> dict:
+        request = Request(model=model, messages=(Message.user("12*13?"),), config=Config(reasoning=reasoning))
         payload = json.loads(lm.build_request(request, stream=False).body)
         return payload["generationConfig"]["thinkingConfig"]
 
-    assert thinking_config(Reasoning(effort="high")) == {
-        "includeThoughts": True, "thinkingBudget": 16384,
-    }
-    assert thinking_config(Reasoning(effort="adaptive")) == {
-        "includeThoughts": True, "thinkingBudget": -1,
-    }
-    # An explicit budget always wins over the effort grade.
-    assert thinking_config(Reasoning(effort="high", thinking_budget=999)) == {
-        "includeThoughts": True, "thinkingBudget": 999,
-    }
-    assert thinking_config(Reasoning(effort="off")) == {"thinkingBudget": 0}
-
-
-# ─── MAP-5: explicit reasoning-off reaches the wire or fails loudly ────────
-#
-# Live audit 2026-09-01: omitting the field let reasoning-by-default models
-# spend hidden (billed) reasoning tokens on requests that asked for off.
+    assert thinking_config("gemini-2.5-flash", Reasoning(effort="high")) == {"thinkingBudget": 16384}
+    assert thinking_config("gemini-2.5-flash", Reasoning(effort="high", summary="auto")) == {"includeThoughts": True, "thinkingBudget": 16384}
+    # An explicit budget is the spelling; effort stays the intent.
+    assert thinking_config("gemini-2.5-flash", Reasoning(effort="high", thinking_budget=256)) == {"thinkingBudget": 256}
+    assert thinking_config("gemini-3.7-flash", Reasoning(effort="low")) == {"thinkingLevel": "low"}
+    assert thinking_config("gemini-2.5-flash", Reasoning(effort="off")) == {"thinkingBudget": 0}
+    with pytest.raises(UnsupportedFeatureError, match="cannot be disabled"):
+        thinking_config("gemini-3.7-flash", Reasoning(effort="off"))
+    with pytest.raises(UnsupportedFeatureError, match="no thinkingLevel"):
+        thinking_config("gemini-3.7-flash", Reasoning(effort="max"))
+    with pytest.raises(UnsupportedFeatureError, match="detail level"):
+        thinking_config("gemini-2.5-flash", Reasoning(effort="low", summary="detailed"))
 
 
 def _reasoning_off_request(model: str = "test-model") -> Request:

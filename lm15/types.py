@@ -77,7 +77,7 @@ ContinuationKind: TypeAlias = str
 FinishReason = Literal["stop", "length", "tool_call", "content_filter", "error"]
 
 ReasoningEffort = Literal[
-    "off", "adaptive", "minimal", "low", "medium", "high", "xhigh"
+    "off", "minimal", "low", "medium", "high", "xhigh", "max"
 ]
 ReasoningSummary = Literal["auto", "concise", "detailed"]
 
@@ -1587,49 +1587,35 @@ Tool: TypeAlias = FunctionTool | BuiltinTool
 
 @dataclass(frozen=True, slots=True)
 class Reasoning:
-    """Extended thinking / reasoning configuration.
+    """How much hidden thinking the model does before it answers (MAP-7).
 
-    effort controls the model's reasoning depth:
-      - "off"      → no reasoning (provider will skip/disable thinking)
-      - "adaptive" → model decides whether to think based on complexity
-      - "minimal"  → the smallest provider-supported reasoning effort
-      - "low"      → light reasoning
-      - "medium"   → moderate reasoning
-      - "high"     → deep reasoning
-      - "xhigh"    → extra-high effort where supported
+    ``effort`` is the one dial and is required.  Vocabulary: ``off``,
+    ``minimal``, ``low``, ``medium``, ``high``, ``xhigh``, ``max``.  Every
+    provider has this dial with these words; each model accepts a subset
+    and rejects the rest loudly.  Adapters send the word verbatim where
+    the provider has levels; budget-only model classes (Anthropic 4.5 and
+    earlier, Gemini 2.5) express it through one documented grading table.
+    Words with no native level on a provider RAISE rather than downgrade.
 
-    thinking_budget is an optional hard cap on reasoning tokens.
-    When set, it limits how many tokens the model spends on internal
-    reasoning — independent of the visible response length.  Budgets
-    are only meaningful when reasoning is enabled: passing a budget
-    together with effort="off" raises ValueError instead of silently
-    discarding the budget.
+    There is no "adaptive" value: leaving ``config.reasoning`` unset is
+    how you let the model decide, on every provider.  ``effort="off"``
+    reaches the wire as the provider's disable or fails loudly where the
+    provider cannot disable (MAP-5).
 
-    summary asks providers that hide raw chain-of-thought (notably
-    OpenAI) to return a provider-generated reasoning summary when
-    supported. It does not request or expose private/raw reasoning.
+    ``thinking_budget`` is a token cap on providers that count thinking
+    separately (Anthropic manual class, Gemini); it RAISES where the wire
+    has no budget.  On budget-only classes the budget is the spelling on
+    the wire and ``effort`` is the intent.  ``total_budget`` was removed
+    2026-09-02: ``Config.max_tokens`` is the ceiling.
 
-    total_budget caps the combined output (thinking + response tokens).
-    When set alongside Config.max_tokens, both limits are enforced:
-    the response won't exceed max_tokens, and the total won't exceed
-    total_budget.
-
-    ``Config(reasoning=None)`` means "do not send an explicit reasoning
-    preference"; ``Config(reasoning=Reasoning())`` means "explicitly force
-    reasoning off."  This tri-state is intentional because some providers
-    and models have their own defaults.
-
-    Not all providers support every knob. Each LM maps the config to
-    its provider's closest native mechanism and never silently drops an
-    explicit setting: when a model cannot honor it (for example
-    effort="off" on a model that always reasons, or a Gemini model that
-    rejects thinkingBudget=0), the request fails loudly — lm15 raises
-    UnsupportedFeatureError, or the provider's own error surfaces.
+    ``summary`` is visibility: ``None`` = provider default, ``"auto"`` =
+    show the thinking where a knob exists (satisfied silently where the
+    provider always shows it), ``"concise"``/``"detailed"`` = OpenAI's
+    detail levels (RAISE elsewhere).
     """
 
-    effort: ReasoningEffort = "off"
+    effort: ReasoningEffort
     thinking_budget: int | None = None
-    total_budget: int | None = None
     summary: ReasoningSummary | None = None
 
     def __post_init__(self) -> None:
@@ -1638,16 +1624,10 @@ class Reasoning:
         if self.summary is not None and self.summary not in REASONING_SUMMARIES:
             raise ValueError(f"unsupported reasoning summary: {self.summary}")
         _coerce_int_field(self, "thinking_budget")
-        _coerce_int_field(self, "total_budget")
         _validate_positive(self.thinking_budget, field_name="thinking_budget")
-        _validate_positive(self.total_budget, field_name="total_budget")
-        if self.effort == "off" and (
-            self.thinking_budget is not None
-            or self.total_budget is not None
-            or self.summary is not None
-        ):
+        if self.effort == "off" and (self.thinking_budget is not None or self.summary is not None):
             raise ValueError(
-                "Reasoning(effort='off') cannot specify thinking_budget, total_budget, or summary"
+                "Reasoning(effort='off') cannot specify thinking_budget or summary"
             )
 
     @property
