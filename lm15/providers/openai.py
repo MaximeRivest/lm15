@@ -24,7 +24,6 @@ from ..errors import (
 from ..features import EndpointSupport, ProviderManifest
 from ..live import WebSocketLiveSession, require_websocket_sync_connect
 from ..profiles import ProviderProfile, ResolvedOpenAIResponsesCompat, resolve_openai_responses_compat
-from ..protocols import Capabilities
 from ..sse import SSEEvent
 from ..transports import TransportRequest
 from ..types import (
@@ -336,11 +335,6 @@ class OpenAILM(BaseProviderLM):
     profile: ProviderProfile | None = None
 
     provider: str = "openai"
-    capabilities: Capabilities = Capabilities(
-        input_modalities=frozenset({"text", "image", "audio", "video", "document", "binary"}),
-        output_modalities=frozenset({"text", "audio", "image"}),
-        features=frozenset({"streaming", "tools", "json_output", "reasoning", "live", "files", "batch", "images", "audio"}),
-    )
     supports: ClassVar[EndpointSupport] = EndpointSupport(
         complete=True,
         stream=True,

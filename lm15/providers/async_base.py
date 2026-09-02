@@ -25,7 +25,6 @@ from ..errors import (
     UnsupportedFeatureError,
 )
 from ..features import EndpointSupport, ProviderManifest
-from ..protocols import Capabilities
 from ..sse import aparse_sse
 from ..transports import (
     AsyncTransportResponse,
@@ -57,7 +56,7 @@ from .openai_codex import (
     DEFAULT_CODEX_ORIGINATOR,
     OpenAICodexLM,
 )
-from .xai import DEFAULT_XAI_BASE_URL, XAI_CAPABILITIES, XaiLM
+from .xai import DEFAULT_XAI_BASE_URL, XaiLM
 
 
 class AsyncTransport(Protocol):
@@ -105,7 +104,6 @@ class AsyncBaseProviderLM:
 
     # Mirrored metadata (subclasses override like their sync siblings).
     provider: str = "unknown"
-    capabilities: Capabilities = Capabilities()
     supports: ClassVar[EndpointSupport] = EndpointSupport()
     manifest: ClassVar[ProviderManifest] = ProviderManifest(
         provider="unknown", supports=EndpointSupport()
@@ -473,7 +471,6 @@ class AsyncOpenAILM(AsyncBaseProviderLM):
         )
 
     provider: str = "openai"
-    capabilities: Capabilities = _mirror_default(OpenAILM, "capabilities")
     supports: ClassVar[EndpointSupport] = OpenAILM.supports
     manifest: ClassVar[ProviderManifest] = OpenAILM.manifest
 
@@ -496,7 +493,6 @@ class AsyncAnthropicLM(AsyncBaseProviderLM):
     api_version: str = "2023-06-01"
 
     provider: str = "anthropic"
-    capabilities: Capabilities = _mirror_default(AnthropicLM, "capabilities")
     supports: ClassVar[EndpointSupport] = AnthropicLM.supports
     manifest: ClassVar[ProviderManifest] = AnthropicLM.manifest
 
@@ -519,7 +515,6 @@ class AsyncGeminiLM(AsyncBaseProviderLM):
     upload_base_url: str = "https://generativelanguage.googleapis.com/upload/v1beta"
 
     provider: str = "gemini"
-    capabilities: Capabilities = _mirror_default(GeminiLM, "capabilities")
     supports: ClassVar[EndpointSupport] = GeminiLM.supports
     manifest: ClassVar[ProviderManifest] = GeminiLM.manifest
 
@@ -562,7 +557,6 @@ class AsyncOpenAIChatLM(AsyncBaseProviderLM):
     compat: Any | None = None
 
     provider: str = "openai_chat"
-    capabilities: Capabilities = _mirror_default(OpenAIChatLM, "capabilities")
     supports: ClassVar[EndpointSupport] = OpenAIChatLM.supports
     manifest: ClassVar[ProviderManifest] = OpenAIChatLM.manifest
 
@@ -602,7 +596,6 @@ class AsyncClaudeCodeLM(AsyncBaseProviderLM):
 
     # Not constructor params on the sync sibling either (it is not a dataclass).
     provider: str = field(default="claude-code", init=False)
-    capabilities: Capabilities = field(default=ClaudeCodeLM.capabilities, init=False)
     supports: ClassVar[EndpointSupport] = ClaudeCodeLM.supports
     manifest: ClassVar[ProviderManifest] = ClaudeCodeLM.manifest
 
@@ -669,7 +662,6 @@ class AsyncOpenAICodexLM(AsyncBaseProviderLM):
 
     # Not constructor params on the sync sibling either (it is not a dataclass).
     provider: str = field(default="openai-codex", init=False)
-    capabilities: Capabilities = field(default=OpenAICodexLM.capabilities, init=False)
     supports: ClassVar[EndpointSupport] = OpenAICodexLM.supports
     manifest: ClassVar[ProviderManifest] = OpenAICodexLM.manifest
 
@@ -750,7 +742,6 @@ class AsyncXaiLM(AsyncBaseProviderLM):
 
     # Not constructor params on the sync sibling either.
     provider: str = field(default="xai", init=False)
-    capabilities: Capabilities = field(default=XAI_CAPABILITIES, init=False)
     supports: ClassVar[EndpointSupport] = XaiLM.supports
     manifest: ClassVar[ProviderManifest] = XaiLM.manifest
     # Same offline probe as the sync sibling (oauth-unless-explicit policy).

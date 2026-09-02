@@ -18,7 +18,7 @@ from ..errors import (
     with_credential_hint,
 )
 from ..features import EndpointSupport, ProviderManifest
-from ..protocols import Capabilities, LiveSession
+from ..protocols import LiveSession
 from ..result import materialize_response
 from ..types import (
     SpeechGenerationRequest,
@@ -59,11 +59,6 @@ class OpenAICodexLM(OpenAILM):
         auth_modes=("chatgpt-oauth", "bearer-oauth"),
         env_keys=(),
         credential_policy="oauth",
-    )
-    capabilities: Capabilities = Capabilities(
-        input_modalities=frozenset({"text", "image", "document", "binary"}),
-        output_modalities=frozenset({"text"}),
-        features=frozenset({"streaming", "tools", "json_output", "reasoning"}),
     )
 
     def __init__(
@@ -107,7 +102,6 @@ class OpenAICodexLM(OpenAILM):
             base_url=base_url,
             profile=None,
             provider="openai-codex",
-            capabilities=self.capabilities,
         )
 
     @classmethod

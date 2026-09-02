@@ -9,7 +9,7 @@ from ..auth import (
 )
 from ..errors import ProviderError, UnsupportedFeatureError, with_credential_hint
 from ..features import EndpointSupport, ProviderManifest
-from ..protocols import Capabilities, LiveSession
+from ..protocols import LiveSession
 from ..types import BatchEntry, BatchJobInfo, BatchRequest, BuiltinTool, FileInfo, FilePage, FileUploadRequest, LiveConfig, Request
 from .anthropic import AnthropicLM
 from .base import Credential, SyncTransport, default_transport, resolve_credential
@@ -30,11 +30,6 @@ class ClaudeCodeLM(AnthropicLM):
         auth_modes=("claude-code-oauth", "bearer-oauth"),
         env_keys=(),
         credential_policy="oauth",
-    )
-    capabilities: Capabilities = Capabilities(
-        input_modalities=frozenset({"text", "image", "document"}),
-        output_modalities=frozenset({"text"}),
-        features=frozenset({"streaming", "tools", "reasoning"}),
     )
 
     def __init__(
@@ -66,7 +61,6 @@ class ClaudeCodeLM(AnthropicLM):
             base_url=base_url,
             api_version=api_version,
             provider="claude-code",
-            capabilities=self.capabilities,
         )
 
     @classmethod

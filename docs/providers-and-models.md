@@ -115,17 +115,20 @@ aimo — is in [the router guide](using-the-router.md).
 ## Will it work before I try it?
 
 Adapters describe themselves. Instead of hunting through docs for
-"does Anthropic support batch?", ask the object:
+"does Anthropic support batch?", ask the object. `supports` is the one
+endpoint declaration per adapter, pinned by the contract's support matrix;
+per-model facts such as modalities and prices live on `ModelInfo`
+([model profiles](using-model-profiles.md)).
 
 ```python
 lm = AnthropicLM(api_key="...")
-print(sorted(lm.capabilities.features))
 print(lm.supports.batches)
+print(lm.supports.live)
 ```
 
 ```output
-['batch', 'files', 'reasoning', 'streaming', 'tools']
 True
+False
 ```
 
 Asking for something a provider can't do raises a typed

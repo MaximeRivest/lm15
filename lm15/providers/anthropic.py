@@ -20,7 +20,6 @@ from ..errors import (
     map_http_error,
 )
 from ..features import EndpointSupport, ProviderManifest
-from ..protocols import Capabilities
 from ..sse import SSEEvent
 from ..transports import TransportRequest
 from ..types import (
@@ -230,11 +229,6 @@ class AnthropicLM(BaseProviderLM):
     api_version: str = "2023-06-01"
 
     provider: str = "anthropic"
-    capabilities: Capabilities = Capabilities(
-        input_modalities=frozenset({"text", "image", "document"}),
-        output_modalities=frozenset({"text"}),
-        features=frozenset({"streaming", "tools", "reasoning", "files", "batch"}),
-    )
     supports: ClassVar[EndpointSupport] = EndpointSupport(
         complete=True, stream=True, files=True, batches=True, models=True
     )

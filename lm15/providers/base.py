@@ -16,7 +16,7 @@ from ..errors import (
 )
 from ..features import EndpointSupport, ProviderManifest
 from ..models import ModelInfo
-from ..protocols import Capabilities, LiveSession
+from ..protocols import LiveSession
 from ..sse import SSEEvent, parse_sse
 from ..transports import TransportRequest
 from ..transports import TransportResponse
@@ -150,7 +150,6 @@ class HttpResponse:
 
 class ProviderDialect(Protocol):
     provider: str
-    capabilities: Capabilities
     supports: EndpointSupport
     manifest: ProviderManifest
 
@@ -168,7 +167,6 @@ class BaseProviderLM:
 
     transport: SyncTransport
     provider: str = "unknown"
-    capabilities: Capabilities = Capabilities()
     supports: ClassVar[EndpointSupport] = EndpointSupport()
     manifest: ClassVar[ProviderManifest] = ProviderManifest(
         provider="unknown", supports=EndpointSupport()

@@ -31,7 +31,6 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Iterator, Sequence
 
 from .features import EndpointSupport, ProviderManifest
-from .protocols import Capabilities
 from .result import response_to_events
 from .types import (
     Message,
@@ -133,11 +132,6 @@ class FakeLM:
     """
 
     provider: str = "fake"
-    capabilities: Capabilities = Capabilities(
-        input_modalities=frozenset({"text", "image", "audio", "video", "document", "binary"}),
-        output_modalities=frozenset({"text"}),
-        features=frozenset({"streaming", "tools", "json_output", "reasoning"}),
-    )
     supports: ClassVar[EndpointSupport] = EndpointSupport(complete=True, stream=True)
     manifest: ClassVar[ProviderManifest] = ProviderManifest(
         provider="fake", supports=supports, auth_modes=(), env_keys=(),

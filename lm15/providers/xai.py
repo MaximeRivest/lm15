@@ -39,7 +39,6 @@ from typing import Any, ClassVar
 from ..auth import XAI_LOGIN_HINT, get_xai_access_token
 from ..errors import ProviderError, UnsupportedFeatureError, with_credential_hint
 from ..features import EndpointSupport, ProviderManifest
-from ..protocols import Capabilities
 from ..transports import TransportRequest
 from ..types import ImageGenerationRequest, ImageGenerationResponse, ImagePart, Request, Usage, VideoGenerationRequest, VideoJobInfo, VideoPart
 from .base import Credential, HttpResponse, SyncTransport, default_transport
@@ -47,12 +46,6 @@ from .common import make_json_request
 from .openai_chat import OpenAIChatLM
 
 DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1"
-
-XAI_CAPABILITIES = Capabilities(
-    input_modalities=frozenset({"text", "image"}),
-    output_modalities=frozenset({"text"}),
-    features=frozenset({"streaming", "tools", "json_output", "reasoning"}),
-)
 
 
 class XaiLM(OpenAIChatLM):
@@ -102,7 +95,6 @@ class XaiLM(OpenAIChatLM):
             base_url=base_url,
             compat="xai",
             provider="xai",
-            capabilities=XAI_CAPABILITIES,
         )
 
     def _payload(self, request: Request, stream: bool) -> dict[str, Any]:

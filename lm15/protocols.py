@@ -36,12 +36,6 @@ from .types import (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class Capabilities:
-    input_modalities: frozenset[str] = field(default_factory=frozenset)
-    output_modalities: frozenset[str] = field(default_factory=frozenset)
-    features: frozenset[str] = field(default_factory=frozenset)
-
 
 class LiveSession(Protocol):
     def send(self, event: LiveClientEvent | None = None, **kwargs: Any) -> None: ...
@@ -58,7 +52,6 @@ class LiveSession(Protocol):
 
 class ProviderLM(Protocol):
     provider: str
-    capabilities: Capabilities
     supports: EndpointSupport
     manifest: ProviderManifest
 

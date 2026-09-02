@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**One truth per support fact.** The adapter-level `Capabilities` object
+(`lm.capabilities`: free-text `features`, adapter-wide modalities) is
+removed. Nothing in lm15 read it, it was not in the contract, and it had
+already drifted (Gemini gained reasoning under MAP-7; its `features` set
+said otherwise). Endpoint support lives in `lm.supports` / `lm.manifest`,
+pinned by `spec/support-matrix.json`; modalities and prices are per model
+on `ModelInfo`. Callers reading `lm.capabilities` get `AttributeError`.
+
 **Honest usage counters and a silent `[DONE]`** (INV-029, MAP-3):
 
 - Adapters no longer write `0` for `input_tokens`/`output_tokens` the

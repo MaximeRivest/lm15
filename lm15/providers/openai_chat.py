@@ -22,7 +22,6 @@ from ..compat import (
 )
 from ..errors import ProviderError, UnsupportedFeatureError
 from ..features import EndpointSupport, ProviderManifest
-from ..protocols import Capabilities
 from ..sse import SSEEvent
 from ..transports import TransportRequest
 from ..types import (
@@ -156,11 +155,6 @@ class OpenAIChatLM(BaseProviderLM):
     compat: OpenAIChatCompat | str | None = None
 
     provider: str = "openai_chat"
-    capabilities: Capabilities = Capabilities(
-        input_modalities=frozenset({"text", "image"}),
-        output_modalities=frozenset({"text"}),
-        features=frozenset({"streaming", "tools", "json_output", "reasoning"}),
-    )
     supports: ClassVar[EndpointSupport] = EndpointSupport(
         complete=True,
         stream=True,

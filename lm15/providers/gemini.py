@@ -25,7 +25,6 @@ from ..errors import (
 )
 from ..features import EndpointSupport, ProviderManifest
 from ..live import WebSocketLiveSession, require_websocket_sync_connect
-from ..protocols import Capabilities
 from ..sse import SSEEvent
 from ..transports import TransportRequest
 from ..types import (
@@ -373,11 +372,6 @@ class GeminiLM(BaseProviderLM):
     upload_base_url: str = "https://generativelanguage.googleapis.com/upload/v1beta"
 
     provider: str = "gemini"
-    capabilities: Capabilities = Capabilities(
-        input_modalities=frozenset({"text", "image", "audio", "video", "document", "binary"}),
-        output_modalities=frozenset({"text", "image", "audio"}),
-        features=frozenset({"streaming", "tools", "json_output", "live", "files", "batch", "images", "audio"}),
-    )
     supports: ClassVar[EndpointSupport] = EndpointSupport(
         complete=True,
         stream=True,
