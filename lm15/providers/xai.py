@@ -134,6 +134,25 @@ class XaiLM(OpenAIChatLM):
                 "verified live 2026-09-01). OpenAI and Gemini carry logprobs.",
                 provider=self.provider,
             )
+        tc = request.config.tool_choice
+        if tc is not None and tc.allowed and not (len(tc.allowed) == 1 and tc.mode == "required"):
+            # MAP-8 rule 1 (live 2026-09-02): api.x.ai accepts allowed_tools and
+            # ignores it — with {lookup} allowed and weather asked, it called
+            # weather.  A silent widen; the forced single-function form held.
+            raise UnsupportedFeatureError(
+                "xai: tool_choice.allowed subsets are silently ignored by api.x.ai "
+                "(verified live 2026-09-02); force a single tool with mode='required', "
+                "or send only the allowed tools in Request.tools",
+                provider=self.provider,
+            )
+        if tc is not None and tc.mode == "required" and request.config.response_format is not None:
+            # MAP-8 rule 3 (live 2026-09-02): a forced tool next to a
+            # response_format returned JSON text and no call.
+            raise UnsupportedFeatureError(
+                "xai: a forced tool (mode='required') cannot be combined with response_format — "
+                "api.x.ai returns JSON text and drops the call (verified live 2026-09-02)",
+                provider=self.provider,
+            )
         return super()._payload(request, stream)
 
     def _image_generate_request(self, request: ImageGenerationRequest) -> TransportRequest:

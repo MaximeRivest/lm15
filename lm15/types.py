@@ -1812,7 +1812,44 @@ class Config:
         _coerce_int_field(self, "logprobs")
         _validate_non_negative(self.logprobs, field_name="logprobs")
         _validate_json_field(self, "response_format")
+        _validate_response_format_shape(self.response_format)
         _validate_extensions_field(self)
+
+
+_RESPONSE_FORMAT_TYPES = ("json_object", "json_schema")
+
+
+def _validate_response_format_shape(value: JsonObject | None) -> None:
+    """INV-050 (MAP-8, 2026-09-02): response_format has exactly two shapes.
+
+    ``{"type": "json_object"}`` — any valid JSON;
+    ``{"type": "json_schema", "schema": <JSON Schema>, "name"?: str,
+    "strict"?: bool}`` — this schema.  Provider-native spellings
+    (``{"format": ...}``, ``{"response_mime_type": ...}``,
+    ``{"json_schema": {...}}``, a bare schema) belong in ``extensions``.
+    ``schema`` is opaque and verbatim: lm15 never rewrites a keyword to
+    make a request pass; the provider's 400 is the contract.
+    """
+    if value is None:
+        return
+    fmt = value.get("type")
+    if fmt not in _RESPONSE_FORMAT_TYPES:
+        raise ValueError(
+            "response_format must be {'type': 'json_object'} or {'type': 'json_schema', "
+            "'schema': {...}, 'name'?: str, 'strict'?: bool}; provider-native shapes go in "
+            f"Config.extensions (got keys {sorted(value)})"
+        )
+    allowed = {"type"} if fmt == "json_object" else {"type", "schema", "name", "strict"}
+    extra = set(value) - allowed
+    if extra:
+        raise ValueError(f"response_format {fmt!r} does not take keys {sorted(extra)}; provider-native shapes go in Config.extensions")
+    if fmt == "json_schema":
+        if not isinstance(value.get("schema"), dict):
+            raise ValueError("response_format json_schema requires a 'schema' object")
+        if "name" in value and (not isinstance(value["name"], str) or not value["name"]):
+            raise ValueError("response_format name must be a non-empty string")
+        if "strict" in value and not isinstance(value["strict"], bool):
+            raise TypeError("response_format strict must be a bool")
 
 
 # ─── Request ─────────────────────────────────────────────────────────

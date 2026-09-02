@@ -247,6 +247,43 @@ a deprecated field; it silently dropped budgets, summaries, and OpenAI
 reasoning items; and it downgraded `xhigh` to `high`. The design pass
 record: lm15-contract/changes/2026-09-02-reasoning-design.md.
 
+## MAP-8 — Tool choice and structured output: no silent cells, one shape
+
+Measured 2026-09-02 (141 cells; lm15-contract/research/tool-choice/,
+research/structured-output/). The 2026-09-01 kind-aware `ToolChoice`
+mapping holds; three cells were silent, and `response_format` had no
+canonical shape.
+
+1. **xAI ignores allowlists.** `tool_choice.allowed` subsets RAISE on
+   xAI; a single name with `mode="required"` maps to the forced-function
+   form, which held.
+2. **Gemini has no parallel knob.** `parallel=False` RAISES on Gemini
+   (two calls came back regardless). The MAP-6 fallback exception does
+   not apply: the outcome is not observable from usage.
+3. **xAI drops a forced tool next to a `response_format`** (JSON text,
+   no call): the pair RAISES on xAI. Elsewhere the server decides —
+   Gemini and Groq 400, OpenAI and Anthropic let the call win.
+4. **INV-050: `response_format` is `{"type": "json_object"}` or
+   `{"type": "json_schema", "schema", "name"?, "strict"?}`**, validated at
+   `Config` construction. Provider-native spellings belong in
+   `extensions`. `schema` is verbatim: lm15 never rewrites a keyword to
+   make a request pass (Anthropic rejects `minimum`; OpenAI and Groq
+   strict mode need every property required — their 400s are the
+   contract).
+5. Mapping: OpenAI Responses `text.format` (`name` defaults to
+   `"response"`); chat dialect, xAI, Groq, compat `response_format
+   .json_schema {name, schema, strict}`; Anthropic `output_config.format
+   {type: json_schema, schema}` — `json_object` RAISES (no any-JSON
+   mode); Gemini `responseMimeType` + `responseJsonSchema` or
+   `responseSchema` by the `additionalProperties` rule.
+6. `strict` goes verbatim where the wire has it and is satisfied where
+   enforcement is always on (Anthropic, Gemini). `name` is a label, not
+   a control: dropped where there is no slot.
+
+**Why:** two canonical spellings for one intent, with the wire deciding
+which, violates principle 2 of types.py; and a restriction that widens
+silently is the worst failure a tool-using loop can have.
+
 ---
 
 History: MAP-1 and MAP-2 were implicit in the reference adapters; they were
@@ -258,4 +295,4 @@ after live vLLM/SGLang/ollama testing showed the multi-end merge losing usage.
 MAP-5 was written on 2026-09-01 after a reasoning-off audit found four
 adapters silently omitting the disable (see
 `lm15-contract/changes/2026-09-01-reasoning-off.md`). MAP-6 was written on
-2026-09-01/02 from the first design pass, MAP-7 on 2026-09-02 from the second (`lm15-contract/playbooks/design-pass.md`).
+2026-09-01/02 from the first design pass, MAP-7 and MAP-8 on 2026-09-02 from the second, third, and fourth (`lm15-contract/playbooks/design-pass.md`).

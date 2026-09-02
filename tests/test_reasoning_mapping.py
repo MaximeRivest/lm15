@@ -106,7 +106,7 @@ def test_anthropic_adaptive_class() -> None:
     # summary=auto is satisfied: thinking blocks are always returned
     assert "summary" not in json.dumps(_body(lm, _req("claude-sonnet-5", Reasoning(effort="high", summary="auto"))))
     # response_format and effort share output_config
-    b = _body(lm, _req("claude-sonnet-5", Reasoning(effort="low"), response_format={"type": "json_object"}))
+    b = _body(lm, _req("claude-sonnet-5", Reasoning(effort="low"), response_format={"type": "json_schema", "schema": {"type": "object", "additionalProperties": False}}))
     assert b["output_config"]["effort"] == "low" and "format" in b["output_config"]
 
 

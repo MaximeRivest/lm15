@@ -105,24 +105,20 @@ def _builtin_to_anthropic(tool: BuiltinTool) -> dict[str, Any]:
 
 
 def _response_format_to_anthropic_output_config(format_config: dict[str, Any]) -> dict[str, Any]:
-    """Map canonical lm15 response_format to Anthropic output_config."""
-    output_config = format_config.get("output_config")
-    if isinstance(output_config, dict):
-        return dict(output_config)
+    """Canonical response_format (INV-050) -> Anthropic output_config.
 
-    if isinstance(format_config.get("format"), dict):
-        return dict(format_config)
-
-    fmt_type = format_config.get("type")
-    if fmt_type == "json_schema":
-        schema = format_config.get("schema")
-        return {"format": {"type": "json_schema", "schema": schema if isinstance(schema, dict) else {}}}
-
-    if fmt_type == "json_object":
-        return {"format": {"type": "json_schema", "schema": {"type": "object"}}}
-
-    schema = format_config.get("schema") if isinstance(format_config.get("schema"), dict) else format_config
-    return {"format": {"type": "json_schema", "schema": schema}}
+    The Messages API has no any-JSON mode: `format.schema` must be an object
+    schema with `additionalProperties: false` (HTTP 400 otherwise, live
+    2026-09-02), so `json_object` RAISES.  `strict` is satisfied (always
+    constrained); `name` is a label with no slot (dropped, stated in MAP-8).
+    """
+    if format_config["type"] == "json_object":
+        raise UnsupportedFeatureError(
+            "anthropic: response_format json_object is not supported — the Messages API has no "
+            "any-JSON mode; give a json_schema (objects need additionalProperties: false)",
+            provider="anthropic",
+        )
+    return {"format": {"type": "json_schema", "schema": format_config["schema"]}}
 
 
 def _reasoning_tokens(usage_payload: dict) -> int | None:

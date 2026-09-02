@@ -155,5 +155,5 @@ def test_extensions_numbers_untouched():
 
 
 def test_response_format_numbers_untouched():
-    c = Config(response_format={"type": "json_schema", "n": 1})
-    assert type(config_to_dict(c)["response_format"]["n"]) is int
+    c = Config(response_format={"type": "json_schema", "schema": {"type": "object", "n": 1}})
+    assert type(config_to_dict(c)["response_format"]["schema"]["n"]) is int

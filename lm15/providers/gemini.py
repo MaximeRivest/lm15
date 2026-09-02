@@ -221,48 +221,18 @@ def _gemini_number(value: float) -> float | int:
 
 
 def _response_format_to_gemini_config(format_config: dict[str, Any]) -> dict[str, Any]:
-    """Map canonical lm15 response_format to Gemini generationConfig."""
-    generation_config = format_config.get("generationConfig")
-    if isinstance(generation_config, dict):
-        return dict(generation_config)
+    """Canonical response_format (INV-050) -> Gemini generationConfig.
 
-    out: dict[str, Any] = {}
-    mime_type = format_config.get("responseMimeType") or format_config.get("response_mime_type")
-    schema = format_config.get("responseSchema") or format_config.get("response_schema")
-    json_schema = format_config.get("responseJsonSchema") or format_config.get("response_json_schema")
-
-    if mime_type is not None:
-        out["responseMimeType"] = str(mime_type)
-    if isinstance(schema, dict):
-        out["responseSchema"] = schema
-    if isinstance(json_schema, dict):
-        out["responseJsonSchema"] = json_schema
-
-    fmt_type = format_config.get("type")
-    if fmt_type == "json_object":
-        out.setdefault("responseMimeType", "application/json")
-        return out
-
-    if fmt_type == "json_schema":
-        schema = format_config.get("schema")
-        if isinstance(schema, dict):
-            out[_gemini_schema_field(schema)] = schema
-            out.pop("responseSchema" if _gemini_schema_field(schema) == "responseJsonSchema" else "responseJsonSchema", None)
-        out.setdefault("responseMimeType", "application/json")
-        return out
-
-    schema = format_config.get("schema") if isinstance(format_config.get("schema"), dict) else None
-    if schema is not None:
-        out[_gemini_schema_field(schema)] = schema
-        out.pop("responseSchema" if _gemini_schema_field(schema) == "responseJsonSchema" else "responseJsonSchema", None)
-        out.setdefault("responseMimeType", "application/json")
-        return out
-
-    if "type" in format_config or "properties" in format_config or "items" in format_config:
-        out[_gemini_schema_field(format_config)] = dict(format_config)
-        out.setdefault("responseMimeType", "application/json")
-
-    return out or dict(format_config)
+    `responseJsonSchema` accepts JSON Schema keywords; `responseSchema` is
+    the OpenAPI subset — `_gemini_schema_field` picks by the presence of
+    `additionalProperties` (pinned by gemini.response_schema and the
+    2026-09-02 receipts).  `strict` is satisfied (always constrained);
+    `name` is a label with no slot.
+    """
+    if format_config["type"] == "json_object":
+        return {"responseMimeType": "application/json"}
+    schema = format_config["schema"]
+    return {"responseMimeType": "application/json", _gemini_schema_field(schema): schema}
 
 
 def _finish_reason(reason: str | None, *, has_tool_call: bool = False) -> str:
@@ -592,6 +562,17 @@ class GeminiLM(BaseProviderLM):
         tc = request.config.tool_choice
         if tc is None:
             return None
+        if tc.parallel is False:
+            # MAP-8 rule 2 (live 2026-09-02): no wire knob; two calls came back
+            # on 2.5 and 3.7 with the preference set.  The outcome is not
+            # observable from usage, so the MAP-6 fallback exception does not
+            # apply — raise.
+            raise UnsupportedFeatureError(
+                "gemini: tool_choice.parallel=False is not supported — GenerateContent has no "
+                "parallel-tool-calls knob and returns several calls regardless (OpenAI and "
+                "Anthropic carry it)",
+                provider=self.provider,
+            )
         mode = {"none": "NONE", "required": "ANY", "auto": "AUTO"}[tc.mode]
         cfg: dict[str, Any] = {"mode": mode}
         if tc.allowed:

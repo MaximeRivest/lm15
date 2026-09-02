@@ -235,31 +235,13 @@ def _builtin_to_openai(tool: BuiltinTool) -> dict[str, Any]:
 
 
 def _response_format_to_openai_text(format_config: dict[str, Any]) -> dict[str, Any]:
-    """Map canonical lm15 response_format to OpenAI Responses text config."""
-    text_config = format_config.get("text")
-    if isinstance(text_config, dict):
-        return text_config
-
-    text_format = format_config.get("format")
-    if isinstance(text_format, dict):
-        return dict(format_config)
-
-    if format_config.get("type") == "json_schema":
-        text_format = dict(format_config)
-        text_format.setdefault("name", "response")
-        return {"format": text_format}
-
-    if format_config.get("type") == "json_object":
-        return {"format": dict(format_config)}
-
-    schema = format_config.get("schema") if isinstance(format_config.get("schema"), dict) else format_config
-    return {
-        "format": {
-            "type": "json_schema",
-            "name": str(format_config.get("name") or "response"),
-            "schema": schema,
-        }
-    }
+    """Canonical response_format (INV-050) -> OpenAI Responses `text` config."""
+    if format_config["type"] == "json_object":
+        return {"format": {"type": "json_object"}}
+    fmt: dict[str, Any] = {"type": "json_schema", "name": format_config.get("name") or "response", "schema": format_config["schema"]}
+    if "strict" in format_config:
+        fmt["strict"] = format_config["strict"]
+    return {"format": fmt}
 
 
 def _finish_from_status(data: dict[str, Any], *, has_tool_call: bool = False) -> str:

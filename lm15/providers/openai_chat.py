@@ -115,23 +115,13 @@ def _chat_content_parts(msg: Message, *, force_array: bool = False) -> str | lis
 
 
 def _response_format_to_chat(format_config: dict[str, Any]) -> dict[str, Any]:
-    """Map canonical lm15 response_format to chat-completions response_format."""
-    if format_config.get("type") == "json_object":
+    """Canonical response_format (INV-050) -> chat-completions response_format."""
+    if format_config["type"] == "json_object":
         return {"type": "json_object"}
-    if isinstance(format_config.get("json_schema"), dict):
-        return dict(format_config)
-    if format_config.get("type") == "json_schema":
-        inner = {k: v for k, v in format_config.items() if k != "type"}
-        inner.setdefault("name", "response")
-        return {"type": "json_schema", "json_schema": inner}
-    schema = format_config.get("schema") if isinstance(format_config.get("schema"), dict) else format_config
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": str(format_config.get("name") or "response"),
-            "schema": schema,
-        },
-    }
+    inner: dict[str, Any] = {"name": format_config.get("name") or "response", "schema": format_config["schema"]}
+    if "strict" in format_config:
+        inner["strict"] = format_config["strict"]
+    return {"type": "json_schema", "json_schema": inner}
 
 
 def _usage_from_chat(usage_data: dict[str, Any]) -> Usage:
