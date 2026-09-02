@@ -98,6 +98,9 @@ from .types import (
     FileUploadRequest,
     FileInfo,
     FilePage,
+    CacheInfo,
+    CachePage,
+    CachedPrefix,
     BatchRequest,
     BatchEntry,
     BatchJobInfo,
@@ -219,6 +222,7 @@ __all__ = [
     "ImageDelta", "ToolCallDelta", "CitationDelta", "ContinuationDelta",
     # auxiliary endpoints
     "FileUploadRequest", "FileInfo", "FilePage",
+    "CacheInfo", "CachePage", "CachedPrefix",
     "BatchRequest", "BatchJobInfo", "BatchEntry",
     "VideoGenerationRequest", "VideoJobInfo", "VideoJob", "AsyncVideoJob",
     "BatchJob", "AsyncBatchJob",

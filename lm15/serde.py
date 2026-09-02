@@ -26,6 +26,9 @@ from .types import (
     BinaryPart,
     BuiltinTool,
     CacheConfig,
+    CachedPrefix,
+    CacheInfo,
+    CachePage,
     CitationDelta,
     CitationPart,
     Config,
@@ -389,6 +392,8 @@ def cache_config_to_dict(c: CacheConfig) -> dict[str, Any]:
         "retention": c.retention,
         "key": c.key,
         "prefix_until_index": c.prefix_until_index,
+        "prefix": c.prefix,
+        "resource": c.resource,
     })
 
 
@@ -404,6 +409,62 @@ def cache_config_from_dict(d: dict[str, Any]) -> CacheConfig:
         retention=retention,
         key=d.get("key"),
         prefix_until_index=d.get("prefix_until_index"),
+        prefix=d.get("prefix"),
+        resource=d.get("resource"),
+    )
+
+
+# ─── Cache resources ─────────────────────────────────────────────────
+
+def cache_info_to_dict(c: CacheInfo) -> dict[str, Any]:
+    return _clean_mapping({
+        "id": c.id,
+        "model": c.model,
+        "tokens": c.tokens,
+        "created_at": c.created_at,
+        "expires_at": c.expires_at,
+        "label": c.label,
+        "provider_data": c.provider_data,
+    })
+
+
+def cache_info_from_dict(d: dict[str, Any]) -> CacheInfo:
+    return CacheInfo(
+        id=d["id"],
+        model=d["model"],
+        tokens=d.get("tokens"),
+        created_at=d.get("created_at"),
+        expires_at=d.get("expires_at"),
+        label=d.get("label"),
+        provider_data=d.get("provider_data"),
+    )
+
+
+def cache_page_to_dict(p: CachePage) -> dict[str, Any]:
+    return _clean_mapping({
+        "items": [cache_info_to_dict(c) for c in p.items],
+        "next_cursor": p.next_cursor,
+    })
+
+
+def cache_page_from_dict(d: dict[str, Any]) -> CachePage:
+    return CachePage(
+        items=tuple(cache_info_from_dict(c) for c in d.get("items", [])),
+        next_cursor=d.get("next_cursor"),
+    )
+
+
+def cached_prefix_to_dict(c: CachedPrefix) -> dict[str, Any]:
+    return _clean_mapping({
+        "prefix": request_to_dict(c.prefix),
+        "resource": cache_info_to_dict(c.resource) if c.resource is not None else None,
+    })
+
+
+def cached_prefix_from_dict(d: dict[str, Any]) -> CachedPrefix:
+    return CachedPrefix(
+        prefix=request_from_dict(d["prefix"]),
+        resource=cache_info_from_dict(d["resource"]) if isinstance(d.get("resource"), dict) else None,
     )
 
 

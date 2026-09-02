@@ -1659,32 +1659,64 @@ class Reasoning:
 
 CacheRetention = Literal["short", "long"]
 CacheMode = Literal["auto", "off"]
+CachePrefix = Literal["stable", "history"]
+CACHE_MODES = frozenset(get_args(CacheMode))
+CACHE_RETENTIONS = frozenset(get_args(CacheRetention))
+CACHE_PREFIXES = frozenset(get_args(CachePrefix))
 
 
 @dataclass(frozen=True, slots=True)
 class CacheConfig:
     """
-    Universal prompt cache and session affinity configuration.
+    Universal prompt cache configuration (MAP-6, docs/mapping-rules.md).
 
-    This is the primary, provider-neutral way to control prompt caching
-    and stable session routing.
+    Every provider caches in up to three tiers: automatic (nothing to
+    send, best-effort), breakpoint (a mark on a block, guaranteed above a
+    per-model minimum), resource (a stored, named, billed object).  The
+    fields name INTENTS; each adapter maps an intent to the best tier it
+    has, and the result is always visible in ``Usage.cache_read_tokens``.
 
-    - mode="auto": Let the provider adapter decide sensible defaults.
-    - mode="off": Explicitly disable sending cache hints.
-    - retention: Request short-lived or long-lived cache when supported.
-    - key: Stable identifier for cache/session affinity.
-    - prefix_until_index: Cache everything up to (and including) this
-      message index. Useful for stable system + tools + history prefixes.
+    - mode="auto": the cheapest safe instruction (a mark on the stable
+      beginning where marks exist; nothing elsewhere).
+    - mode="off": send nothing; where a provider has a real off switch
+      for cache WRITES, send it.
+    - prefix="stable": mark the end of system + tools.
+      prefix="history": mark the end of the last message (a growing
+      chat).  Providers without marks fall back to the automatic tier:
+      that fallback spends nothing and its outcome is observable, the
+      two conditions that permit it.
+    - prefix_until_index: the same intent with a precise position (the
+      last block of that message).  Mutually exclusive with ``prefix``.
+    - retention: "long" asks for the longer lifetime at extra cost;
+      providers without one RAISE.
+    - key: a best-effort routing/affinity hint; providers without one RAISE.
+    - resource: the id of a stored cache object (``CacheInfo.id``) to
+      reference; providers without the resource tier RAISE.
     """
 
     mode: CacheMode = "auto"
     retention: CacheRetention | None = None
     key: str | None = None
     prefix_until_index: int | None = None
+    prefix: CachePrefix | None = None
+    resource: str | None = None
 
     def __post_init__(self) -> None:
-        if self.mode == "off" and (self.retention is not None or self.key is not None):
-            raise ValueError("CacheConfig(mode='off') cannot specify retention or key")
+        if self.mode not in CACHE_MODES:
+            raise ValueError(f"unsupported cache mode: {self.mode}")
+        if self.retention is not None and self.retention not in CACHE_RETENTIONS:
+            raise ValueError(f"unsupported cache retention: {self.retention}")
+        if self.prefix is not None and self.prefix not in CACHE_PREFIXES:
+            raise ValueError(f"unsupported cache prefix: {self.prefix}")
+        _validate_optional_text(self.key, field_name="CacheConfig.key", allow_empty=False)
+        _validate_optional_text(self.resource, field_name="CacheConfig.resource", allow_empty=False)
+        if self.mode == "off" and (
+            self.retention is not None or self.key is not None
+            or self.prefix is not None or self.prefix_until_index is not None or self.resource is not None
+        ):
+            raise ValueError("CacheConfig(mode='off') cannot specify retention, key, prefix, prefix_until_index, or resource")
+        if self.prefix is not None and self.prefix_until_index is not None:
+            raise ValueError("CacheConfig cannot specify both prefix and prefix_until_index")
         if self.prefix_until_index is not None:
             _coerce_int_field(self, "prefix_until_index")
             _validate_non_negative(self.prefix_until_index, field_name="prefix_until_index")
@@ -2253,6 +2285,149 @@ class FilePage:
         if not all(isinstance(item, FileInfo) for item in self.items):
             raise TypeError("FilePage.items must contain FileInfo objects")
         _validate_optional_text(self.next_cursor, field_name="FilePage.next_cursor", allow_empty=False)
+
+
+# ─── Cache resources (the stored tier of MAP-6) ──────────────────────
+#
+# A stored cache object belongs to one model on every provider that has
+# the tier (a KV state is model-specific by nature).  ``CacheInfo`` is the
+# snapshot; ``CachedPrefix`` is the ergonomic that pairs a prefix Request
+# with its optional object and builds requests against it.  Nothing here
+# names a provider: id formats, TTL spellings, and what the wire does with
+# ``CacheConfig.resource`` are the adapter's business.
+
+
+@dataclass(frozen=True, slots=True)
+class CacheInfo:
+    """A snapshot of one provider-side stored cache object.
+
+    ``id`` is the provider's reference verbatim; place it in
+    ``CacheConfig.resource``.  ``tokens`` is the stored token count when
+    reported (storage cost = tokens x hours x the provider's rate).
+    ``expires_at`` is ISO-8601 UTC, normalized from the provider's form.
+    """
+
+    id: str
+    model: str
+    tokens: int | None = None
+    created_at: str | None = None
+    expires_at: str | None = None
+    label: str | None = None
+    provider_data: ProviderData | None = None
+
+    def __post_init__(self) -> None:
+        _validate_text(self.id, field_name="CacheInfo.id", allow_empty=False)
+        _validate_text(self.model, field_name="CacheInfo.model", allow_empty=False)
+        _coerce_int_field(self, "tokens")
+        _validate_non_negative(self.tokens, field_name="CacheInfo.tokens")
+        _validate_optional_text(self.created_at, field_name="CacheInfo.created_at", allow_empty=False)
+        _validate_optional_text(self.expires_at, field_name="CacheInfo.expires_at", allow_empty=False)
+        _validate_optional_text(self.label, field_name="CacheInfo.label", allow_empty=False)
+        _validate_json_field(self, "provider_data")
+
+
+@dataclass(frozen=True, slots=True)
+class CachePage:
+    """One page of stored cache objects plus an opaque continuation cursor."""
+
+    items: tuple[CacheInfo, ...] = ()
+    next_cursor: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "items", tuple(self.items))
+        if not all(isinstance(item, CacheInfo) for item in self.items):
+            raise TypeError("CachePage.items must contain CacheInfo objects")
+        _validate_optional_text(self.next_cursor, field_name="CachePage.next_cursor", allow_empty=False)
+
+
+@dataclass(frozen=True, slots=True)
+class CachedPrefix:
+    """A reusable prompt beginning: ``cached = lm.cache(prefix)``.
+
+    ``prefix`` is a Request whose model, system, tools, and messages form
+    the reusable part (its config must be default: a cached object has no
+    temperature).  ``resource`` is the stored object on providers with
+    that tier, ``None`` on providers that mark blocks or cache
+    automatically.  ``request(messages)`` builds a Request that appends
+    ``messages`` and sets the cache boundary at the seam; ``cached +
+    messages`` is Python sugar for it.  The built Request and its wire
+    bytes are what the contract pins; the sugar is per-language.
+    """
+
+    prefix: Request
+    resource: CacheInfo | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.prefix, Request):
+            raise TypeError("CachedPrefix.prefix must be a Request")
+        if self.prefix.config != Config():
+            raise ValueError("CachedPrefix.prefix must carry a default Config: a cached object has no generation settings")
+        if self.resource is not None:
+            if not isinstance(self.resource, CacheInfo):
+                raise TypeError("CachedPrefix.resource must be a CacheInfo")
+            if self.resource.model != self.prefix.model:
+                raise ValueError("CachedPrefix.resource.model must equal the prefix model (a stored cache belongs to one model)")
+
+    @property
+    def id(self) -> str | None:
+        return self.resource.id if self.resource is not None else None
+
+    @property
+    def expires_at(self) -> str | None:
+        return self.resource.expires_at if self.resource is not None else None
+
+    def cache_config(self) -> CacheConfig:
+        """The CacheConfig that marks the seam between prefix and suffix."""
+        return CacheConfig(
+            prefix_until_index=len(self.prefix.messages) - 1,
+            resource=self.id,
+        )
+
+    def request(
+        self,
+        messages: "str | Message | Sequence[Message] | Request",
+        *,
+        config: Config | None = None,
+    ) -> Request:
+        """Append ``messages`` to the prefix and set the cache boundary.
+
+        ``messages`` may be a string (one user message), a Message, a
+        sequence of Messages, or a Request (same model, no system, no
+        tools: the prefix owns those).  ``config`` supplies generation
+        settings; its ``cache`` must be unset (the prefix decides).
+        """
+        suffix: tuple[Message, ...]
+        if isinstance(messages, Request):
+            if messages.model != self.prefix.model:
+                raise ValueError("suffix Request model must equal the prefix model")
+            if messages.system is not None or messages.tools:
+                raise ValueError("suffix Request cannot redefine system or tools: the prefix owns them")
+            if config is None and messages.config != Config():
+                config = messages.config
+            suffix = messages.messages
+        elif isinstance(messages, str):
+            suffix = (Message.user(messages),)
+        elif isinstance(messages, Message):
+            suffix = (messages,)
+        else:
+            suffix = tuple(messages)
+            if not suffix or not all(isinstance(m, Message) for m in suffix):
+                raise TypeError("messages must be a Message or a non-empty sequence of Messages")
+        base = config if config is not None else Config()
+        if base.cache is not None:
+            raise ValueError("config.cache is decided by the CachedPrefix; leave it unset")
+        from dataclasses import replace as _replace
+
+        return Request(
+            model=self.prefix.model,
+            system=self.prefix.system,
+            tools=self.prefix.tools,
+            messages=self.prefix.messages + suffix,
+            config=_replace(base, cache=self.cache_config()),
+        )
+
+    def __add__(self, messages: "str | Message | Sequence[Message] | Request") -> Request:
+        return self.request(messages)
 
 
 # ─── Batch ───────────────────────────────────────────────────────────
