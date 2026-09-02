@@ -15,7 +15,15 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent
 REPO_ROOT = ROOT.parent
-DOC_ROOT = ROOT / "provider_docs"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from conformance.sources import api_references_path  # noqa: E402
+
+# One copy: the scraped reference pages are read from the curl-fixtures
+# scrape directory (api-references/<provider>/pages/, refreshed by its
+# update.sh), never from a snapshot in this repo.
+DOC_ROOT = api_references_path()
 FEATURES_PATH = ROOT / "provider_requests" / "features.yaml"
 REPORT_DIR = ROOT / "reports"
 JsonObject = dict[str, Any]
@@ -83,9 +91,9 @@ def extract_gemini_params(text: str) -> list[str]:
 
 
 PROVIDERS: dict[str, tuple[Path, Callable[[str], list[str]]]] = {
-    "openai": (DOC_ROOT / "openai" / "responses-create.md", extract_openai_params),
-    "anthropic": (DOC_ROOT / "anthropic" / "messages-create.md", extract_anthropic_params),
-    "gemini": (DOC_ROOT / "gemini" / "generate-content.md", extract_gemini_params),
+    "openai": (DOC_ROOT / "openai" / "pages" / "responses--create.md", extract_openai_params),
+    "anthropic": (DOC_ROOT / "anthropic" / "pages" / "messages--create.md", extract_anthropic_params),
+    "gemini": (DOC_ROOT / "gemini" / "pages" / "generate-content.md", extract_gemini_params),
 }
 
 # Always-on lm15 Request fields that don't get a separate feature entry.
@@ -99,6 +107,12 @@ def _normalize(name: str) -> str:
 
 def report_provider(provider: str, features: dict[str, Any]) -> DocReport:
     doc_path, extract = PROVIDERS[provider]
+    if not doc_path.exists():
+        raise FileNotFoundError(
+            f"scraped reference page not found at {doc_path}; check out curl-fixtures "
+            "next to this repo (and run its api-references/<provider>/update.sh) "
+            "or set LM15_API_REFERENCES"
+        )
     text = doc_path.read_text()
     params = extract(text)
     feature_keys = sorted(features.get(provider, {}).get("features", {}))

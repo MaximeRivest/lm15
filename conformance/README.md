@@ -34,10 +34,20 @@ conformance/
 │   ├── results/                  # saved live-test summaries and bodies
 │   └── validate_live.py          # re-run fixtures against the live API
 ├── errors/cases/                 # provider error body → expected lm15 error
-├── serde/canonical.json          # canonical JSON serde fixtures
-├── provider_docs/                # snapshot of upstream API references
+├── sources.py                    # where single-source inputs live (see below)
 └── reports/                      # generated local reports, ignored by git
 ```
+
+Two inputs are deliberately NOT mirrored here, because mirrors drifted:
+
+- the canonical serde vector is read from `../lm15-contract/serde/canonical.json`
+  (`LM15_CONTRACT_DIR` overrides the checkout location);
+- the scraped provider reference pages are read from
+  `../curl-fixtures/api-references/<provider>/pages/`, next to the
+  `update.sh` scrapers that refresh them (`LM15_API_REFERENCES` overrides).
+
+When a sibling is not checked out, the CLI check fails with the path it
+looked at and the pytest wrappers skip.
 
 ## Run everything
 
@@ -79,13 +89,14 @@ Each script writes both JSON and Markdown reports under
   image generation, audio generation, plus live URL/header and session shape.
 
 - **serde_fixtures**
-  Round-trips canonical JSON fixtures for every public lm15 type represented in
-  the portable interchange contract.
+  Round-trips the contract's canonical JSON vector
+  (`lm15-contract/serde/canonical.json`) for every public lm15 type
+  represented in the portable interchange contract.
 
 - **doc_drift**
-  Audits the snapshot of provider documentation under `provider_docs/` and
-  flags any documented top-level request parameters that have no corresponding
-  entry in `provider_requests/features.yaml`.
+  Parses the scraped provider reference pages in `curl-fixtures/api-references`
+  and flags any documented top-level request parameter that has no
+  corresponding entry in `provider_requests/features.yaml`.
 
 ## Future ports
 

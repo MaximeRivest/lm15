@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from conformance.check_doc_drift import load_features, report_provider
+import pytest
+
+from conformance.check_doc_drift import DOC_ROOT, load_features, report_provider
 from conformance.check_endpoint_fixtures import iter_cases as iter_endpoint_cases, run_case as run_endpoint_case
 from conformance.check_error_fixtures import check_case as check_error_case, load_cases as load_error_cases
 from conformance.check_request_fixtures import compare_case as compare_request_case, load_logical_cases
 from conformance.check_response_fixtures import check_case as check_response_case
-from conformance.check_serde_fixtures import check_json_case, load_cases as load_serde_cases
+from conformance.check_serde_fixtures import FIXTURE_PATH as SERDE_VECTOR, check_json_case, load_cases as load_serde_cases
 from conformance.response_fixtures import iter_cases_with_expect_lm15
 
 
@@ -57,6 +59,7 @@ def test_non_chat_endpoint_round_trips_match_provider_shapes() -> None:
     ]
 
 
+@pytest.mark.skipif(not SERDE_VECTOR.exists(), reason="lm15-contract corpus not checked out")
 def test_serde_fixtures_round_trip_through_json() -> None:
     failures = []
     for case in load_serde_cases():
@@ -69,6 +72,7 @@ def test_serde_fixtures_round_trip_through_json() -> None:
     ]
 
 
+@pytest.mark.skipif(not DOC_ROOT.exists(), reason="curl-fixtures scrape directory not checked out")
 def test_provider_doc_drift_has_no_unmapped_parameters() -> None:
     features = load_features()
     reports = [report_provider(provider, features) for provider in ("openai", "anthropic", "gemini")]

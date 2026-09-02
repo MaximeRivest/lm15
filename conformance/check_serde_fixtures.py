@@ -16,8 +16,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from lm15 import serde  # noqa: E402
+from conformance.sources import contract_path  # noqa: E402
 
-FIXTURE_PATH = ROOT / "serde" / "canonical.json"
+# One copy: the serde vector is read from the lm15-contract checkout
+# (serde/canonical.json), never from a mirror in this repo.
+FIXTURE_PATH = contract_path("serde", "canonical.json")
 REPORT_DIR = ROOT / "reports"
 JsonObject = dict[str, Any]
 
@@ -70,6 +73,11 @@ KIND_SERDE: dict[str, tuple[JsonToObj, ObjToJson]] = {
 
 
 def load_cases() -> list[JsonObject]:
+    if not FIXTURE_PATH.exists():
+        raise FileNotFoundError(
+            f"serde vector not found at {FIXTURE_PATH}; check out lm15-contract "
+            "next to this repo or set LM15_CONTRACT_DIR"
+        )
     return list(json.loads(FIXTURE_PATH.read_text()).get("cases", []))
 
 
