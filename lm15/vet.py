@@ -92,6 +92,7 @@ KIND_SERDE: dict[str, tuple[JsonToObj, ObjToJson]] = {
     "cache_info": (serde.cache_info_from_dict, serde.cache_info_to_dict),
     "cache_page": (serde.cache_page_from_dict, serde.cache_page_to_dict),
     "cached_prefix": (serde.cached_prefix_from_dict, serde.cached_prefix_to_dict),
+    "token_logprob": (serde.token_logprob_from_dict, serde.token_logprob_to_dict),
     "continuation_state": (serde.continuation_from_dict, serde.continuation_to_dict),
     "error_detail": (serde.error_detail_from_dict, serde.error_detail_to_dict),
     "delta": (serde.delta_from_dict, serde.delta_to_dict),
