@@ -29,6 +29,8 @@ from ..protocols import Capabilities
 from ..sse import SSEEvent
 from ..transports import TransportRequest
 from ..types import (
+    CacheInfo,
+    CachePage,
     VideoGenerationRequest,
     VideoJobInfo,
     VideoPart,
@@ -369,7 +371,6 @@ class GeminiLM(BaseProviderLM):
     transport: SyncTransport = field(default_factory=default_transport)
     base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     upload_base_url: str = "https://generativelanguage.googleapis.com/upload/v1beta"
-    _cached_content_ids: dict[str, str] = field(default_factory=dict, repr=False)
 
     provider: str = "gemini"
     capabilities: Capabilities = Capabilities(
@@ -387,6 +388,7 @@ class GeminiLM(BaseProviderLM):
         speech=True,
         video=True,
         models=True,
+        caches=True,
     )
     manifest: ClassVar[ProviderManifest] = ProviderManifest(
         provider="gemini",
@@ -611,13 +613,42 @@ class GeminiLM(BaseProviderLM):
                 cfg["mode"] = "VALIDATED"
         return {"functionCallingConfig": cfg}
 
-    def _payload(self, request: Request, *, apply_cache: bool = True) -> dict[str, Any]:
+    def _payload(self, request: Request) -> dict[str, Any]:
         extensions = dict(request.config.extensions or {})
         cache_cfg = request.config.cache
-        use_cache = (cache_cfg is None or cache_cfg.mode != "off") and apply_cache
+        # MAP-6 on Gemini.  Automatic tier: nothing to send; prefix intents
+        # fall back to it (no cost, visible in usageMetadata).  Resource
+        # tier: `cachedContent` names a stored object that already holds
+        # system, tools, and the prefix messages, so the wire carries only
+        # the suffix — the server rejects system/tools next to a cache.
+        # key / retention name mechanisms this wire does not have.
+        resource: str | None = None
+        suffix_from = 0
+        if cache_cfg is not None and cache_cfg.mode != "off":
+            if cache_cfg.key is not None:
+                raise UnsupportedFeatureError(
+                    "gemini: cache.key is not supported — GenerateContent has no cache "
+                    "affinity key; use cache.resource with a stored cache (lm.cache(prefix))",
+                    provider=self.provider,
+                )
+            if cache_cfg.retention is not None and cache_cfg.retention != "short":
+                raise UnsupportedFeatureError(
+                    "gemini: cache.retention is not supported in-request — lifetime belongs to "
+                    "the stored cache (cache_create(..., ttl_seconds=...) / cache_update)",
+                    provider=self.provider,
+                )
+            if cache_cfg.resource is not None:
+                resource = cache_cfg.resource
+                if cache_cfg.prefix_until_index is not None:
+                    suffix_from = min(cache_cfg.prefix_until_index, len(request.messages) - 1) + 1
+        wire_messages = request.messages[suffix_from:]
+        if resource is not None and not wire_messages:
+            raise ValueError("gemini: a request against a stored cache needs at least one message after the prefix")
 
-        payload: dict[str, Any] = {"contents": [self._message(m) for m in request.messages]}
-        if request.system:
+        payload: dict[str, Any] = {"contents": [self._message(m) for m in wire_messages]}
+        if resource is not None:
+            payload["cachedContent"] = self._cache_resource(resource)
+        if request.system and resource is None:
             text = request.system if isinstance(request.system, str) else parts_to_text(request.system)
             payload["systemInstruction"] = {"parts": [{"text": text}]}
 
@@ -658,7 +689,7 @@ class GeminiLM(BaseProviderLM):
         if generation_config:
             payload["generationConfig"] = generation_config
 
-        if request.tools:
+        if request.tools and resource is None:
             function_declarations = [
                 {"name": t.name, "description": t.description, "parameters": t.parameters}
                 for t in request.tools
@@ -672,7 +703,7 @@ class GeminiLM(BaseProviderLM):
                     tools_wire.append(_builtin_to_gemini(tool))
             payload["tools"] = tools_wire
 
-        tool_config = self._tool_config_payload(request)
+        tool_config = self._tool_config_payload(request) if resource is None else None
         if tool_config is not None:
             payload["toolConfig"] = tool_config
 
@@ -681,9 +712,6 @@ class GeminiLM(BaseProviderLM):
             payload.setdefault("generationConfig", {})["responseModalities"] = ["IMAGE"]
         elif output == "audio":
             payload.setdefault("generationConfig", {})["responseModalities"] = ["AUDIO"]
-
-        if use_cache:
-            self._apply_prompt_cache(request, payload)
 
         # Promoted cross-provider knobs (changes/2026-09-01-extensions-burn-down):
         # store maps verbatim (same wire key as OpenAI, verified live).
@@ -709,103 +737,6 @@ class GeminiLM(BaseProviderLM):
             passthrough = {k: v for k, v in extensions.items() if k not in {"prompt_caching", "output"}}
             payload.update(passthrough)
         return payload
-
-    def _prompt_cache_plan(self, request: Request, payload: dict[str, Any]) -> dict[str, Any] | None:
-        """Compute the cache prefix split and lookup key. Pure — no network."""
-        cache_cfg: CacheConfig | None = request.config.cache
-        contents = payload.get("contents") or []
-        if len(contents) < 2:
-            return None
-
-        # Determine prefix
-        if cache_cfg is not None and cache_cfg.prefix_until_index is not None:
-            prefix_end = min(cache_cfg.prefix_until_index + 1, len(contents))
-            prefix = contents[:prefix_end]
-            remaining = contents[prefix_end:]
-        else:
-            prefix = contents[:-1]
-            remaining = contents[-1:]
-
-        if not prefix:
-            return None
-
-        # Build cache key
-        key_parts = {
-            "model": self._model_path(request.model),
-            "systemInstruction": payload.get("systemInstruction"),
-            "contents": prefix,
-        }
-        if cache_cfg is not None and cache_cfg.key:
-            key_parts["user_key"] = cache_cfg.key
-
-        key = hashlib.sha256(json.dumps(key_parts, sort_keys=True).encode("utf-8")).hexdigest()
-        return {"key": key, "prefix": prefix, "remaining": remaining}
-
-    def resolve_prompt_cache(self, request: Request) -> str | None:
-        """Create or look up the cachedContents entry for this request's prefix.
-
-        This is the only place the cachedContents endpoint is called. complete()
-        and stream() invoke it before sending; build_request never touches the
-        network.
-        """
-        cache_cfg: CacheConfig | None = request.config.cache
-        if not (cache_cfg is None or cache_cfg.mode != "off"):
-            return None
-        payload = self._payload(request, apply_cache=False)
-        plan = self._prompt_cache_plan(request, payload)
-        if plan is None:
-            return None
-        cache_id = self._cached_content_ids.get(plan["key"])
-        if cache_id is not None:
-            return cache_id
-
-        body: dict[str, Any] = {
-            "model": self._model_path(request.model),
-            "contents": plan["prefix"],
-        }
-        if payload.get("systemInstruction"):
-            body["systemInstruction"] = payload["systemInstruction"]
-
-        # Set TTL if retention="long"
-        if cache_cfg is not None and cache_cfg.retention == "long":
-            body["ttl"] = "86400s"  # 24 hours
-
-        resp = self._send(make_json_request(
-            method="POST",
-            url=f"{self.base_url.rstrip('/')}/cachedContents",
-            headers=self._auth_headers({"Content-Type": "application/json"}),
-            payload=body,
-            read_timeout=60.0,
-        ))
-        if resp.status < 400:
-            data = resp.json()
-            name = data.get("name")
-            if name:
-                cache_id = str(name)
-                self._cached_content_ids[plan["key"]] = cache_id
-                return cache_id
-        return None
-
-    def _apply_prompt_cache(self, request: Request, payload: dict[str, Any]) -> None:
-        """Rewrite the payload to use an already-resolved cache id. Pure — no network."""
-        plan = self._prompt_cache_plan(request, payload)
-        if plan is None:
-            return
-        cache_id = self._cached_content_ids.get(plan["key"])
-        if cache_id:
-            payload["cachedContent"] = cache_id
-            payload["contents"] = plan["remaining"]
-            payload.pop("systemInstruction", None)
-
-    def complete(self, request: Request) -> Response:
-        self.resolve_prompt_cache(request)
-        # Explicit base call: conformance loads this module under a second
-        # sys.path entry, which breaks zero-arg super()'s class-cell check.
-        return BaseProviderLM.complete(self, request)
-
-    def stream(self, request: Request) -> Iterator[StreamEvent]:
-        self.resolve_prompt_cache(request)
-        yield from BaseProviderLM.stream(self, request)
 
     def build_request(self, request: Request, stream: bool) -> TransportRequest:
         endpoint = "streamGenerateContent" if stream else "generateContent"
@@ -1551,6 +1482,107 @@ class GeminiLM(BaseProviderLM):
             method="GET",
             url=f"{self.base_url.rstrip('/')}/{self._file_resource(file_id)}:download?alt=media",
             headers=self._auth_headers(), read_timeout=300.0,
+        )
+
+    # ─── Cache resource hooks (cachedContents; the stored tier of MAP-6) ──
+    #
+    # Wire shapes verified live 2026-09-01 (research/caching/receipts/
+    # gemini__explicit-resource__*): POST /cachedContents {model, contents,
+    # systemInstruction?, tools?, toolConfig?, ttl "Ns", displayName?} ->
+    # the object with name, model, createTime, expireTime,
+    # usageMetadata.totalTokenCount; GET/PATCH(ttl)/DELETE by name; list
+    # -> {cachedContents: [...], nextPageToken}.  The object pins its
+    # model and owns system/tools: a request may not repeat them.
+    # CacheInfo.id is the resource name verbatim ("cachedContents/<id>").
+
+    @staticmethod
+    def _cache_resource(cache_id: str) -> str:
+        return cache_id if cache_id.startswith("cachedContents/") else f"cachedContents/{cache_id}"
+
+    def _cache_create_request(self, prefix: Request, ttl_seconds: int | None, label: str | None) -> TransportRequest:
+        body: dict[str, Any] = {
+            "model": self._model_path(prefix.model),
+            "contents": [self._message(m) for m in prefix.messages],
+        }
+        if prefix.system:
+            text = prefix.system if isinstance(prefix.system, str) else parts_to_text(prefix.system)
+            body["systemInstruction"] = {"parts": [{"text": text}]}
+        if prefix.tools:
+            declarations = [
+                {"name": t.name, "description": t.description, "parameters": t.parameters}
+                for t in prefix.tools if isinstance(t, FunctionTool)
+            ]
+            tools_wire: list[dict[str, Any]] = []
+            if declarations:
+                tools_wire.append({"functionDeclarations": declarations})
+            tools_wire += [_builtin_to_gemini(t) for t in prefix.tools if isinstance(t, BuiltinTool)]
+            body["tools"] = tools_wire
+        if ttl_seconds is not None:
+            body["ttl"] = f"{ttl_seconds}s"
+        if label is not None:
+            body["displayName"] = label
+        return make_json_request(
+            method="POST", url=f"{self.base_url.rstrip('/')}/cachedContents",
+            headers=self._auth_headers({"Content-Type": "application/json"}), payload=body, read_timeout=120.0,
+        )
+
+    def _cache_info_from_body(self, body: str) -> CacheInfo:
+        return self._cache_info(json.loads(body))
+
+    def _cache_info(self, data: dict[str, Any]) -> CacheInfo:
+        name = data.get("name")
+        if not isinstance(name, str) or not name:
+            raise ProviderError("gemini: cache object carries no name", provider=self.provider)
+        model = str(data.get("model") or "")
+        model = model[len("models/"):] if model.startswith("models/") else model
+        if not model:
+            raise ProviderError("gemini: cache object carries no model", provider=self.provider)
+        usage = data.get("usageMetadata") if isinstance(data.get("usageMetadata"), dict) else {}
+        tokens = usage.get("totalTokenCount")
+        label = data.get("displayName")
+        return CacheInfo(
+            id=name,
+            model=model,
+            tokens=int(tokens) if isinstance(tokens, (int, str)) and str(tokens).isdigit() else None,
+            created_at=iso_utc(data.get("createTime")),
+            expires_at=iso_utc(data.get("expireTime")),
+            label=label if isinstance(label, str) and label else None,
+            provider_data=data,
+        )
+
+    def _cache_get_request(self, cache_id: str) -> TransportRequest:
+        return make_json_request(
+            method="GET", url=f"{self.base_url.rstrip('/')}/{self._cache_resource(cache_id)}",
+            headers=self._auth_headers(), read_timeout=60.0,
+        )
+
+    def _cache_list_request(self, limit: int, cursor: str | None) -> TransportRequest:
+        params: dict[str, Any] = {"pageSize": int(limit)}
+        if cursor is not None:
+            params["pageToken"] = cursor
+        return make_json_request(
+            method="GET", url=f"{self.base_url.rstrip('/')}/cachedContents",
+            params=params, headers=self._auth_headers(), read_timeout=60.0,
+        )
+
+    def _cache_page_from_list_body(self, body: str) -> CachePage:
+        data = json.loads(body)
+        entries = data.get("cachedContents") if isinstance(data.get("cachedContents"), list) else []
+        items = tuple(self._cache_info(e) for e in entries if isinstance(e, dict))
+        cursor = data.get("nextPageToken")
+        return CachePage(items=items, next_cursor=cursor if isinstance(cursor, str) and cursor else None)
+
+    def _cache_delete_request(self, cache_id: str) -> TransportRequest:
+        return make_json_request(
+            method="DELETE", url=f"{self.base_url.rstrip('/')}/{self._cache_resource(cache_id)}",
+            headers=self._auth_headers(), read_timeout=60.0,
+        )
+
+    def _cache_update_request(self, cache_id: str, ttl_seconds: int) -> TransportRequest:
+        return make_json_request(
+            method="PATCH", url=f"{self.base_url.rstrip('/')}/{self._cache_resource(cache_id)}",
+            headers=self._auth_headers({"Content-Type": "application/json"}),
+            payload={"ttl": f"{ttl_seconds}s"}, read_timeout=60.0,
         )
 
     # ─── Batch hooks (Batch Mode, inline requests) ───────────────────

@@ -37,7 +37,6 @@ from ..types import (
     VideoGenerationRequest,
     SpeechGenerationRequest,
     BatchRequest,
-    CacheConfig,
     FileUploadRequest,
     ImageGenerationRequest,
     LiveConfig,
@@ -241,6 +240,48 @@ class AsyncBaseProviderLM:
         from ..batch import AsyncBatchJob
 
         return tuple(AsyncBatchJob(self, info) for info in await self.batch_list(limit))
+
+    # ── Cache resources: async drivers over the sync adapter's pure hooks ──
+
+    async def cache_create(self, prefix: Request, *, ttl_seconds: int | None = None, label: str | None = None):
+        self._inner._check_cache_prefix(prefix, ttl_seconds)
+        resp = await self._send(self._inner._cache_create_request(prefix, ttl_seconds, label))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return self._inner._cache_info_from_body(resp.text())
+
+    async def cache_get(self, cache_id: str):
+        resp = await self._send(self._inner._cache_get_request(cache_id))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return self._inner._cache_info_from_body(resp.text())
+
+    async def cache_list(self, limit: int = 20, cursor: str | None = None):
+        resp = await self._send(self._inner._cache_list_request(limit, cursor))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return self._inner._cache_page_from_list_body(resp.text())
+
+    async def cache_delete(self, cache_id: str) -> None:
+        resp = await self._send(self._inner._cache_delete_request(cache_id))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+
+    async def cache_update(self, cache_id: str, *, ttl_seconds: int):
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be a positive int")
+        resp = await self._send(self._inner._cache_update_request(cache_id, ttl_seconds))
+        if resp.status >= 400:
+            raise self._inner.normalize_error(resp.status, resp.text())
+        return self._inner._cache_info_from_body(resp.text())
+
+    async def cache(self, prefix: Request, *, ttl_seconds: int | None = None, label: str | None = None):
+        from ..types import CachedPrefix
+
+        if self.supports.caches:
+            return CachedPrefix(prefix, await self.cache_create(prefix, ttl_seconds=ttl_seconds, label=label))
+        self._inner._check_cache_prefix(prefix, ttl_seconds)
+        return CachedPrefix(prefix)
 
     # ── Files: async drivers over the sync adapter's pure hooks ──────
 
@@ -476,7 +517,6 @@ class AsyncGeminiLM(AsyncBaseProviderLM):
     transport: AsyncTransport = field(default_factory=default_async_transport)
     base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     upload_base_url: str = "https://generativelanguage.googleapis.com/upload/v1beta"
-    _cached_content_ids: dict[str, str] = field(default_factory=dict, repr=False)
 
     provider: str = "gemini"
     capabilities: Capabilities = _mirror_default(GeminiLM, "capabilities")
@@ -491,60 +531,7 @@ class AsyncGeminiLM(AsyncBaseProviderLM):
             transport=_ForbiddenTransport(),
             base_url=self.base_url,
             upload_base_url=self.upload_base_url,
-            # Share the cache-id map so the inner adapter's pure
-            # _apply_prompt_cache sees ids resolved by the async port below.
-            _cached_content_ids=self._cached_content_ids,
         )
-
-    async def resolve_prompt_cache(self, request: Request) -> str | None:
-        """Async port of GeminiLM.resolve_prompt_cache — the one network call
-        the sync mapping layer owns.  Mirrors the sync logic exactly, but the
-        cachedContents POST goes through the async transport."""
-        inner = self._inner
-        cache_cfg: CacheConfig | None = request.config.cache
-        if not (cache_cfg is None or cache_cfg.mode != "off"):
-            return None
-        payload = inner._payload(request, apply_cache=False)
-        plan = inner._prompt_cache_plan(request, payload)
-        if plan is None:
-            return None
-        cache_id = self._cached_content_ids.get(plan["key"])
-        if cache_id is not None:
-            return cache_id
-
-        body: dict[str, Any] = {
-            "model": inner._model_path(request.model),
-            "contents": plan["prefix"],
-        }
-        if payload.get("systemInstruction"):
-            body["systemInstruction"] = payload["systemInstruction"]
-        if cache_cfg is not None and cache_cfg.retention == "long":
-            body["ttl"] = "86400s"  # 24 hours
-
-        resp = await self._send(make_json_request(
-            method="POST",
-            url=f"{self.base_url.rstrip('/')}/cachedContents",
-            headers=inner._auth_headers({"Content-Type": "application/json"}),
-            payload=body,
-            read_timeout=60.0,
-        ))
-        if resp.status < 400:
-            data = resp.json()
-            name = data.get("name")
-            if name:
-                cache_id = str(name)
-                self._cached_content_ids[plan["key"]] = cache_id
-                return cache_id
-        return None
-
-    async def complete(self, request: Request) -> Response:
-        await self.resolve_prompt_cache(request)
-        return await AsyncBaseProviderLM.complete(self, request)
-
-    async def stream(self, request: Request) -> AsyncIterator[StreamEvent]:
-        await self.resolve_prompt_cache(request)
-        async for event in AsyncBaseProviderLM.stream(self, request):
-            yield event
 
     async def live(self, config: LiveConfig):
         # Native async twin of GeminiLM.live: same pure setup frame,

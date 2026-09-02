@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import urllib.parse
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Iterator
@@ -131,6 +132,24 @@ def _attach_unmapped(provider_data: dict[str, Any], unmapped: list[dict[str, str
     return out
 
 
+_GPT_VERSION_RE = re.compile(r"^gpt-(\d+)\.(\d+)")
+
+
+def openai_model_has_cache_options(model: str) -> bool:
+    """True for the GPT-5.6-and-later model class (MAP-6, mode="off").
+
+    The off switch for cache WRITES is ``prompt_cache_options`` and only
+    that class accepts it (older models reject it with HTTP 400, and their
+    writes are free anyway).  Deciding client-side needs a model check —
+    a table that rots.  Stated trade-off: a future family whose name does
+    not match ``gpt-<major>.<minor>`` keeps the provider's implicit writes
+    on ``mode="off"``; ``extensions={"prompt_cache_options": ...}`` is the
+    override.
+    """
+    m = _GPT_VERSION_RE.match(model.lower())
+    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (5, 6)
+
+
 def _cache_breakpoint_index(request: Request, cache_control: str) -> int | None:
     """Message index that carries the explicit prompt-cache breakpoint.
 
@@ -140,7 +159,10 @@ def _cache_breakpoint_index(request: Request, cache_control: str) -> int | None:
     policy names OpenAI's cache control (compat servers that declare
     ``cache_control="none"`` get nothing, as for prompt_cache_key).  The
     index is clamped to the last message, the Anthropic adapter's
-    precedent.
+    precedent.  ``prefix="history"`` sends nothing: OpenAI's implicit
+    trailing breakpoint already marks the latest message (MAP-6 A2).
+    ``prefix="stable"`` is handled by the system-message rendering, not
+    here.
     """
     cache_cfg = request.config.cache
     if cache_cfg is None or cache_cfg.mode == "off" or cache_cfg.prefix_until_index is None:
@@ -148,6 +170,45 @@ def _cache_breakpoint_index(request: Request, cache_control: str) -> int | None:
     if cache_control != "openai":
         return None
     return min(cache_cfg.prefix_until_index, len(request.messages) - 1)
+
+
+def _cache_stable_prefix(request: Request, cache_control: str) -> bool:
+    """``prefix="stable"``: mark the end of system + tools (MAP-6 A2)."""
+    cache_cfg = request.config.cache
+    return (
+        cache_cfg is not None and cache_cfg.mode != "off" and cache_cfg.prefix == "stable"
+        and cache_control == "openai"
+    )
+
+
+def _cache_common_payload(request: Request, payload: dict, cache_control: str, provider: str) -> None:
+    """Shared MAP-6 fields for both OpenAI dialects: off switch, key, retention."""
+    cache_cfg = request.config.cache
+    if cache_cfg is None or cache_control != "openai":
+        return
+    if cache_cfg.mode == "off":
+        # Option 2 (ratified 2026-09-01): the real off switch where the
+        # model class has one; nothing where writes are free anyway.
+        if openai_model_has_cache_options(request.model):
+            payload["prompt_cache_options"] = {"mode": "explicit"}
+        return
+    if cache_cfg.key:
+        payload["prompt_cache_key"] = cache_cfg.key
+    if cache_cfg.retention == "long":
+        if openai_model_has_cache_options(request.model):
+            raise UnsupportedFeatureError(
+                f"{provider}: cache.retention='long' is not available on the gpt-5.6+ "
+                "model class — prompt_cache_options.ttl accepts only '30m' (the default). "
+                "Older OpenAI models take prompt_cache_retention='24h'; Anthropic takes a 1h TTL",
+                provider=provider,
+            )
+        payload["prompt_cache_retention"] = "24h"
+    if cache_cfg.resource is not None:
+        raise UnsupportedFeatureError(
+            f"{provider}: cache.resource is not supported — this provider has no stored-cache "
+            "tier; it caches by marks on blocks (prefix / prefix_until_index) and automatically",
+            provider=provider,
+        )
 
 
 def _breakpoint_unsupported(provider: str, index: int, role: str) -> UnsupportedFeatureError:
@@ -590,7 +651,19 @@ class OpenAILM(BaseProviderLM):
             "stream": stream,
         }
         if request.system:
-            payload["instructions"] = request.system if isinstance(request.system, str) else parts_to_text(request.system)
+            system_text = request.system if isinstance(request.system, str) else parts_to_text(request.system)
+            if _cache_stable_prefix(request, compat.cache_control):
+                # Top-level `instructions` cannot carry a breakpoint
+                # (prompt-caching guide: "place them in an input_text block
+                # inside a developer message").  The stable-prefix intent
+                # therefore renders the system prompt as the first input
+                # item with the mark on it.
+                payload["input"].insert(0, {
+                    "role": compat.developer_role,
+                    "content": [{"type": "input_text", "text": system_text, "prompt_cache_breakpoint": {"mode": "explicit"}}],
+                })
+            else:
+                payload["instructions"] = system_text
         if request.config.max_tokens is not None:
             payload[compat.max_output_tokens_field] = request.config.max_tokens
         if request.config.temperature is not None:
@@ -671,13 +744,8 @@ class OpenAILM(BaseProviderLM):
                 elif compat.reasoning_format == "qwen_chat_template":
                     payload["chat_template_kwargs"] = {"enable_thinking": False}
 
-        # Cache / Prompt Caching support
-        cache_cfg = request.config.cache
-        if cache_cfg is not None and cache_cfg.mode != "off" and compat.cache_control == "openai":
-            if cache_cfg.key:
-                payload["prompt_cache_key"] = cache_cfg.key
-            if cache_cfg.retention == "long":
-                payload["prompt_cache_retention"] = "24h"
+        # Prompt caching (MAP-6): off switch, key, retention, resource.
+        _cache_common_payload(request, payload, compat.cache_control, self.provider)
 
         if compat.routing is not None:
             payload["provider"] = compat.routing

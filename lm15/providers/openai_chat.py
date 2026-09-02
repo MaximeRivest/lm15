@@ -59,6 +59,8 @@ from .openai import (
     _attach_unmapped,
     _breakpoint_unsupported,
     _cache_breakpoint_index,
+    _cache_common_payload,
+    _cache_stable_prefix,
     _record_unmapped,
 )
 
@@ -239,7 +241,14 @@ class OpenAIChatLM(BaseProviderLM):
         messages: list[dict[str, Any]] = []
         if request.system:
             system_text = request.system if isinstance(request.system, str) else parts_to_text(request.system)
-            messages.append({"role": compat.instruction_role, "content": system_text})
+            if _cache_stable_prefix(request, compat.cache_control):
+                # prefix="stable": the mark rides on the system message's
+                # text content part (array form; a bare string cannot carry it).
+                messages.append({"role": compat.instruction_role, "content": [
+                    {"type": "text", "text": system_text, "prompt_cache_breakpoint": {"mode": "explicit"}}
+                ]})
+            else:
+                messages.append({"role": compat.instruction_role, "content": system_text})
 
         breakpoint_index = _cache_breakpoint_index(request, compat.cache_control)
         for msg_index, msg in enumerate(request.messages):
@@ -454,12 +463,8 @@ class OpenAIChatLM(BaseProviderLM):
                 elif compat.thinking_format == "qwen_chat_template":
                     payload["chat_template_kwargs"] = {"enable_thinking": False}
 
-        cache_cfg = request.config.cache
-        if cache_cfg is not None and cache_cfg.mode != "off" and compat.cache_control == "openai":
-            if cache_cfg.key:
-                payload["prompt_cache_key"] = cache_cfg.key
-            if cache_cfg.retention == "long":
-                payload["prompt_cache_retention"] = "24h"
+        # Prompt caching (MAP-6): off switch, key, retention, resource.
+        _cache_common_payload(request, payload, compat.cache_control, self.provider)
 
         if compat.routing is not None:
             payload["provider"] = compat.routing

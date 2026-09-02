@@ -1,6 +1,6 @@
 # Cookbook style guide
 
-The editorial constitution for the 18-recipe lm15 cookbook. Every recipe
+The editorial constitution for the 19-recipe lm15 cookbook. Every recipe
 page MUST conform. When in doubt, this file wins over precedent in
 older docs (the retired monolithic cookbooks were raw material to mine,
 not style to copy).

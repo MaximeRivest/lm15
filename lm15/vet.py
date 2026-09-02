@@ -343,6 +343,40 @@ def op_file_op_parse(msg: JsonObject) -> JsonObject:
     raise ValueError(f"unknown file parse kind: {kind}")
 
 
+def op_cache_op_build(msg: JsonObject) -> JsonObject:
+    """Wire request for one cache-resource operation (cache_op discriminates)."""
+    lm = adapter_for_provider(str(msg["provider"]), str(msg["api_key"]), _base_url(msg))
+    op = str(msg["cache_op"])
+    if op == "create":
+        prefix = serde.request_from_dict(msg["prefix_request"])
+        lm._check_cache_prefix(prefix, msg.get("ttl_seconds"))
+        return normalize_transport_request(lm._cache_create_request(prefix, msg.get("ttl_seconds"), msg.get("label")))
+    if op == "get":
+        return normalize_transport_request(lm._cache_get_request(str(msg["cache_id"])))
+    if op == "list":
+        return normalize_transport_request(lm._cache_list_request(int(msg.get("limit", 20)), msg.get("cursor")))
+    if op == "delete":
+        return normalize_transport_request(lm._cache_delete_request(str(msg["cache_id"])))
+    if op == "update":
+        return normalize_transport_request(lm._cache_update_request(str(msg["cache_id"]), int(msg["ttl_seconds"])))
+    raise ValueError(f"unknown cache_op: {op}")
+
+
+def op_cache_op_parse(msg: JsonObject) -> JsonObject:
+    """Canonical CacheInfo / CachePage from a pinned wire body (kind discriminates)."""
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg))
+    kind = str(msg["kind"])
+    status = int(msg["status"])
+    body = base64.b64decode(msg["body_b64"]).decode("utf-8")
+    if status >= 400:
+        raise lm.normalize_error(status, body)
+    if kind == "info":
+        return {"cache": serde.cache_info_to_dict(lm._cache_info_from_body(body))}
+    if kind == "page":
+        return {"page": serde.cache_page_to_dict(lm._cache_page_from_list_body(body))}
+    raise ValueError(f"unknown cache parse kind: {kind}")
+
+
 def op_video_op_build(msg: JsonObject) -> JsonObject:
     """Wire request(s) for one video-job operation (action discriminates).
 
@@ -607,6 +641,8 @@ HANDLERS: dict[str, Callable[[JsonObject], JsonObject]] = {
     "video_op_parse": op_video_op_parse,
     "batch_op_build": op_batch_op_build,
     "batch_op_parse": op_batch_op_parse,
+    "cache_op_build": op_cache_op_build,
+    "cache_op_parse": op_cache_op_parse,
 }
 
 

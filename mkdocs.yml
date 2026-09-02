@@ -90,6 +90,7 @@ nav:
           - Local & OpenAI-compatible servers: cookbooks/16-local-and-compatible-servers.md
           - Errors, retries & testing: cookbooks/17-errors-and-testing.md
           - Provider passthrough: cookbooks/18-provider-passthrough.md
+          - Prompt caching: cookbooks/19-prompt-caching.md
   - Specification:
       - How lm15 is specified: how-lm15-is-specified.md
       - Serde rules: serde-rules.md

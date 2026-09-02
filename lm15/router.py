@@ -682,6 +682,11 @@ class LMRouter:
         resolution = self.resolve(request.model)
         return self.lm(request.model).stream(_routed_request(request, resolution))
 
+    def cache(self, prefix: Request, *, ttl_seconds: int | None = None, label: str | None = None):
+        """``router.cache(prefix)``: the MAP-6 door, routed by the prefix's model."""
+        resolution = self.resolve(prefix.model)
+        return self.lm(prefix.model).cache(_routed_request(prefix, resolution), ttl_seconds=ttl_seconds, label=label)
+
 
 class AsyncLMRouter:
     """Async mirror of :class:`LMRouter`.
@@ -715,3 +720,7 @@ class AsyncLMRouter:
     def stream(self, request: Request) -> AsyncIterator[StreamEvent]:
         resolution = self.resolve(request.model)
         return self.lm(request.model).stream(_routed_request(request, resolution))
+
+    async def cache(self, prefix: Request, *, ttl_seconds: int | None = None, label: str | None = None):
+        resolution = self.resolve(prefix.model)
+        return await self.lm(prefix.model).cache(_routed_request(prefix, resolution), ttl_seconds=ttl_seconds, label=label)

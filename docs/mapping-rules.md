@@ -114,6 +114,80 @@ and grok-4.6 spent 158 while accepting `thinking: {"type": "disabled"}`
 without effect. Reasoning tokens are billed output; an explicit off that
 silently does nothing charges the caller for what they disabled.
 
+## MAP-6 — Caching: one model for every provider
+
+Every provider caches prompt prefixes in up to three tiers, measured
+2026-09-01 across 13 providers (lm15-contract/research/caching/):
+
+- **automatic** — nothing to send, best-effort, no user-visible state
+  (OpenAI all classes, Gemini implicit, xAI, Groq, DeepSeek, Fireworks,
+  vLLM, SGLang);
+- **breakpoint** — a mark on a block, guaranteed above a per-model
+  minimum, 1.25x write price (Anthropic; OpenAI gpt-5.6 and later);
+- **resource** — a stored, named object with a lifetime and a storage
+  price per token-hour, pinned to one model (Gemini `cachedContents`,
+  Vertex; any future provider with the same shape).
+
+`CacheConfig` names INTENTS. Each adapter maps an intent to the best tier
+it has; the outcome is always visible in `Usage.cache_read_tokens` /
+`cache_write_tokens`.
+
+1. **No `config.cache`: send nothing.** Automatic tiers apply server-side.
+2. **`mode="off"`: send nothing, and disable cache WRITES where a switch
+   exists** — OpenAI gpt-5.6+ `prompt_cache_options: {"mode":
+   "explicit"}` with no marks. Pre-5.6 OpenAI models reject the option and
+   write for free, so they get nothing (option 2, ratified 2026-09-01).
+3. **`mode="auto"` with no prefix: the cheapest safe instruction.**
+   Anthropic marks the system block; every other provider sends nothing.
+   Never the trailing marker: with a changing last message it wrote the
+   full prefix at 1.25x on every call and read nothing (measured on both
+   Anthropic top-level `cache_control` and OpenAI implicit mode).
+4. **Prefix intents are marks where marks exist, and fall back to the
+   automatic tier where they do not.** `prefix="stable"` marks the end of
+   system + tools (Anthropic: the system block; OpenAI: the system prompt
+   is rendered as the first developer/system message with the mark,
+   because top-level `instructions` cannot carry one). `prefix="history"`
+   marks the last block of the last message (Anthropic); on OpenAI 5.6+
+   implicit mode already does exactly that, so nothing is sent.
+   `prefix_until_index=N` marks the last block of message N (Anthropic:
+   any block; OpenAI: a text block, else RAISE). Providers without marks
+   (Gemini, xAI, Groq, older OpenAI, compat servers with
+   `cache_control="none"`) send nothing. The fallback is permitted by two
+   conditions, both required: it spends nothing, and its outcome is
+   observable in usage. It must not be extended to fields that fail
+   either condition.
+5. **`retention="long"`** names a specific mechanism: Anthropic `ttl:
+   "1h"` (2x write); OpenAI <5.6 `prompt_cache_retention: "24h"`;
+   OpenAI 5.6+ (30m is the only value) and Gemini (lifetime belongs to
+   the stored object) RAISE.
+6. **`key`** is a best-effort affinity hint: OpenAI and OpenRouter
+   `prompt_cache_key`; Anthropic and Gemini RAISE.
+7. **`resource`** is a `CacheInfo.id` from the resource tier. The adapter
+   references the object and sends only what the object does not hold —
+   Gemini: `cachedContent` + the messages after `prefix_until_index`, no
+   `systemInstruction`/`tools`/`toolConfig` (the server rejects them next
+   to a cache). Providers without the tier RAISE.
+8. **The resource tier is a surface**, shaped like files: `cache_create
+   (prefix: Request, ttl_seconds, label)`, `cache_get`, `cache_list`,
+   `cache_delete`, `cache_update(id, ttl_seconds)`, pure hooks, async
+   mirrors, the `cache` harness direction, `EndpointSupport.caches`.
+   `lm.cache(prefix)` returns a `CachedPrefix`: on the resource tier it
+   creates the object (one explicit, billed call); elsewhere it is pure.
+   `cached + messages` builds the Request with the boundary at the seam.
+9. **No hidden network calls.** An adapter's `build_request` never
+   creates cache state. (Removed 2026-09-02: the Gemini adapter's
+   per-request `cachedContents` POST, which made a billed object per
+   turn and reused none.)
+10. **Docs state the fan-out trap**: on OpenAI 5.6+ with no config, one
+    document and many questions writes at 1.25x every time and never
+    reads; `prefix="stable"` or `lm.cache(prefix)` is the one-line fix.
+    A tools change is a miss everywhere.
+
+**Why:** the caching design pass (lm15-contract/changes/2026-09-01-caching-design.md,
+research/caching/). Provider agnosticism is defined as: the same code
+runs everywhere, does the best thing the provider offers, and shows the
+result — not identical bytes saved everywhere.
+
 ---
 
 History: MAP-1 and MAP-2 were implicit in the reference adapters; they were
@@ -124,4 +198,5 @@ gemini.max_output_tokens (MAP-2) — see
 after live vLLM/SGLang/ollama testing showed the multi-end merge losing usage.
 MAP-5 was written on 2026-09-01 after a reasoning-off audit found four
 adapters silently omitting the disable (see
-`lm15-contract/changes/2026-09-01-reasoning-off.md`).
+`lm15-contract/changes/2026-09-01-reasoning-off.md`). MAP-6 was written on
+2026-09-01/02 from the first design pass (`lm15-contract/playbooks/design-pass.md`).

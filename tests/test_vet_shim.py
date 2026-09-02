@@ -27,6 +27,8 @@ ALL_OPS = [
     "batch_op_parse",
     "build_models_request",
     "build_request",
+    "cache_op_build",
+    "cache_op_parse",
     "capabilities",
     "explain_auth",
     "file_op_build",

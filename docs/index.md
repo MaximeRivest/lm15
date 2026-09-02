@@ -77,7 +77,7 @@ that materializes into the identical `Response`.
   [Providers & models](providers-and-models.md).
 - **Keys, rotating tokens, subscriptions:**
   [Authentication](authentication.md).
-- **"How do I do X?"** — eighteen [cookbook recipes](cookbooks/index.md),
+- **"How do I do X?"** — nineteen [cookbook recipes](cookbooks/index.md),
   from [first request](cookbooks/01-first-request.md) to
   [video generation](cookbooks/14-video-generation.md) and
   [live sessions](cookbooks/15-live-sessions.md).

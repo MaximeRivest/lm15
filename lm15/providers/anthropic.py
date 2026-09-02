@@ -453,13 +453,38 @@ class AnthropicLM(BaseProviderLM):
 
         messages = [self._message(m) for m in request.messages]
 
-        # Apply prefix caching if requested
-        if use_cache and cache_cfg is not None and cache_cfg.prefix_until_index is not None:
-            idx = min(cache_cfg.prefix_until_index, len(messages) - 1)
-            if idx >= 0 and messages[idx].get("content"):
+        # MAP-6 marks.  prefix_until_index=N and prefix="history" (N = last
+        # message) put cache_control on the last block of message N; the
+        # explicit block form rather than the top-level automatic marker,
+        # which walks backwards silently when the last block is ineligible.
+        # prefix="stable" (and plain auto) mark the system block below.
+        # key / resource name mechanisms the Messages API does not have.
+        if use_cache and cache_cfg is not None:
+            if cache_cfg.key is not None:
+                raise UnsupportedFeatureError(
+                    "anthropic: cache.key is not supported — the Messages API has no "
+                    "cache affinity key (OpenAI's prompt_cache_key); marks on blocks "
+                    "are the mechanism (prefix / prefix_until_index)",
+                    provider=self.provider,
+                )
+            if cache_cfg.resource is not None:
+                raise UnsupportedFeatureError(
+                    "anthropic: cache.resource is not supported — the Messages API has no "
+                    "stored-cache tier; it caches by marks on blocks",
+                    provider=self.provider,
+                )
+            idx = None
+            if cache_cfg.prefix_until_index is not None:
+                idx = min(cache_cfg.prefix_until_index, len(messages) - 1)
+            elif cache_cfg.prefix == "history":
+                idx = len(messages) - 1
+            if idx is not None and idx >= 0 and messages[idx].get("content"):
                 last_block = messages[idx]["content"][-1]
                 if isinstance(last_block, dict):
-                    last_block.setdefault("cache_control", {"type": "ephemeral"})
+                    marker: dict[str, Any] = {"type": "ephemeral"}
+                    if long_cache:
+                        marker["ttl"] = "1h"
+                    last_block.setdefault("cache_control", marker)
 
         thinking_budget = _reasoning_thinking_budget(request)
         payload: dict[str, Any] = {

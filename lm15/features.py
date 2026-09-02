@@ -45,6 +45,7 @@ class EndpointSupport:
     video: bool = False
     responses_api: bool = False
     models: bool = False
+    caches: bool = False
 
     # Escape hatch for endpoint names not yet promoted to typed booleans.
     extra: frozenset[str] = field(default_factory=frozenset)

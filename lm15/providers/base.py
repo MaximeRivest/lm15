@@ -23,6 +23,10 @@ from ..transports import TransportResponse
 from ..transports import StdlibTransport
 from ..transports import TransportError as NetworkTransportError
 from ..types import (
+    CachedPrefix,
+    CacheInfo,
+    CachePage,
+    Config,
     VIDEO_TERMINAL_STATUSES,
     VideoGenerationRequest,
     VideoJobInfo,
@@ -569,6 +573,93 @@ class BaseProviderLM:
         from ..batch import BatchJob
 
         return tuple(BatchJob(self, info) for info in self.batch_list(limit))
+
+    # ─── Cache resources (the stored tier of MAP-6) ────────────────────
+    #
+    # Same pure-hook pattern as files.  A stored cache belongs to one model
+    # on every provider that has the tier; the prefix Request supplies
+    # model, system, tools, and messages.  Adapters without the tier leave
+    # the hooks raising and `cache()` returns a CachedPrefix without a
+    # resource — the marks-or-automatic path.  Nothing here names a
+    # provider; id formats and TTL spellings are the adapter's.
+
+    def _caches_unsupported(self) -> UnsupportedFeatureError:
+        return UnsupportedFeatureError(f"{self.provider}: stored caches not supported", provider=self.provider)
+
+    def _cache_create_request(self, prefix: Request, ttl_seconds: int | None, label: str | None) -> TransportRequest:
+        raise self._caches_unsupported()
+
+    def _cache_info_from_body(self, body: str) -> CacheInfo:
+        raise self._caches_unsupported()
+
+    def _cache_get_request(self, cache_id: str) -> TransportRequest:
+        raise self._caches_unsupported()
+
+    def _cache_list_request(self, limit: int, cursor: str | None) -> TransportRequest:
+        raise self._caches_unsupported()
+
+    def _cache_page_from_list_body(self, body: str) -> CachePage:
+        raise self._caches_unsupported()
+
+    def _cache_delete_request(self, cache_id: str) -> TransportRequest:
+        raise self._caches_unsupported()
+
+    def _cache_update_request(self, cache_id: str, ttl_seconds: int) -> TransportRequest:
+        raise self._caches_unsupported()
+
+    @staticmethod
+    def _check_cache_prefix(prefix: Request, ttl_seconds: int | None) -> None:
+        if prefix.config != Config():
+            raise ValueError("cache_create: the prefix Request must carry a default Config (a stored cache has no generation settings)")
+        if ttl_seconds is not None and (isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or ttl_seconds <= 0):
+            raise ValueError("ttl_seconds must be a positive int")
+
+    def cache_create(self, prefix: Request, *, ttl_seconds: int | None = None, label: str | None = None) -> CacheInfo:
+        """Store the prefix (model, system, tools, messages) as a cache object."""
+        self._check_cache_prefix(prefix, ttl_seconds)
+        resp = self._send(self._cache_create_request(prefix, ttl_seconds, label))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return self._cache_info_from_body(resp.text())
+
+    def cache_get(self, cache_id: str) -> CacheInfo:
+        resp = self._send(self._cache_get_request(cache_id))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return self._cache_info_from_body(resp.text())
+
+    def cache_list(self, limit: int = 20, cursor: str | None = None) -> CachePage:
+        resp = self._send(self._cache_list_request(limit, cursor))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return self._cache_page_from_list_body(resp.text())
+
+    def cache_delete(self, cache_id: str) -> None:
+        """Returning without an exception IS the confirmation (the files precedent)."""
+        resp = self._send(self._cache_delete_request(cache_id))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+
+    def cache_update(self, cache_id: str, *, ttl_seconds: int) -> CacheInfo:
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be a positive int")
+        resp = self._send(self._cache_update_request(cache_id, ttl_seconds))
+        if resp.status >= 400:
+            raise self.normalize_error(resp.status, resp.text())
+        return self._cache_info_from_body(resp.text())
+
+    def cache(self, prefix: Request, *, ttl_seconds: int | None = None, label: str | None = None) -> CachedPrefix:
+        """Make a prompt beginning reusable with the best tier this provider has.
+
+        Resource tier: creates the stored object (one network call, billed
+        per hour while it lives) and returns it inside the CachedPrefix.
+        Marks and automatic tiers: pure — the CachedPrefix only records the
+        boundary; `cached + messages` places the mark or sends nothing.
+        """
+        if self.supports.caches:
+            return CachedPrefix(prefix, self.cache_create(prefix, ttl_seconds=ttl_seconds, label=label))
+        self._check_cache_prefix(prefix, ttl_seconds)
+        return CachedPrefix(prefix)
 
     # ─── Files (account-scoped storage: upload / get / list / delete / download) ─
     #

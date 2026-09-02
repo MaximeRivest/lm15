@@ -53,3 +53,5 @@ capture. Style rules live in [STYLE.md](STYLE.md).
   error tree, why retry policy is yours, and testing without a network.
 - [18 — Provider passthrough](18-provider-passthrough.md) — Reaching
   provider-only knobs without forking your code off lm15's types.
+- [19 — Prompt caching](19-prompt-caching.md) — One line that reuses a
+  long beginning on every provider, and shows what it cost.
