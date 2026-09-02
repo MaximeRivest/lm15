@@ -18,6 +18,7 @@ from lm15.types import (
     ContinuationDelta,
     ContinuationState,
     DocumentPart,
+    FunctionTool,
     ImageDelta,
     ImagePart,
     Message,
@@ -28,6 +29,7 @@ from lm15.types import (
     StreamEndEvent,
     TextDelta,
     TextPart,
+    ToolCallDelta,
     Usage,
     VideoPart,
 )
@@ -225,3 +227,54 @@ def test_result_module_has_no_tool_execution_helpers() -> None:
     for name in ("_invoke_tool", "_normalize_tool_output", "_preview_parts",
                  "_ExecutedTool", "Result", "AsyncResult", "StreamChunk"):
         assert not hasattr(result_mod, name)
+
+
+# ─── MAP-9: a missing tool-call name is filled from the request ──────
+
+
+def _assemble(tools, events):
+    request = Request(model="m", messages=(Message.user("hi"),), tools=tuple(tools))
+    return materialize_response(iter(events), request)
+
+
+def _call(idx: int, name: str | None = None) -> StreamDeltaEvent:
+    return StreamDeltaEvent(delta=ToolCallDelta(input='{"q": 1}', part_index=idx, name=name))
+
+
+def test_map9_single_declared_tool_names_the_call() -> None:
+    resp = _assemble([FunctionTool(name="lookup")], [_call(0), StreamEndEvent(finish_reason="tool_call")])
+    (call,) = resp.tool_calls
+    assert call.name == "lookup"
+    assert call.id == "tool_call_0"
+
+
+def test_map9_position_among_all_parts_picks_the_tool() -> None:
+    # The text part at index 0 occupies position 0, so the unnamed call at
+    # index 1 takes the tool at position 1 — the stated part-position rule.
+    events = [
+        StreamDeltaEvent(delta=TextDelta(text="thinking", part_index=0)),
+        _call(1),
+        StreamEndEvent(finish_reason="tool_call"),
+    ]
+    resp = _assemble([FunctionTool(name="alpha"), FunctionTool(name="beta")], events)
+    (call,) = resp.tool_calls
+    assert call.name == "beta"
+
+
+def test_map9_no_candidate_falls_back_to_literal_tool() -> None:
+    events = [
+        StreamDeltaEvent(delta=TextDelta(text="a", part_index=0)),
+        StreamDeltaEvent(delta=TextDelta(text="b", part_index=1)),
+        _call(2),
+        StreamEndEvent(finish_reason="tool_call"),
+    ]
+    resp = _assemble([FunctionTool(name="alpha"), FunctionTool(name="beta")], events)
+    (call,) = resp.tool_calls
+    assert call.name == "tool"
+
+
+def test_map9_delivered_name_wins_over_fallback() -> None:
+    events = [_call(0, name="beta"), _call(0), StreamEndEvent(finish_reason="tool_call")]
+    resp = _assemble([FunctionTool(name="alpha"), FunctionTool(name="beta")], events)
+    (call,) = resp.tool_calls
+    assert call.name == "beta"

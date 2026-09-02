@@ -305,6 +305,34 @@ silently is the worst failure a tool-using loop can have.
 
 ---
 
+## MAP-9 — Stream assembly fills a missing tool-call name from the request
+
+When a stream's tool-call deltas for one part index never carry a `name`,
+the assembler (`lm15.result.ResponseAccumulator.response`) fills it from
+`Request.tools`, in this order:
+
+1. exactly one function tool is declared → that tool's name;
+2. otherwise the function tool at the same **position** as the part, where
+   position is the part's rank among all assembled parts of the message
+   (thinking, text, image, audio, citation, and tool-call parts alike), not
+   its rank among tool calls;
+3. otherwise the literal name `"tool"`.
+
+A missing `id` becomes `tool_call_<index>`. When deltas do carry a name,
+the last non-`None` name wins and the fallback never runs.
+
+**Why:** every provider dialect lm15 ships sends the name on the first
+delta of a call, so this path is defensive, not a wire fact. It exists so
+that a degraded stream still yields a `ToolCallPart` the application can
+act on (MAP-1) rather than a dropped call. It is written down because a
+port that guesses differently would assemble a different `Response` from
+the same events. Stated trade-off: rule 2 keys on the part position, not
+the tool-call position; a thinking or text part before the call shifts the
+guess. Left as-is on 2026-09-01 (maintainer delegation) because no fixture
+exercises the fallback; changing it needs a fixture that does.
+
+---
+
 History: MAP-1 and MAP-2 were implicit in the reference adapters; they were
 ratified as written rules on 2026-06-10 after the adversarial golden review
 flagged anthropic.container, openai.code_interpreter (MAP-1) and
@@ -315,3 +343,5 @@ MAP-5 was written on 2026-09-01 after a reasoning-off audit found four
 adapters silently omitting the disable (see
 `lm15-contract/changes/2026-09-01-reasoning-off.md`). MAP-6 was written on
 2026-09-01/02 from the first design pass, MAP-7 and MAP-8 on 2026-09-02 from the second, third, and fourth (`lm15-contract/playbooks/design-pass.md`).
+MAP-9 transcribes a fallback that had lived only in code since the first
+accumulator; written down 2026-09-02 under the same delegation.
