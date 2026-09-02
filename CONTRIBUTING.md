@@ -124,7 +124,7 @@ Example `expect_lm15` block:
 ### Doc-drift fixture check
 
 `conformance/check_doc_drift.py` parses the scraped provider reference pages
-in the sibling `curl-fixtures/api-references/<provider>/pages/` directory
+in the sibling `lm15-contract/scrapes/<provider>/pages/` directory
 (refreshed by each provider's `update.sh`; `LM15_API_REFERENCES` overrides
 the location) and compares top-level request parameters with
 `conformance/provider_requests/features.yaml`. There is no snapshot in this

@@ -120,7 +120,7 @@ def run_case(case_id: str, fn: Callable[[], None]) -> EndpointResult:
 
 
 def openai_file_upload() -> None:
-    # Body shape captured live 2026-08-31 (curl-fixtures/files-2026-08-31/).
+    # Body shape captured live 2026-08-31 (lm15-contract/receipts/2026-08-31-files/).
     transport = FakeTransport([json_response({
         "object": "file", "id": "file_1", "purpose": "user_data",
         "filename": "hello.txt", "bytes": 5, "created_at": 1788215944,
@@ -197,7 +197,7 @@ def openai_live_url_and_headers() -> None:
 
 
 def anthropic_file_upload() -> None:
-    # Body shape captured live 2026-08-31 (curl-fixtures/files-2026-08-31/).
+    # Body shape captured live 2026-08-31 (lm15-contract/receipts/2026-08-31-files/).
     transport = FakeTransport([json_response({
         "type": "file", "id": "file_anth_1", "size_bytes": 5,
         "created_at": "2026-08-31T22:39:04.248542Z", "expires_at": None,
@@ -229,7 +229,7 @@ def anthropic_batch_submit() -> None:
 
 
 def gemini_file_upload() -> None:
-    # Body shape captured live 2026-08-31 (curl-fixtures/files-2026-08-31/):
+    # Body shape captured live 2026-08-31 (lm15-contract/receipts/2026-08-31-files/):
     # upload wraps the file object; the canonical id is the URI (model
     # requests address files by URI, not resource name).
     transport = FakeTransport([json_response({"file": {
@@ -322,7 +322,7 @@ def openai_live_session_payload_shape() -> None:
         lm.close()
     assert payload["type"] == "session.update"
     session = payload["session"]
-    # GA session shape verified live 2026-09-01 (curl-fixtures/live-2026-09-01/).
+    # GA session shape verified live 2026-09-01 (lm15-contract/receipts/2026-09-01-live/).
     assert session["type"] == "realtime"
     assert session["instructions"] == "you are helpful"
     assert session["output_modalities"] == ["audio"]

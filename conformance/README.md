@@ -43,7 +43,7 @@ Two inputs are deliberately NOT mirrored here, because mirrors drifted:
 - the canonical serde vector is read from `../lm15-contract/serde/canonical.json`
   (`LM15_CONTRACT_DIR` overrides the checkout location);
 - the scraped provider reference pages are read from
-  `../curl-fixtures/api-references/<provider>/pages/`, next to the
+  `../lm15-contract/scrapes/<provider>/pages/`, next to the
   `update.sh` scrapers that refresh them (`LM15_API_REFERENCES` overrides).
 
 When a sibling is not checked out, the CLI check fails with the path it
@@ -94,7 +94,7 @@ Each script writes both JSON and Markdown reports under
   represented in the portable interchange contract.
 
 - **doc_drift**
-  Parses the scraped provider reference pages in `curl-fixtures/api-references`
+  Parses the scraped provider reference pages in `lm15-contract/scrapes/`
   and flags any documented top-level request parameter that has no
   corresponding entry in `provider_requests/features.yaml`.
 

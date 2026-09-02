@@ -20,9 +20,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from conformance.sources import api_references_path  # noqa: E402
 
-# One copy: the scraped reference pages are read from the curl-fixtures
-# scrape directory (api-references/<provider>/pages/, refreshed by its
-# update.sh), never from a snapshot in this repo.
+# One copy: the scraped reference pages are read from the contract's
+# scrape directory (lm15-contract/scrapes/<provider>/pages/, refreshed by
+# its update.sh), never from a snapshot in this repo.
 DOC_ROOT = api_references_path()
 FEATURES_PATH = ROOT / "provider_requests" / "features.yaml"
 REPORT_DIR = ROOT / "reports"
@@ -109,8 +109,8 @@ def report_provider(provider: str, features: dict[str, Any]) -> DocReport:
     doc_path, extract = PROVIDERS[provider]
     if not doc_path.exists():
         raise FileNotFoundError(
-            f"scraped reference page not found at {doc_path}; check out curl-fixtures "
-            "next to this repo (and run its api-references/<provider>/update.sh) "
+            f"scraped reference page not found at {doc_path}; check out lm15-contract "
+            "next to this repo (and run its scrapes/<provider>/update.sh) "
             "or set LM15_API_REFERENCES"
         )
     text = doc_path.read_text()

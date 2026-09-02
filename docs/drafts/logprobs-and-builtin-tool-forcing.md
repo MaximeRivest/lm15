@@ -22,8 +22,8 @@ HAS a nested `allowed_tools` form — mapped, no raise needed. Builtin
 forcing raises on the dialect.
 
 Date: 2026-09-01
-Evidence: `curl-fixtures/api-references/{openai,anthropic,gemini}/pages`,
-live captures under `curl-fixtures/logprobs-toolchoice-2026-09-01/` and
+Evidence: `lm15-contract/scrapes/{openai,anthropic,gemini}/pages`,
+live captures under `lm15-contract/receipts/2026-09-01-logprobs-toolchoice/` and
 `lm15-contract/bodies/{openai.tool_choice_builtin,openai.tool_choice_allowed,anthropic.tool_choice_builtin,openai_chat.logprobs}/`
 
 This draft covers two features:
@@ -194,7 +194,7 @@ were asked for.
 - Conformance: request-direction fixtures (knob → 3 wire forms +
   anthropic raise); response-direction fixtures from captured bodies;
   one streaming fixture per wire.
-- Live captures needed under `curl-fixtures/`: OpenAI Responses with
+- Live captures needed under `lm15-contract/receipts/`: OpenAI Responses with
   `include`, Gemini with `responseLogprobs` (verify the exact shape of
   `chosenCandidates` — the reference doc reuses the name `Candidate`).
 
