@@ -135,8 +135,10 @@ silently does nothing charges the caller for what they disabled.
 
 ## MAP-6 — Caching: one model for every provider
 
-Every provider caches prompt prefixes in up to three tiers, measured
-2026-09-01 across 13 providers (lm15-contract/research/caching/):
+Every provider caches prompt prefixes in up to three tiers; 13 providers
+were studied on 2026-09-01, six of them measured live (OpenAI both
+dialects, Anthropic, Gemini, xAI, Groq) and seven from documentation only
+(lm15-contract/research/caching/):
 
 - **automatic** — nothing to send, best-effort, no user-visible state
   (OpenAI all classes, Gemini implicit, xAI, Groq, DeepSeek, Fireworks,
@@ -320,6 +322,35 @@ of iteration (text already yielded stays yielded).
 What lm15 does mint: a missing `id` becomes `tool_call_<index>`. That is an
 lm15-owned correlator, stated, needed because Gemini sends no call ids; it
 is not a guess about what the model meant.
+
+**Assembly algorithm** (the same in every port; written down 2026-09-02
+after the independent review found it lived only in code):
+
+1. `part_index` names a **slot**, not a part. A slot may accumulate
+   several kinds at once, because the chat dialect indexes text, thinking,
+   and tool calls independently (a text delta and a tool-call delta both
+   arrive at index 0 — pinned by `openai_chat.tool_call_unnamed` and
+   `xai.streaming`).
+2. Per slot, per kind, fragments concatenate in arrival order: text and
+   thinking by string, audio by base64 chunk, tool-call input by string
+   (parsed as JSON at the end, best-effort), tool-call `id`/`name` last
+   non-`None` wins, image and citation parts replace.
+3. At materialization, slots are visited in ascending index; within one
+   slot the parts are emitted in this fixed kind order: **thinking, text,
+   image, audio, citations, tool call**. Continuation state attached to
+   the slot goes on every part emitted from it.
+4. A slot that received only continuation state (no content of any kind)
+   emits one empty `TextPart` carrying that state, so the state is not
+   lost. A message with no parts at all emits one empty `TextPart`
+   (MAP-2).
+5. `finish_reason`: the end event's word wins; `None` becomes `tool_call`
+   when a tool call was assembled, else `stop`; a provider `stop` next to
+   an assembled tool call becomes `tool_call`.
+6. The stream's `id` is the start event's id when the dialect has a start
+   frame (Anthropic `message_start`, Responses `response.created`); the
+   chat dialect has no start frame and its per-chunk `id` is **not**
+   lifted into the Response (pinned by the reviewed `openai_chat.streaming`
+   and by `xai.streaming`; a wire fact dropped by rule, stated here).
 
 **Why:** an unnamed call is not actionable (MAP-1), and every shipped
 dialect names a call on its first fragment, so a missing name is an adapter

@@ -266,6 +266,14 @@ def _gemini_usage(usage_payload: Any, *, output_keys: tuple[str, ...]) -> Usage:
     )
 
 
+def _thought_signature_state(part: dict[str, Any]) -> tuple[ContinuationState, ...]:
+    """The part's ``thoughtSignature`` as canonical replay state, or ()."""
+    signature = part.get("thoughtSignature")
+    if signature is None:
+        return ()
+    return (ContinuationState(provider="gemini", kind="thought_signature", data={"value": str(signature)}),)
+
+
 def _finish_reason(reason: str | None, *, has_tool_call: bool = False) -> str:
     if has_tool_call:
         return "tool_call"
@@ -536,7 +544,11 @@ class GeminiLM(BaseProviderLM):
 
     def _part(self, part) -> dict[str, Any]:
         if isinstance(part, TextPart):
-            return {"text": part.text}
+            out: dict[str, Any] = {"text": part.text}
+            thought = continuation_data(part, "gemini", "thought_signature")
+            if thought and thought.get("value"):
+                out["thoughtSignature"] = thought["value"]
+            return out
         if isinstance(part, (ImagePart, AudioPart, VideoPart, DocumentPart, BinaryPart)):
             mime = part.media_type or "application/octet-stream"
             if part.url is not None:
@@ -789,20 +801,17 @@ class GeminiLM(BaseProviderLM):
                 if unmapped is not None:
                     _record_unmapped(unmapped, f"{path_prefix}[{part_index}]", type(part).__name__)
                 continue
-            if "thought" in part and part.get("thought") and part.get("text"):
-                continuation: tuple[ContinuationState, ...] = ()
-                thought_signature = part.get("thoughtSignature")
-                if thought_signature is not None:
-                    continuation = (
-                        ContinuationState(
-                            provider="gemini",
-                            kind="thought_signature",
-                            data={"value": str(thought_signature)},
-                        ),
-                    )
-                parts.append(ThinkingPart(text=str(part.get("text") or ""), continuation=continuation))
+            if part.get("thought") and "text" in part:
+                # A thought part is classified by its flag, not by non-empty
+                # text: 3.x can send {thought: true, text: "", thoughtSignature}
+                # and the signature is the replay state (MAP-7 rule 8).
+                parts.append(ThinkingPart(text=str(part.get("text") or ""), continuation=_thought_signature_state(part)))
             elif "text" in part:
-                parts.append(TextPart(text=str(part.get("text") or "")))
+                # On Gemini 3.x the final answer text carries the turn's
+                # thoughtSignature (independent review 2026-09-02: dropped
+                # silently before). It is replay state exactly as on a
+                # thought or functionCall part, and goes back on the wire.
+                parts.append(TextPart(text=str(part.get("text") or ""), continuation=_thought_signature_state(part)))
             elif "functionCall" in part and isinstance(part["functionCall"], dict):
                 fc = part["functionCall"]
                 continuation: tuple[ContinuationState, ...] = ()
@@ -938,6 +947,16 @@ class GeminiLM(BaseProviderLM):
                     yielded_delta = True
                     yield StreamDeltaEvent(delta=TextDelta(text=str(part.get("text") or ""), part_index=idx, logprobs=chunk_logprobs))
                     chunk_logprobs = ()
+                    if part.get("thoughtSignature") is not None:
+                        # Same replay state on an answer-text part (3.x).
+                        yield StreamDeltaEvent(
+                            delta=ContinuationDelta(
+                                provider="gemini",
+                                kind="thought_signature",
+                                data={"value": str(part.get("thoughtSignature"))},
+                                part_index=idx,
+                            )
+                        )
                 elif "functionCall" in part and isinstance(part["functionCall"], dict):
                     fc = part["functionCall"]
                     saw_tool = True

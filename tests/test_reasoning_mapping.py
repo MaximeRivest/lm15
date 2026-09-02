@@ -142,3 +142,37 @@ def test_xai_effort_verbatim_off_raises() -> None:
     assert _body(lm, _req("grok-4.6", Reasoning(effort="xhigh")))["reasoning_effort"] == "xhigh"
     with pytest.raises(UnsupportedFeatureError, match="cannot be disabled"):
         _body(lm, _req("grok-4.6", Reasoning(effort="off")))
+
+
+# ─── Gemini 3.x: the answer text carries the turn's signature ────────
+
+
+def test_gemini_text_part_signature_is_kept_and_replayed() -> None:
+    # Independent review 2026-09-02: on 3.x the final text part carries
+    # thoughtSignature and the reference dropped it silently. It is replay
+    # state (MAP-7 rule 8) exactly as on a thought or functionCall part.
+    from lm15 import Message, Request
+    from lm15.providers import HttpResponse
+    from lm15.providers.gemini import GeminiLM
+    from lm15.testing import FakeTransport
+
+    lm = GeminiLM(api_key="k", transport=FakeTransport([]))
+    body = {
+        "responseId": "r", "modelVersion": "gemini-3.7-flash",
+        "candidates": [{"content": {"role": "model", "parts": [
+            {"text": "", "thought": True, "thoughtSignature": "SIG-THOUGHT"},
+            {"text": "Yes.", "thoughtSignature": "SIG-TEXT"},
+        ]}, "finishReason": "STOP"}],
+        "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": 1, "totalTokenCount": 4},
+    }
+    req = Request(model="gemini-3.7-flash", messages=(Message.user("q"),))
+    resp = lm.parse_response(req, HttpResponse(status=200, reason="OK", headers=[("content-type", "application/json")], body=json.dumps(body).encode()))
+    thinking, text = resp.message.parts
+    assert thinking.type == "thinking" and thinking.text == "" and thinking.continuation[0].data == {"value": "SIG-THOUGHT"}
+    assert text.type == "text" and text.continuation[0].data == {"value": "SIG-TEXT"}
+    # Replay: both signatures go back on the wire on the right parts.
+    follow = Request(model="gemini-3.7-flash", messages=(Message.user("q"), resp.message, Message.user("and?")))
+    wire = json.loads(lm.build_request(follow, stream=False).body)
+    model_parts = wire["contents"][1]["parts"]
+    assert model_parts[0] == {"text": "", "thought": True, "thoughtSignature": "SIG-THOUGHT"}
+    assert model_parts[1] == {"text": "Yes.", "thoughtSignature": "SIG-TEXT"}
