@@ -97,7 +97,9 @@ def test_function_call_response_done_does_not_end_turn() -> None:
         "status": "completed",
         "output": [{"type": "function_call", "call_id": "call_1", "name": "f", "arguments": "{}"}],
         "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}}}
-    assert decode(done) == []
+    # ...but its tokens are billed: they ride a usage event, never a turn_end.
+    (event,) = decode(done)
+    assert event.type == "usage" and event.usage.total_tokens == 15
 
 
 def test_turn_end_reads_ga_usage_keys() -> None:
@@ -117,8 +119,9 @@ def test_cancelled_response_maps_to_interrupted() -> None:
     done = {"type": "response.done", "response": {
         "status": "cancelled", "status_details": {"type": "cancelled", "reason": "client_cancelled"},
         "output": [], "usage": {"input_tokens": 40, "output_tokens": 2, "total_tokens": 42}}}
-    (event,) = decode(done)
-    assert event.type == "interrupted"
+    usage, interrupted = decode(done)
+    assert usage.type == "usage" and usage.usage.total_tokens == 42
+    assert interrupted.type == "interrupted"
 
 
 def test_cancel_race_error_is_benign() -> None:
@@ -152,3 +155,11 @@ def test_interrupt_sends_cancel() -> None:
 
     frames = lm()._encode_live_client_event(LiveClientInterruptEvent())
     assert frames == [{"type": "response.cancel"}]
+
+
+def test_response_done_without_usage_emits_no_usage_event() -> None:
+    # No usage reported → nothing to bill; never an empty usage event.
+    done = {"type": "response.done", "response": {
+        "status": "cancelled", "output": []}}
+    (event,) = decode(done)
+    assert event.type == "interrupted"

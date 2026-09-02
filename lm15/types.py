@@ -106,7 +106,7 @@ FileReadiness = Literal["pending", "ready", "failed"]
 AudioEncoding = Literal["pcm16", "opus", "mp3", "aac"]
 ToolChoiceMode = Literal["auto", "required", "none"]
 LiveClientEventType = Literal["turn", "audio", "image", "text", "tool_result", "interrupt", "end_audio"]
-LiveServerEventType = Literal["audio", "text", "tool_call", "tool_call_delta", "interrupted", "turn_end", "error"]
+LiveServerEventType = Literal["audio", "text", "tool_call", "tool_call_delta", "interrupted", "turn_end", "usage", "error"]
 
 ROLE_VALUES = frozenset(get_args(Role))
 FINISH_REASONS = frozenset(get_args(FinishReason))
@@ -2025,6 +2025,16 @@ class Usage:
 
     Arithmetic over usage (e.g. ``InferencePricing.estimate``) must treat
     ``None`` as "unknown", never as zero.
+
+    Counters are provider-verbatim (spec/types.md, Usage, 2026-09-02): the
+    same field means different things across providers. ``input_tokens``
+    includes cached tokens on OpenAI, Gemini, and xAI but not on Anthropic
+    (whose cache counters are disjoint); ``output_tokens`` includes
+    reasoning on OpenAI and Anthropic but not on Gemini and xAI. lm15 does
+    not normalise: that is what a bill reconciles against. A consumer
+    comparing across providers must apply the provider's rule from the
+    table in the spec; ``Response.provider_data`` and the router's
+    resolution say which provider answered.
     """
 
     input_tokens: int | None = None
@@ -2940,6 +2950,26 @@ class LiveServerTurnEndEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class LiveServerUsageEvent:
+    """Billed usage for a response that did not end the turn.
+
+    A function-call response (the model waits for results; the turn stays
+    open) and a cancelled response (barge-in) both consume tokens the
+    provider reports. ``turn_end`` carries the usage of a completed turn;
+    this event carries the usage of everything else, so a session's bill
+    is the sum of every ``usage`` and ``turn_end`` event. Never a turn
+    boundary; dispatch loops ignore it.
+    """
+
+    usage: Usage
+    type: Literal["usage"] = field(default="usage", init=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.usage, Usage):
+            raise TypeError("LiveServerUsageEvent.usage must be a Usage")
+
+
+@dataclass(frozen=True, slots=True)
 class LiveServerErrorEvent:
     error: ErrorDetail
     type: Literal["error"] = field(default="error", init=False)
@@ -2956,6 +2986,7 @@ LiveServerEvent: TypeAlias = (
     | LiveServerToolCallDeltaEvent
     | LiveServerInterruptedEvent
     | LiveServerTurnEndEvent
+    | LiveServerUsageEvent
     | LiveServerErrorEvent
 )
 LIVE_SERVER_EVENT_CLASSES: tuple[type, ...] = get_args(LiveServerEvent)

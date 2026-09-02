@@ -73,6 +73,7 @@ from ..types import (
     LiveServerToolCallDeltaEvent,
     LiveServerToolCallEvent,
     LiveServerTurnEndEvent,
+    LiveServerUsageEvent,
     Message,
     RefusalPart,
     Request,
@@ -356,6 +357,25 @@ def _is_codex(lm: BaseProviderLM) -> bool:
     # A function, not a method: OpenAIChatLM borrows normalize_error.
     return lm.access.backend == CODEX_BACKEND
 MODEL_LIST_HINT = "List the models your subscription accepts: call .list_models() on this client."
+
+
+def _live_usage_from_response(response: dict[str, Any]) -> Usage | None:
+    """Usage from a Realtime ``response.done`` payload, or None when absent."""
+    usage_data = response.get("usage") if isinstance(response, dict) else None
+    if not isinstance(usage_data, dict):
+        return None
+    u_in = usage_data.get("input_token_details") or usage_data.get("input_tokens_details") or {}
+    u_out = usage_data.get("output_token_details") or usage_data.get("output_tokens_details") or {}
+    return Usage(
+        input_tokens=usage_data.get("input_tokens"),
+        output_tokens=usage_data.get("output_tokens"),
+        total_tokens=usage_data.get("total_tokens"),
+        reasoning_tokens=u_out.get("reasoning_tokens"),
+        cache_read_tokens=u_in.get("cached_tokens"),
+        cache_write_tokens=u_in.get("cache_write_tokens"),
+        input_audio_tokens=u_in.get("audio_tokens"),
+        output_audio_tokens=u_out.get("audio_tokens"),
+    )
 
 
 @dataclass(slots=True)
@@ -1437,33 +1457,28 @@ class OpenAILM(BaseProviderLM):
         elif et in {"response.done", "response.completed"}:
             response = payload.get("response", {}) if isinstance(payload.get("response"), dict) else {}
             output = response.get("output") if isinstance(response.get("output"), list) else []
+            usage = _live_usage_from_response(response)
             if str(response.get("status") or "") == "cancelled":
                 # GA signals barge-in via response.done status=cancelled
                 # (status_details.reason=client_cancelled); parallel to
-                # Gemini's interrupted frame. The cancelled turn's usage is
-                # dropped with it — stated, mirrors Gemini.
+                # Gemini's interrupted frame. The cancelled response still
+                # consumed tokens (pinned: 143 in openai.live_interrupt); they
+                # ride a usage event before the interrupt signal, so the
+                # session's bill is the sum of usage + turn_end events.
+                if usage is not None:
+                    events.append(LiveServerUsageEvent(usage=usage))
                 events.append(LiveServerInterruptedEvent())
             elif any(isinstance(i, dict) and i.get("type") == "function_call" for i in output):
                 # A response that requests tool calls does NOT end the turn:
                 # the model is waiting for results, and the continuation
                 # arrives as a further wire response (observed live
                 # 2026-09-01). Gemini keeps the turn open here; emitting
-                # turn_end would break the shared tool-dispatch loop.
-                pass
+                # turn_end would break the shared tool-dispatch loop. Its
+                # tokens (pinned: 75 in openai.live_tools) ride a usage event.
+                if usage is not None:
+                    events.append(LiveServerUsageEvent(usage=usage))
             else:
-                usage_data = response.get("usage", {}) if isinstance(response, dict) else {}
-                u_in = usage_data.get("input_token_details") or usage_data.get("input_tokens_details") or {}
-                u_out = usage_data.get("output_token_details") or usage_data.get("output_tokens_details") or {}
-                events.append(LiveServerTurnEndEvent(usage=Usage(
-                    input_tokens=usage_data.get("input_tokens"),
-                    output_tokens=usage_data.get("output_tokens"),
-                    total_tokens=usage_data.get("total_tokens"),
-                    reasoning_tokens=u_out.get("reasoning_tokens"),
-                    cache_read_tokens=u_in.get("cached_tokens"),
-                    cache_write_tokens=u_in.get("cache_write_tokens"),
-                    input_audio_tokens=u_in.get("audio_tokens"),
-                    output_audio_tokens=u_out.get("audio_tokens"),
-                )))
+                events.append(LiveServerTurnEndEvent(usage=usage or Usage()))
         elif et in {"response.cancelled", "response.canceled"}:
             events.append(LiveServerInterruptedEvent())
         elif et in {"error", "response.error"}:

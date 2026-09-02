@@ -75,6 +75,7 @@ from ..types import (
     LiveServerToolCallDeltaEvent,
     LiveServerToolCallEvent,
     LiveServerTurnEndEvent,
+    LiveServerUsageEvent,
     Message,
     Request,
     Response,
@@ -263,7 +264,24 @@ def _gemini_usage(usage_payload: Any, *, output_keys: tuple[str, ...]) -> Usage:
         total_tokens=usage_payload.get("totalTokenCount"),
         cache_read_tokens=usage_payload.get("cachedContentTokenCount"),
         reasoning_tokens=usage_payload.get("thoughtsTokenCount"),
+        # Modality breakdowns: {modality, tokenCount} entries. AUDIO has a
+        # canonical slot on both sides (OpenAI fills the same slots); IMAGE
+        # and VIDEO do not and stay in provider_data. Independent review
+        # 2026-09-02: three goldens carried audio counts nowhere.
+        input_audio_tokens=_modality_tokens(usage_payload.get("promptTokensDetails"), "AUDIO"),
+        output_audio_tokens=_modality_tokens(
+            usage_payload.get("candidatesTokensDetails") or usage_payload.get("responseTokensDetails"), "AUDIO"
+        ),
     )
+
+
+def _modality_tokens(details: Any, modality: str) -> int | None:
+    """Sum of ``tokenCount`` over the entries for ``modality``; None when the
+    breakdown has no such entry (not reported, per INV-029)."""
+    if not isinstance(details, list):
+        return None
+    counts = [e.get("tokenCount", 0) for e in details if isinstance(e, dict) and e.get("modality") == modality]
+    return sum(counts) if counts else None
 
 
 def _thought_signature_state(part: dict[str, Any]) -> tuple[ContinuationState, ...]:
@@ -1344,6 +1362,13 @@ class GeminiLM(BaseProviderLM):
         out_tx = server.get("outputTranscription")
         if isinstance(out_tx, dict) and out_tx.get("text"):
             events.append(LiveServerTextEvent(text=str(out_tx["text"])))
+        has_usage = isinstance(payload.get("usageMetadata"), dict) or isinstance(server.get("usageMetadata"), dict)
+        if has_usage and not server.get("turnComplete"):
+            # Usage reported on a frame that does not end the turn (an
+            # interrupted or tool-call frame) rides a usage event; the
+            # pinned Gemini transcripts report usage only on turnComplete,
+            # so this is the rule, not a receipt.
+            events.append(LiveServerUsageEvent(usage=self._live_usage(payload, server)))
         if server.get("interrupted"):
             events.append(LiveServerInterruptedEvent())
         if server.get("turnComplete"):

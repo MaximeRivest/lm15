@@ -66,6 +66,7 @@ from .types import (
     LiveServerToolCallDeltaEvent,
     LiveServerToolCallEvent,
     LiveServerTurnEndEvent,
+    LiveServerUsageEvent,
     Message,
     Part,
     PART_TYPES,
@@ -1281,6 +1282,8 @@ def live_server_event_to_dict(e: LiveServerEvent) -> dict[str, Any]:
         return {"type": e.type}
     if isinstance(e, LiveServerTurnEndEvent):
         return _clean_mapping({"type": e.type, "usage": usage_to_dict(e.usage)})
+    if isinstance(e, LiveServerUsageEvent):
+        return _clean_mapping({"type": e.type, "usage": usage_to_dict(e.usage)})
     if isinstance(e, LiveServerErrorEvent):
         return {"type": e.type, "error": error_detail_to_dict(e.error)}
     raise TypeError(f"unsupported live server event type: {type(e)}")
@@ -1302,6 +1305,8 @@ def live_server_event_from_dict(d: dict[str, Any]) -> LiveServerEvent:
         return LiveServerInterruptedEvent()
     if t == "turn_end":
         return LiveServerTurnEndEvent(usage=usage_from_dict(d.get("usage", {})))
+    if t == "usage":
+        return LiveServerUsageEvent(usage=usage_from_dict(d.get("usage", {})))
     if t == "error":
         return LiveServerErrorEvent(error=error_detail_from_dict(d["error"]))
     raise ValueError(f"unsupported live server event type: {t}")

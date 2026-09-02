@@ -45,7 +45,11 @@ Usage(input_tokens=47, output_tokens=23, total_tokens=438, …, reasoning_tokens
 ```
 
 Note `reasoning_tokens=368`: Gemini 3 thinks by default, even about
-beeps.
+beeps. And note the arithmetic: 47 + 23 + 368 = 438. On Gemini the
+thinking is *outside* `output_tokens`; on OpenAI and Anthropic it is
+*inside*. lm15 reports every counter exactly as the provider does, so the
+numbers reconcile with the bill; the per-provider rules are in the
+contract's `spec/types.md` under Usage.
 
 Video is the same shape. `video(path=...)` inlines the bytes; keep clips
 small (inline base64, no chunked upload):

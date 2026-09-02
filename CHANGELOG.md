@@ -10,6 +10,19 @@ said otherwise). Endpoint support lives in `lm.supports` / `lm.manifest`,
 pinned by `spec/support-matrix.json`; modalities and prices are per model
 on `ModelInfo`. Callers reading `lm.capabilities` get `AttributeError`.
 
+**Three follow-ups from the independent review.**
+- `LiveServerUsageEvent` (`type: "usage"`): billed tokens of a live
+  response that does not end the turn — a tool-call response (75 tokens
+  were vanishing in the pinned transcript) or a cancelled one (143).
+  `Turn.usage` now sums every `usage` and `turn_end` event it saw; an
+  interrupted turn keeps its usage instead of `None`.
+- Gemini modality breakdowns (`promptTokensDetails`,
+  `candidatesTokensDetails`, `responseTokensDetails`, modality `AUDIO`)
+  now fill `input_audio_tokens` / `output_audio_tokens`, as OpenAI's do.
+- Usage counters are declared provider-verbatim in the contract, with a
+  per-provider table of what `input_tokens` and `output_tokens` include.
+  Nothing changed in the numbers; the rule that they differ is now text.
+
 **Caching on gpt-5.6+: two amendments from live probes** (MAP-6 rules 4
 and 5). `retention="long"` no longer raises on the 5.6 class; it sends
 `prompt_cache_retention: "24h"` like every other class (the server

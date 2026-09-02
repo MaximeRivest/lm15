@@ -22,6 +22,7 @@ from lm15.types import (
     LiveServerTextEvent,
     LiveServerToolCallEvent,
     LiveServerTurnEndEvent,
+    LiveServerUsageEvent,
     Usage,
 )
 
@@ -209,3 +210,45 @@ async def test_async_recv_is_cancellable() -> None:
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+# ─── usage events: a turn's bill is everything it saw ────────────────
+
+def test_tool_call_response_usage_lands_in_the_continuation_turn() -> None:
+    # Wire order on OpenAI Realtime: output_item.done (tool_call) then
+    # response.done (usage). result() returns at the tool_call; the usage
+    # event is the first thing the continuation turn sees, and the
+    # continuation's bill includes it (the semantic turn stayed open).
+    frames = [
+        LiveServerTextEvent(text="calling "),
+        LiveServerToolCallEvent(id="c1", name="get_weather", input={"city": "Montreal"}),
+        LiveServerUsageEvent(usage=Usage(input_tokens=54, output_tokens=21, total_tokens=75)),
+        LiveServerTextEvent(text="It is sunny."),
+        LiveServerTurnEndEvent(usage=Usage(input_tokens=90, output_tokens=10, total_tokens=100)),
+    ]
+    session = sync_session(frames)
+    first = session.turn().result()
+    assert first.ended_by == "tool_call" and first.usage is None
+    second = session.turn().result()
+    assert second.ended_by == "turn_end" and second.text == "It is sunny."
+    assert second.usage == Usage(input_tokens=144, output_tokens=31, total_tokens=175)
+
+
+def test_interrupted_turn_keeps_its_usage() -> None:
+    frames = [
+        LiveServerTextEvent(text="I was say"),
+        LiveServerUsageEvent(usage=Usage(input_tokens=127, output_tokens=16, total_tokens=143)),
+        LiveServerInterruptedEvent(),
+    ]
+    turn = sync_session(frames).turn().result()
+    assert turn.ended_by == "interrupted" and turn.usage is not None and turn.usage.total_tokens == 143
+
+
+def test_usage_sum_keeps_unknown_unknown() -> None:
+    # INV-029 arithmetic: a counter absent on either side is unknown in the sum.
+    frames = [
+        LiveServerUsageEvent(usage=Usage(input_tokens=1, output_tokens=1, reasoning_tokens=5)),
+        LiveServerTurnEndEvent(usage=Usage(input_tokens=2, output_tokens=2)),
+    ]
+    turn = sync_session(frames).turn().result()
+    assert turn.usage.input_tokens == 3 and turn.usage.reasoning_tokens is None

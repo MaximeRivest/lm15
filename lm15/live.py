@@ -85,7 +85,10 @@ class Turn:
     """One materialized turn.
 
     ``ended_by`` is one of ``turn_end`` / ``interrupted`` / ``error`` /
-    ``tool_call``. A ``tool_call`` ending mirrors the non-live
+    ``tool_call``. ``usage`` is the field-wise sum of every ``usage`` and
+    ``turn_end`` event the turn saw: a tool-call response's tokens arrive
+    as a ``usage`` event at the start of the continuation turn, and a
+    cancelled response's tokens precede its ``interrupted``. A ``tool_call`` ending mirrors the non-live
     ``finish_reason="tool_call"`` contract: the model is waiting for
     YOUR result — answer with ``send_tool_result()`` and materialize the
     next turn. Materializing buffers text and audio in memory until the
@@ -106,6 +109,21 @@ class Turn:
         return self.ended_by == "turn_end"
 
 
+def _sum_usage(acc: "Usage | None", more: Usage) -> Usage:
+    """Field-wise sum of two Usage values from one session (same provider,
+    same taxonomy). INV-029: a counter absent on either side is unknown
+    in the sum, never zero."""
+    if acc is None:
+        return more
+    fields = ("input_tokens", "output_tokens", "total_tokens", "cache_read_tokens", "cache_write_tokens",
+              "reasoning_tokens", "input_audio_tokens", "output_audio_tokens")
+    values = {}
+    for name in fields:
+        a, b = getattr(acc, name), getattr(more, name)
+        values[name] = a + b if a is not None and b is not None else None
+    return Usage(**values)
+
+
 def _materialize_turn(events: tuple[LiveServerEvent, ...]) -> Turn:
     text_parts: list[str] = []
     audio = bytearray()
@@ -122,8 +140,13 @@ def _materialize_turn(events: tuple[LiveServerEvent, ...]) -> Turn:
                 audio_media_type = event.media_type
         elif event.type == "tool_call":
             tool_calls.append(ToolCallInfo(id=event.id, name=event.name, input=event.input))
-        elif event.type == "turn_end":
-            usage = event.usage
+        elif event.type in ("turn_end", "usage"):
+            # A turn's bill is every usage-bearing event it saw: the
+            # usage event of a tool-call response (which arrives after the
+            # tool_call that ended the previous result(), i.e. at the start
+            # of the continuation turn — the semantic turn stayed open) and
+            # the usage of a cancelled response before its interrupted.
+            usage = _sum_usage(usage, event.usage)
         elif event.type == "error":
             error = event.error
     ended_by = events[-1].type if events and events[-1].type in (_TURN_TERMINAL | {"tool_call"}) else "error"

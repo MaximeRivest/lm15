@@ -174,3 +174,17 @@ def test_openai_responses_done_does_not_overwrite_tool_call() -> None:
     assert len(ends) == 1
     assert ends[0].finish_reason == "tool_call"
     assert ends[0].usage.total_tokens == 3
+
+
+def test_gemini_modality_breakdowns_fill_the_audio_slots() -> None:
+    lm = GeminiLM(api_key="k")
+    body = _gemini_body({
+        "promptTokenCount": 153, "candidatesTokenCount": 59, "totalTokenCount": 212,
+        "promptTokensDetails": [{"modality": "TEXT", "tokenCount": 130}, {"modality": "AUDIO", "tokenCount": 23}],
+        "candidatesTokensDetails": [{"modality": "AUDIO", "tokenCount": 59}],
+    })
+    usage = lm.parse_response(_REQ, _http(body)).usage
+    assert usage.input_audio_tokens == 23 and usage.output_audio_tokens == 59
+    # No AUDIO entry: not reported, never 0.
+    text_only = lm.parse_response(_REQ, _http(_gemini_body({"promptTokenCount": 1, "candidatesTokenCount": 1, "promptTokensDetails": [{"modality": "TEXT", "tokenCount": 1}]}))).usage
+    assert text_only.input_audio_tokens is None and text_only.output_audio_tokens is None

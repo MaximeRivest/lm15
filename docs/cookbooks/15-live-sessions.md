@@ -147,6 +147,14 @@ with lm.live(LiveConfig(model=MODEL, system="Be concise.")) as session:
 'live hello' | ended_by: turn_end | audio bytes: 53762 | tokens: 188
 ```
 
+One more event to know about: `usage`. A response that does not end the
+turn still costs tokens — the response that requested a tool call, or one
+you interrupted. Those arrive as a `usage` event (after the `tool_call`,
+or just before `interrupted`). Dispatch loops ignore it; `Turn.usage` sums
+every `usage` and `turn_end` it saw, so a tool-call continuation's bill
+includes the call that asked for it, and an interrupted turn is no longer
+free on paper.
+
 Two caveats, on the box. A live session is full-duplex: with voice
 activity detection the model can speak spontaneously and turns can
 overlap after interruptions — `turn()` serves the half-duplex idiom
