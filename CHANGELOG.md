@@ -10,6 +10,20 @@ said otherwise). Endpoint support lives in `lm.supports` / `lm.manifest`,
 pinned by `spec/support-matrix.json`; modalities and prices are per model
 on `ModelInfo`. Callers reading `lm.capabilities` get `AttributeError`.
 
+**Auth by composition** (contract AUTH-10, proposed). An adapter is a
+dialect bound to an `AccessPolicy` value (`lm15.access`; `ProviderManifest`
+is the same class under its earlier name): credential policy, auth header,
+static headers, login hint, endpoint surfaces, backend variant, system
+prefix, base URL. `ClaudeCodeLM` and `OpenAICodexLM` are now names for
+`AnthropicLM(access=CLAUDE_CODE)` and `OpenAILM(access=OPENAI_CODEX)` and
+define nothing but constructors; `XaiLM` composes its credential path and
+keeps its provider wire (images, video, refusals). Every dialect and async
+mirror takes `access=` and `credentials_path=`; `api_key` is optional and a
+`key` policy with no key raises `NotConfiguredError` naming the env keys
+(was `TypeError`). Endpoint surfaces are gated on the bound policy in the
+shared drivers, so a subscription login that lacks files/batch raises
+before any hook. Wire output is byte-identical (harness 13/13).
+
 **Stream assembly never invents a tool-call name** (MAP-9, ErrorCode
 `stream_assembly`). When a streamed tool call's fragments never carried a
 name, the accumulator used to guess one from `Request.tools` by position

@@ -11,6 +11,7 @@ policy with that server's default base URL.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Iterator
 
@@ -21,7 +22,8 @@ from ..compat import (
     resolve_openai_chat_compat,
 )
 from ..errors import ProviderError, UnsupportedFeatureError
-from ..features import EndpointSupport, ProviderManifest
+from ..access import OPENAI_CHAT_API, auth_header
+from ..features import ProviderManifest
 from ..sse import SSEEvent
 from ..transports import TransportRequest
 from ..types import (
@@ -149,23 +151,16 @@ class OpenAIChatLM(BaseProviderLM):
     ``base_url`` argument always wins.
     """
 
-    api_key: Credential = field(repr=False)
+    api_key: Credential | None = field(default=None, repr=False)
     transport: SyncTransport = field(default_factory=default_transport)
     base_url: str = _DEFAULT_BASE_URL
     compat: OpenAIChatCompat | str | None = None
+    access: ProviderManifest | None = field(default=None, repr=False)
+    credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
 
-    provider: str = "openai_chat"
-    supports: ClassVar[EndpointSupport] = EndpointSupport(
-        complete=True,
-        stream=True,
-        models=True,
-    )
-    manifest: ClassVar[ProviderManifest] = ProviderManifest(
-        provider="openai_chat",
-        supports=supports,
-        auth_modes=("bearer",),
-        env_keys=("OPENAI_API_KEY",),
-    )
+    provider: str = field(default="openai_chat", init=False)
+    account_id: str | None = field(default=None, init=False, repr=False)
+    manifest: ClassVar[ProviderManifest] = OPENAI_CHAT_API
 
     # OpenAI-compatible servers reuse the same error envelope family;
     # share the Responses adapter's mapping verbatim.
@@ -179,6 +174,7 @@ class OpenAIChatLM(BaseProviderLM):
     normalize_error = OpenAILM.normalize_error
 
     def __post_init__(self) -> None:
+        self._bind_access(self.access, credentials_path=self.credentials_path, default_base_url=_DEFAULT_BASE_URL)
         compat = self.compat
         if isinstance(compat, str):
             preset_key = compat.lower().replace("-", "_").replace(" ", "_")
@@ -194,10 +190,11 @@ class OpenAIChatLM(BaseProviderLM):
     _resolved_compat: ResolvedOpenAIChatCompat = field(init=False, repr=False, default=ResolvedOpenAIChatCompat())
 
     def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {resolve_credential(self.api_key)}",
-            "Content-Type": "application/json",
-        }
+        name, value = auth_header(self.access, resolve_credential(self.api_key))
+        headers = {name: value, "Content-Type": "application/json"}
+        for key, static in self.access.headers:
+            headers[key] = static
+        return headers
 
     # ─── Live model listing (provisional endpoint) ──────────────────────
 

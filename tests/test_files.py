@@ -356,12 +356,26 @@ def test_openai_chat_files_unsupported() -> None:
 
 
 def test_subscription_adapters_block_files() -> None:
+    # The dialect implements files; the access policy does not carry them
+    # (a subscription token has no files API). The base drivers gate on the
+    # bound policy, so every verb raises before any hook or network.
     from lm15.providers.claude_code import ClaudeCodeLM
     from lm15.providers.openai_codex import OpenAICodexLM
 
-    for cls in (ClaudeCodeLM, OpenAICodexLM):
-        for name in ("file_upload", "file_get", "file_list", "file_delete", "file_download"):
-            assert name in cls.__dict__, f"{cls.__name__} must explicitly block {name}"
+    for lm in (
+        ClaudeCodeLM(api_key="tok", transport=FakeTransport([])),
+        OpenAICodexLM(api_key="tok", account_id="acct", transport=FakeTransport([])),
+    ):
+        assert lm.supports.files is False
+        for call in (
+            lambda: lm.file_upload(FileUploadRequest(filename="a", bytes_data=b"x")),
+            lambda: lm.file_get("f"),
+            lambda: lm.file_list(),
+            lambda: lm.file_delete("f"),
+            lambda: lm.file_download("f"),
+        ):
+            with pytest.raises(UnsupportedFeatureError, match="files not supported"):
+                call()
 
 
 # ─── Async twin ─────────────────────────────────────────────────────

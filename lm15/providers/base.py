@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Iterator, Protocol, Sequence, Union
 
@@ -13,6 +14,7 @@ from ..errors import (
     TransportError as LM15TransportError,
     UnsupportedFeatureError,
     map_http_error,
+    with_credential_hint,
 )
 from ..features import EndpointSupport, ProviderManifest
 from ..models import ModelInfo
@@ -162,15 +164,90 @@ class ProviderDialect(Protocol):
     def normalize_error(self, status: int, body: str) -> ProviderError: ...
 
 
+_SURFACE_WORD = {
+    "files": "files",
+    "batches": "batch",
+    "images": "image generation",
+    "speech": "speech generation",
+    "video": "video generation",
+    "live": "live",
+    "caches": "caches",
+    "models": "model listing",
+}
+
+
 class BaseProviderLM:
-    """Shared synchronous provider LM implementation."""
+    """Shared synchronous provider LM implementation.
+
+    An adapter is a dialect (the class) bound to an access policy (a value,
+    ``lm15.access``): the policy says which credential travels in which
+    header, which static headers ride along, which endpoint surfaces this
+    access path carries, and which backend variant the dialect must switch
+    on. ``manifest`` is the class's default policy; ``access`` is the bound
+    one. Dialect code reads ``self.access`` at a small set of stated points
+    and never carries a subclass per access path.
+    """
 
     transport: SyncTransport
     provider: str = "unknown"
-    supports: ClassVar[EndpointSupport] = EndpointSupport()
-    manifest: ClassVar[ProviderManifest] = ProviderManifest(
-        provider="unknown", supports=EndpointSupport()
-    )
+    manifest: ClassVar[ProviderManifest] = ProviderManifest(provider="unknown")
+    access: ProviderManifest
+    account_id: str | None = None
+    _credential_source: str = "explicit"
+
+    @property
+    def supports(self) -> EndpointSupport:
+        """The endpoint surfaces this bound access path carries."""
+        return self.access.supports
+
+    @classmethod
+    def has_stored_credential(cls) -> bool:
+        """Offline probe for the router's ``oauth-unless-explicit`` chain
+        (spec/auth.md AUTH-1): is a usable login stored locally?"""
+        from ..access import has_stored_credential
+
+        return has_stored_credential(cls.manifest)
+
+    def _bind_access(
+        self,
+        access: ProviderManifest | None,
+        *,
+        credentials_path: "str | os.PathLike[str] | None" = None,
+        default_base_url: str | None = None,
+    ) -> None:
+        """Bind the access policy and resolve the credential it calls for.
+
+        Called from each dialect's ``__post_init__``. Sets ``access``,
+        ``provider``, ``api_key`` (a callable for stored logins, re-read per
+        request so rotations and refreshes are picked up), ``account_id``
+        when the credential carries one, and ``base_url`` when the policy
+        names its own and the caller left the dialect's default.
+        """
+        from ..access import load_credential
+
+        policy = access if access is not None else type(self).manifest
+        self.access = policy
+        self.provider = policy.provider
+        loaded = load_credential(policy, self.api_key, credentials_path=credentials_path)
+        self.api_key = loaded.credential
+        self._credential_source = loaded.source
+        if loaded.account_id is not None and self.account_id is None:
+            self.account_id = loaded.account_id
+        if policy.base_url is not None and default_base_url is not None and self.base_url == default_base_url:
+            self.base_url = policy.base_url
+
+    def _require(self, surface: str) -> None:
+        """Raise unless the bound access path carries ``surface``.
+
+        A dialect may implement a surface its access path does not carry
+        (Anthropic files on a Claude Code login); the policy, not the class,
+        decides. Message shape: ``<provider>: <surface> not supported``.
+        """
+        if not self.access.supports.supports_endpoint(surface):
+            raise UnsupportedFeatureError(
+                f"{self.provider}: {_SURFACE_WORD.get(surface, surface)} not supported",
+                provider=self.provider,
+            )
 
     def complete(self, request: Request) -> Response:
         req = self.build_request(request, stream=False)
@@ -225,12 +302,12 @@ class BaseProviderLM:
             raise LM15TransportError(str(exc)) from exc
 
     def normalize_error(self, status: int, body: str) -> ProviderError:
-        return map_http_error(
+        return self._with_login_hint(map_http_error(
             status,
             body.strip()[:500] or f"HTTP {status}",
             provider=self.provider,
-            env_keys=self.manifest.env_keys,
-        )
+            env_keys=self.access.env_keys,
+        ))
 
     def _provider_error(
         self,
@@ -251,8 +328,19 @@ class BaseProviderLM:
         }
         kwargs = {key: value for key, value in kwargs.items() if value is not None}
         if issubclass(cls, AuthError):
-            return cls(message, env_keys=self.manifest.env_keys, **kwargs)
+            return self._with_login_hint(cls(message, env_keys=self.access.env_keys, **kwargs))
         return cls(message, **kwargs)
+
+    def _with_login_hint(self, error: ProviderError) -> ProviderError:
+        """Auth errors guide the user to re-login when the credential is a
+        local login: always under an ``oauth`` policy (there is no env var),
+        and under ``oauth-unless-explicit`` only when the stored login was
+        the rung that won — an explicit key keeps the generic guidance.
+        ``with_credential_hint`` is a no-op on non-auth errors."""
+        hint = self.access.login_hint
+        if hint and (self.access.credential_policy == "oauth" or self._credential_source == "stored"):
+            return with_credential_hint(error, hint)
+        return error
 
     def close(self) -> None:
         close = getattr(self.transport, "close", None)
@@ -277,6 +365,7 @@ class BaseProviderLM:
         self.close()
 
     def live(self, config: LiveConfig) -> LiveSession:
+        self._require("live")
         raise UnsupportedFeatureError(f"{self.provider}: live not supported", provider=self.provider)
 
     # ─── Media generation (images / speech) ────────────────────────
@@ -312,6 +401,7 @@ class BaseProviderLM:
         same chat call; xAI: ``/images/edits``) and raise where the wire
         has none — never silently ignore them.
         """
+        self._require("images")
         resp = self._send(self._image_generate_request(request))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
@@ -321,6 +411,7 @@ class BaseProviderLM:
         """Text-to-speech.  Omitted ``voice``/``format`` mean the server's
         defaults, honestly reported in the returned part's media_type —
         lm15 injects no defaults of its own."""
+        self._require("speech")
         resp = self._send(self._speech_generate_request(request))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
@@ -363,12 +454,14 @@ class BaseProviderLM:
 
     def video_submit(self, request: VideoGenerationRequest) -> VideoJobInfo:
         """Submit a video job; returns the ticket snapshot."""
+        self._require("video")
         resp = self._send(self._video_submit_request(request))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
         return self._video_job_from_body(resp.text())
 
     def video_status(self, video_id: str) -> VideoJobInfo:
+        self._require("video")
         resp = self._send(self._video_status_request(video_id))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
@@ -379,6 +472,7 @@ class BaseProviderLM:
         delivery mode (URL or bytes) — no silent re-hosting, no silent
         gigabyte download; ``part.bytes`` fetches URL results on demand.
         Raises ValueError while the job runs."""
+        self._require("video")
         resp = self._send(self._video_status_request(video_id))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
@@ -401,6 +495,7 @@ class BaseProviderLM:
         """One page of this credential's video jobs.  ``model`` is required
         on Gemini (operations list per model), ignored on OpenAI; xAI has
         no list endpoint at all and raises."""
+        self._require("video")
         resp = self._send(self._video_list_request(limit, model))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
@@ -446,6 +541,7 @@ class BaseProviderLM:
 
     def list_models(self) -> "tuple[ModelInfo, ...]":
         """Fetch the models this credential can use, as canonical ModelInfo."""
+        self._require("models")
         resp = self._send(self._models_request())
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
@@ -493,6 +589,7 @@ class BaseProviderLM:
 
     def batch_submit(self, request: BatchRequest) -> BatchJobInfo:
         """Submit to the provider's batch queue; returns the ticket snapshot."""
+        self._require("batches")
         upload_body = None
         upload_req = self._batch_upload_request(request)
         if upload_req is not None:
@@ -506,6 +603,7 @@ class BaseProviderLM:
         return self._batch_job_from_body(resp.text())
 
     def batch_status(self, batch_id: str) -> BatchJobInfo:
+        self._require("batches")
         resp = self._send(self._batch_status_request(batch_id))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
@@ -513,6 +611,7 @@ class BaseProviderLM:
 
     def batch_results(self, batch_id: str) -> "tuple[BatchEntry, ...]":
         """Entries in submission order; raises ValueError while the job runs."""
+        self._require("batches")
         resp = self._send(self._batch_status_request(batch_id))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
@@ -533,6 +632,7 @@ class BaseProviderLM:
 
     def batch_cancel(self, batch_id: str) -> BatchJobInfo:
         """Request cancellation — a request, not a guarantee."""
+        self._require("batches")
         resp = self._send(self._batch_cancel_request(batch_id))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
@@ -544,6 +644,7 @@ class BaseProviderLM:
         The provider is the system of record; recovery from a lost id must
         never depend on the user having been careful.
         """
+        self._require("batches")
         resp = self._send(self._batch_list_request(limit))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
@@ -614,6 +715,7 @@ class BaseProviderLM:
 
     def cache_create(self, prefix: Request, *, ttl_seconds: int | None = None, label: str | None = None) -> CacheInfo:
         """Store the prefix (model, system, tools, messages) as a cache object."""
+        self._require("caches")
         self._check_cache_prefix(prefix, ttl_seconds)
         resp = self._send(self._cache_create_request(prefix, ttl_seconds, label))
         if resp.status >= 400:
@@ -621,12 +723,14 @@ class BaseProviderLM:
         return self._cache_info_from_body(resp.text())
 
     def cache_get(self, cache_id: str) -> CacheInfo:
+        self._require("caches")
         resp = self._send(self._cache_get_request(cache_id))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
         return self._cache_info_from_body(resp.text())
 
     def cache_list(self, limit: int = 20, cursor: str | None = None) -> CachePage:
+        self._require("caches")
         resp = self._send(self._cache_list_request(limit, cursor))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
@@ -634,11 +738,13 @@ class BaseProviderLM:
 
     def cache_delete(self, cache_id: str) -> None:
         """Returning without an exception IS the confirmation (the files precedent)."""
+        self._require("caches")
         resp = self._send(self._cache_delete_request(cache_id))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
 
     def cache_update(self, cache_id: str, *, ttl_seconds: int) -> CacheInfo:
+        self._require("caches")
         if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be a positive int")
         resp = self._send(self._cache_update_request(cache_id, ttl_seconds))
@@ -699,12 +805,14 @@ class BaseProviderLM:
         ``file_id``.  On Gemini the file may come back ``pending``
         (processing); ``file_wait_ready`` covers that.
         """
+        self._require("files")
         resp = self._send(self._file_upload_request(request))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
         return self._file_info_from_body(resp.text())
 
     def file_get(self, file_id: str) -> FileInfo:
+        self._require("files")
         resp = self._send(self._file_get_request(file_id))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
@@ -717,6 +825,7 @@ class BaseProviderLM:
         by listing, never by client-side bookkeeping.  ``cursor`` is the
         opaque ``next_cursor`` of the previous page.
         """
+        self._require("files")
         resp = self._send(self._file_list_request(limit, cursor))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
@@ -726,6 +835,7 @@ class BaseProviderLM:
         """Delete a stored file.  Returning without an exception IS the
         confirmation; provider acknowledgement bodies differ and carry no
         canonical information."""
+        self._require("files")
         resp = self._send(self._file_delete_request(file_id))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
@@ -737,6 +847,7 @@ class BaseProviderLM:
         tool-generated only; OpenAI: by purpose; Gemini: generated only)
         and refuses the rest with a typed error — forwarded, not masked.
         """
+        self._require("files")
         resp = self._send(self._file_download_request(file_id))
         if resp.status >= 400:
             raise self.normalize_error(resp.status, resp.text())
@@ -747,6 +858,7 @@ class BaseProviderLM:
         snapshot (``ready`` or ``failed``) — check ``readiness``, mirroring
         BatchJob.wait's return-don't-raise convention.  Only Gemini uploads
         (large media) are ever pending; the first poll usually returns."""
+        self._require("files")
         import time as _time
 
         deadline = None if timeout is None else _time.monotonic() + timeout

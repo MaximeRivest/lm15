@@ -128,6 +128,9 @@ from .types import (
     ERROR_CODES,
 )
 
+# ── Access policies (auth by composition; spec/auth.md AUTH-10) ──────
+from .features import AccessPolicy, EndpointSupport
+
 # ── Errors ───────────────────────────────────────────────────────────
 from .errors import (
     LM15Error,
@@ -239,6 +242,7 @@ __all__ = [
     "InvalidRequestError", "ContextLengthError", "TimeoutError",
     "ServerError", "UnsupportedModelError", "UnsupportedFeatureError",
     "NotConfiguredError", "RETRYABLE_ERRORS",
+    "AccessPolicy", "EndpointSupport",
     # providers
     "OpenAILM", "OpenAIChatLM", "AnthropicLM", "GeminiLM", "ClaudeCodeLM", "OpenAICodexLM", "XaiLM",
     "ProviderLM",

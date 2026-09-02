@@ -104,10 +104,30 @@ class AsyncBaseProviderLM:
 
     # Mirrored metadata (subclasses override like their sync siblings).
     provider: str = "unknown"
-    supports: ClassVar[EndpointSupport] = EndpointSupport()
-    manifest: ClassVar[ProviderManifest] = ProviderManifest(
-        provider="unknown", supports=EndpointSupport()
-    )
+    manifest: ClassVar[ProviderManifest] = ProviderManifest(provider="unknown")
+
+    @property
+    def access(self) -> ProviderManifest:
+        """The bound access policy — the inner sync adapter's."""
+        return self._inner.access
+
+    @property
+    def supports(self) -> EndpointSupport:
+        return self._inner.access.supports
+
+    @classmethod
+    def has_stored_credential(cls) -> bool:
+        from ..access import has_stored_credential
+
+        return has_stored_credential(cls.manifest)
+
+    def _mirror_binding(self) -> None:
+        """Copy what the inner adapter's access binding resolved: the
+        provider string, the credential (a per-request provider for stored
+        logins, repr-suppressed), and the base URL the policy chose."""
+        self.provider = self._inner.provider
+        self.api_key = self._inner.api_key
+        self.base_url = self._inner.base_url
 
     async def complete(self, request: Request) -> Response:
         req = self._inner.build_request(request, stream=False)
@@ -445,10 +465,13 @@ async def _aiter_lines(resp: AsyncTransportResponse) -> AsyncIterator[bytes]:
 
 @dataclass(slots=True)
 class AsyncOpenAILM(AsyncBaseProviderLM):
-    api_key: Credential = field(repr=False)
+    api_key: Credential | None = field(default=None, repr=False)
     transport: AsyncTransport = field(default_factory=default_async_transport)
     base_url: str = "https://api.openai.com/v1"
     profile: Any | None = None
+    access: ProviderManifest | None = field(default=None, repr=False)
+    credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
+    account_id: str | None = None
 
     async def live(self, config: LiveConfig):
         # Native async websocket (websockets.asyncio) — not a thread
@@ -470,8 +493,7 @@ class AsyncOpenAILM(AsyncBaseProviderLM):
             decode_event=inner._decode_live_server_event,
         )
 
-    provider: str = "openai"
-    supports: ClassVar[EndpointSupport] = OpenAILM.supports
+    provider: str = field(default="openai", init=False)
     manifest: ClassVar[ProviderManifest] = OpenAILM.manifest
 
     _inner: OpenAILM = field(init=False, repr=False, compare=False)
@@ -482,18 +504,23 @@ class AsyncOpenAILM(AsyncBaseProviderLM):
             transport=_ForbiddenTransport(),
             base_url=self.base_url,
             profile=self.profile,
+            access=self.access,
+            credentials_path=self.credentials_path,
+            account_id=self.account_id,
         )
+        self._mirror_binding()
 
 
 @dataclass(slots=True)
 class AsyncAnthropicLM(AsyncBaseProviderLM):
-    api_key: Credential = field(repr=False)
+    api_key: Credential | None = field(default=None, repr=False)
     transport: AsyncTransport = field(default_factory=default_async_transport)
     base_url: str = "https://api.anthropic.com/v1"
     api_version: str = "2023-06-01"
+    access: ProviderManifest | None = field(default=None, repr=False)
+    credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
 
-    provider: str = "anthropic"
-    supports: ClassVar[EndpointSupport] = AnthropicLM.supports
+    provider: str = field(default="anthropic", init=False)
     manifest: ClassVar[ProviderManifest] = AnthropicLM.manifest
 
     _inner: AnthropicLM = field(init=False, repr=False, compare=False)
@@ -504,18 +531,22 @@ class AsyncAnthropicLM(AsyncBaseProviderLM):
             transport=_ForbiddenTransport(),
             base_url=self.base_url,
             api_version=self.api_version,
+            access=self.access,
+            credentials_path=self.credentials_path,
         )
+        self._mirror_binding()
 
 
 @dataclass(slots=True)
 class AsyncGeminiLM(AsyncBaseProviderLM):
-    api_key: Credential = field(repr=False)
+    api_key: Credential | None = field(default=None, repr=False)
     transport: AsyncTransport = field(default_factory=default_async_transport)
     base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     upload_base_url: str = "https://generativelanguage.googleapis.com/upload/v1beta"
+    access: ProviderManifest | None = field(default=None, repr=False)
+    credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
 
-    provider: str = "gemini"
-    supports: ClassVar[EndpointSupport] = GeminiLM.supports
+    provider: str = field(default="gemini", init=False)
     manifest: ClassVar[ProviderManifest] = GeminiLM.manifest
 
     _inner: GeminiLM = field(init=False, repr=False, compare=False)
@@ -526,7 +557,10 @@ class AsyncGeminiLM(AsyncBaseProviderLM):
             transport=_ForbiddenTransport(),
             base_url=self.base_url,
             upload_base_url=self.upload_base_url,
+            access=self.access,
+            credentials_path=self.credentials_path,
         )
+        self._mirror_binding()
 
     async def live(self, config: LiveConfig):
         # Native async twin of GeminiLM.live: same pure setup frame,
@@ -551,13 +585,14 @@ class AsyncGeminiLM(AsyncBaseProviderLM):
 
 @dataclass(slots=True)
 class AsyncOpenAIChatLM(AsyncBaseProviderLM):
-    api_key: Credential = field(repr=False)
+    api_key: Credential | None = field(default=None, repr=False)
     transport: AsyncTransport = field(default_factory=default_async_transport)
     base_url: str = _mirror_default(OpenAIChatLM, "base_url")
     compat: Any | None = None
+    access: ProviderManifest | None = field(default=None, repr=False)
+    credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
 
-    provider: str = "openai_chat"
-    supports: ClassVar[EndpointSupport] = OpenAIChatLM.supports
+    provider: str = field(default="openai_chat", init=False)
     manifest: ClassVar[ProviderManifest] = OpenAIChatLM.manifest
 
     _inner: OpenAIChatLM = field(init=False, repr=False, compare=False)
@@ -568,7 +603,10 @@ class AsyncOpenAIChatLM(AsyncBaseProviderLM):
             transport=_ForbiddenTransport(),
             base_url=self.base_url,
             compat=self.compat,
+            access=self.access,
+            credentials_path=self.credentials_path,
         )
+        self._mirror_binding()
         # The sync sibling's __post_init__ resolves compat presets (and may
         # supply that server's default base_url); mirror the resolved values.
         self.base_url = self._inner.base_url
@@ -596,7 +634,6 @@ class AsyncClaudeCodeLM(AsyncBaseProviderLM):
 
     # Not constructor params on the sync sibling either (it is not a dataclass).
     provider: str = field(default="claude-code", init=False)
-    supports: ClassVar[EndpointSupport] = ClaudeCodeLM.supports
     manifest: ClassVar[ProviderManifest] = ClaudeCodeLM.manifest
 
     _inner: ClaudeCodeLM = field(init=False, repr=False, compare=False)
@@ -662,7 +699,6 @@ class AsyncOpenAICodexLM(AsyncBaseProviderLM):
 
     # Not constructor params on the sync sibling either (it is not a dataclass).
     provider: str = field(default="openai-codex", init=False)
-    supports: ClassVar[EndpointSupport] = OpenAICodexLM.supports
     manifest: ClassVar[ProviderManifest] = OpenAICodexLM.manifest
 
     _inner: OpenAICodexLM = field(init=False, repr=False, compare=False)
@@ -742,7 +778,6 @@ class AsyncXaiLM(AsyncBaseProviderLM):
 
     # Not constructor params on the sync sibling either.
     provider: str = field(default="xai", init=False)
-    supports: ClassVar[EndpointSupport] = XaiLM.supports
     manifest: ClassVar[ProviderManifest] = XaiLM.manifest
     # Same offline probe as the sync sibling (oauth-unless-explicit policy).
     has_stored_credential: ClassVar = XaiLM.has_stored_credential

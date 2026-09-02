@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Iterator
@@ -19,7 +20,8 @@ from ..errors import (
     canonical_error_code,
     map_http_error,
 )
-from ..features import EndpointSupport, ProviderManifest
+from ..access import ANTHROPIC_API, auth_header
+from ..features import ProviderManifest
 from ..sse import SSEEvent
 from ..transports import TransportRequest
 from ..types import (
@@ -221,23 +223,34 @@ def _citation_from_anthropic(citation: dict[str, Any]) -> CitationPart | None:
     return CitationPart(url=url_s, title=title_s, text=text_s)
 
 
+_DEFAULT_BASE_URL = "https://api.anthropic.com/v1"
+
+
 @dataclass(slots=True)
 class AnthropicLM(BaseProviderLM):
-    api_key: Credential = field(repr=False)
-    transport: SyncTransport = field(default_factory=default_transport)
-    base_url: str = "https://api.anthropic.com/v1"
-    api_version: str = "2023-06-01"
+    """Anthropic Messages dialect, bound to an access policy.
 
-    provider: str = "anthropic"
-    supports: ClassVar[EndpointSupport] = EndpointSupport(
-        complete=True, stream=True, files=True, batches=True, models=True
-    )
-    manifest: ClassVar[ProviderManifest] = ProviderManifest(
-        provider="anthropic",
-        supports=supports,
-        auth_modes=("x-api-key",),
-        env_keys=("ANTHROPIC_API_KEY",),
-    )
+    ``access`` defaults to the API-key policy (``lm15.access.ANTHROPIC_API``);
+    ``lm15.access.CLAUDE_CODE`` binds the same dialect to a local Claude
+    Code login (``ClaudeCodeLM`` is that binding under a name). The policy
+    is consulted at exactly these points: the auth header, static headers
+    (``anthropic-beta`` is joined with the dialect's own betas), the system
+    prefix, the login hint on errors, and the endpoint surfaces.
+    """
+
+    api_key: Credential | None = field(default=None, repr=False)
+    transport: SyncTransport = field(default_factory=default_transport)
+    base_url: str = _DEFAULT_BASE_URL
+    api_version: str = "2023-06-01"
+    access: ProviderManifest | None = None
+    credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
+
+    provider: str = field(default="anthropic", init=False)
+    account_id: str | None = field(default=None, init=False, repr=False)
+    manifest: ClassVar[ProviderManifest] = ANTHROPIC_API
+
+    def __post_init__(self) -> None:
+        self._bind_access(self.access, credentials_path=self.credentials_path, default_base_url=_DEFAULT_BASE_URL)
 
     _error_type_map: ClassVar[dict[str, type[ProviderError]]] = {
         "authentication_error": AuthError,
@@ -331,26 +344,35 @@ class AnthropicLM(BaseProviderLM):
             msg = body.strip()[:500] or f"HTTP {status}"
             err_type = ""
             request_id = ""
-        return map_http_error(
+        return self._with_login_hint(map_http_error(
             status,
             msg,
             provider=self.provider,
-            env_keys=self.manifest.env_keys,
+            env_keys=self.access.env_keys,
             provider_code=err_type or None,
             request_id=request_id or None,
-        )
+        ))
 
     def _headers(self, request: Request | None = None) -> dict[str, str]:
+        name, value = auth_header(self.access, resolve_credential(self.api_key), api_key_header="x-api-key")
         headers = {
-            "x-api-key": resolve_credential(self.api_key),
+            name: value,
             "anthropic-version": self.api_version,
             "content-type": "application/json",
         }
+        betas: list[str] = []
+        for key, static in self.access.headers:
+            if key.lower() == "anthropic-beta":
+                betas.extend(b for b in static.split(",") if b)
+            else:
+                headers[key] = static
         if request is not None and any(
             isinstance(tool, BuiltinTool) and tool.name == "code_execution"
             for tool in request.tools
         ):
-            headers["anthropic-beta"] = "code-execution-2025-05-22"
+            betas.append("code-execution-2025-05-22")
+        if betas:
+            headers["anthropic-beta"] = ",".join(betas)
         return headers
 
     # ─── Request serialization ──────────────────────────────────────
@@ -584,6 +606,18 @@ class AnthropicLM(BaseProviderLM):
         if request.config.extensions:
             passthrough = {k: v for k, v in request.config.extensions.items() if k != "prompt_caching"}
             payload.update(passthrough)
+        if self.access.system_prefix:
+            # The access path requires this text first in the system prompt
+            # (Claude Code's backend checks for it); the caller's system
+            # follows, cache markers and all.
+            prefix = {"type": "text", "text": self.access.system_prefix}
+            existing = payload.get("system")
+            if existing is None:
+                payload["system"] = [prefix]
+            elif isinstance(existing, list):
+                payload["system"] = [prefix, *existing]
+            else:
+                payload["system"] = [prefix, {"type": "text", "text": str(existing)}]
         return payload
 
     def build_request(self, request: Request, stream: bool) -> TransportRequest:

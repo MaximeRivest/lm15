@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import struct
 import urllib.parse
 import uuid
@@ -23,7 +24,8 @@ from ..errors import (
     canonical_error_code,
     map_http_error,
 )
-from ..features import EndpointSupport, ProviderManifest
+from ..access import GEMINI_API
+from ..features import ProviderManifest
 from ..live import WebSocketLiveSession, require_websocket_sync_connect
 from ..sse import SSEEvent
 from ..transports import TransportRequest
@@ -364,32 +366,24 @@ def _gemini_citations(candidate: dict[str, Any], full_text: str) -> list[Citatio
     return citations
 
 
+_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+
+
 @dataclass(slots=True)
 class GeminiLM(BaseProviderLM):
-    api_key: Credential = field(repr=False)
+    api_key: Credential | None = field(default=None, repr=False)
     transport: SyncTransport = field(default_factory=default_transport)
-    base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    base_url: str = _DEFAULT_BASE_URL
     upload_base_url: str = "https://generativelanguage.googleapis.com/upload/v1beta"
+    access: ProviderManifest | None = field(default=None, repr=False)
+    credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
 
-    provider: str = "gemini"
-    supports: ClassVar[EndpointSupport] = EndpointSupport(
-        complete=True,
-        stream=True,
-        live=True,
-        files=True,
-        batches=True,
-        images=True,
-        speech=True,
-        video=True,
-        models=True,
-        caches=True,
-    )
-    manifest: ClassVar[ProviderManifest] = ProviderManifest(
-        provider="gemini",
-        supports=supports,
-        auth_modes=("query-api-key", "x-goog-api-key"),
-        env_keys=("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-    )
+    provider: str = field(default="gemini", init=False)
+    account_id: str | None = field(default=None, init=False, repr=False)
+    manifest: ClassVar[ProviderManifest] = GEMINI_API
+
+    def __post_init__(self) -> None:
+        self._bind_access(self.access, credentials_path=self.credentials_path, default_base_url=_DEFAULT_BASE_URL)
 
     _error_status_map: ClassVar[dict[str, type[ProviderError]]] = {
         "INVALID_ARGUMENT": InvalidRequestError,
@@ -522,7 +516,7 @@ class GeminiLM(BaseProviderLM):
             status,
             msg,
             provider=self.provider,
-            env_keys=self.manifest.env_keys,
+            env_keys=self.access.env_keys,
             provider_code=err_status or None,
         )
 

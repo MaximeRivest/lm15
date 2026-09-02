@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import urllib.parse
 from dataclasses import dataclass, field
@@ -12,6 +13,7 @@ from ..errors import (
     BillingError,
     ContextLengthError,
     InvalidRequestError,
+    NotConfiguredError,
     ProviderError,
     RateLimitError,
     ServerError,
@@ -21,7 +23,10 @@ from ..errors import (
     canonical_error_code,
     map_http_error,
 )
-from ..features import EndpointSupport, ProviderManifest
+from ..access import OPENAI_API, auth_header
+from ..auth import extract_chatgpt_account_id
+from ..features import ProviderManifest
+from ..result import materialize_response
 from ..live import WebSocketLiveSession, require_websocket_sync_connect
 from ..profiles import ProviderProfile, ResolvedOpenAIResponsesCompat, resolve_openai_responses_compat
 from ..sse import SSEEvent
@@ -327,33 +332,58 @@ def _citation_delta_from_openai_annotation(
     )
 
 
+_DEFAULT_BASE_URL = "https://api.openai.com/v1"
+CODEX_BACKEND = "chatgpt-codex"
+
+
+def _is_codex(lm: BaseProviderLM) -> bool:
+    # A function, not a method: OpenAIChatLM borrows normalize_error.
+    return lm.access.backend == CODEX_BACKEND
+MODEL_LIST_HINT = "List the models your subscription accepts: call .list_models() on this client."
+
+
 @dataclass(slots=True)
 class OpenAILM(BaseProviderLM):
-    api_key: Credential = field(repr=False)
-    transport: SyncTransport = field(default_factory=default_transport)
-    base_url: str = "https://api.openai.com/v1"
-    profile: ProviderProfile | None = None
+    """OpenAI Responses dialect, bound to an access policy.
 
-    provider: str = "openai"
-    supports: ClassVar[EndpointSupport] = EndpointSupport(
-        complete=True,
-        stream=True,
-        live=True,
-        files=True,
-        batches=True,
-        images=True,
-        speech=True,
-        video=True,
-        responses_api=True,
-        models=True,
-    )
-    manifest: ClassVar[ProviderManifest] = ProviderManifest(
-        provider="openai",
-        supports=supports,
-        auth_modes=("bearer",),
-        enterprise_variants=("azure-openai",),
-        env_keys=("OPENAI_API_KEY",),
-    )
+    ``access`` defaults to the API-key policy (``lm15.access.OPENAI_API``);
+    ``lm15.access.OPENAI_CODEX`` binds the same dialect to the ChatGPT Codex
+    backend on a local Codex CLI login (``OpenAICodexLM`` is that binding
+    under a name). Policy consult points: the auth header and static
+    headers, the ``chatgpt-account-id`` header when the credential carries
+    an account, the login hint on errors, the endpoint surfaces, and the
+    ``backend`` switch at four stated places — payload defaults
+    (instructions prefix, ``store: false``, streaming-only, no max-token
+    knob), streaming-first ``complete``, the ``{"detail": ...}`` error
+    envelope, and the ``/models`` endpoint shape.
+    """
+
+    api_key: Credential | None = field(default=None, repr=False)
+    transport: SyncTransport = field(default_factory=default_transport)
+    base_url: str = _DEFAULT_BASE_URL
+    profile: ProviderProfile | None = None
+    access: ProviderManifest | None = field(default=None, repr=False)
+    credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
+    account_id: str | None = None
+
+    provider: str = field(default="openai", init=False)
+    manifest: ClassVar[ProviderManifest] = OPENAI_API
+
+    def __post_init__(self) -> None:
+        self._bind_access(self.access, credentials_path=self.credentials_path, default_base_url=_DEFAULT_BASE_URL)
+        if self.access.backend == CODEX_BACKEND:
+            if not self.account_id and isinstance(self.api_key, str):
+                self.account_id = extract_chatgpt_account_id(self.api_key)
+            if not self.account_id:
+                raise NotConfiguredError(
+                    "No ChatGPT account id found in the Codex OAuth token.",
+                    provider=self.provider,
+                    credential_hint=self.access.login_hint,
+                )
+
+    @property
+    def _codex(self) -> bool:
+        return _is_codex(self)
 
     _response_error_code_map: ClassVar[dict[str, type[ProviderError]]] = {
         "server_error": ServerError,
@@ -410,10 +440,13 @@ class OpenAILM(BaseProviderLM):
         )
 
     def _headers(self, content_type: str = "application/json") -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {resolve_credential(self.api_key)}",
-            "Content-Type": content_type,
-        }
+        name, value = auth_header(self.access, resolve_credential(self.api_key))
+        headers = {name: value, "Content-Type": content_type}
+        if self._codex and self.account_id:
+            headers["chatgpt-account-id"] = self.account_id
+        for key, static in self.access.headers:
+            headers[key] = static
+        return headers
 
     @staticmethod
     def _is_model_error(message: str, *codes: str) -> bool:
@@ -446,6 +479,14 @@ class OpenAILM(BaseProviderLM):
 
     def normalize_error(self, status: int, body: str) -> ProviderError:
         """Extract message from OpenAI error shape."""
+        if _is_codex(self):
+            # The ChatGPT Codex backend does not always use the OpenAI error
+            # envelope ({"error": {...}}); rejections arrive as
+            # {"detail": "..."} (e.g. an unknown model slug -> HTTP 400 with
+            # a plain-text reason). Recover and classify that first.
+            detail_error = self._normalize_detail_error(status, body)
+            if detail_error is not None:
+                return detail_error
         try:
             data = json.loads(body)
             err = data.get("error", {}) if isinstance(data, dict) else {}
@@ -497,13 +538,28 @@ class OpenAILM(BaseProviderLM):
         except Exception:
             msg = body.strip()[:500] or f"HTTP {status}"
             provider_code = None
-        return map_http_error(
+        return self._with_login_hint(map_http_error(
             status,
             msg,
             provider=self.provider,
-            env_keys=self.manifest.env_keys,
+            env_keys=self.access.env_keys,
             provider_code=provider_code,
-        )
+        ))
+
+    def _normalize_detail_error(self, status: int, body: str) -> ProviderError | None:
+        try:
+            data = json.loads(body)
+        except ValueError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        detail = data.get("detail")
+        if not isinstance(detail, str) or not detail.strip():
+            return None
+        detail = detail.strip()
+        if self._is_model_error(detail):
+            return self._provider_error(UnsupportedModelError, f"{detail}\n{MODEL_LIST_HINT}", status=status)
+        return self._with_login_hint(map_http_error(status, detail, provider=self.provider))
 
     # ─── Request serialization ──────────────────────────────────────
 
@@ -782,6 +838,17 @@ class OpenAILM(BaseProviderLM):
             }
             passthrough = {k: v for k, v in request.config.extensions.items() if k not in reserved}
             payload.update(passthrough)
+        if self._codex:
+            # Backend facts (live 2026-08-31): the Codex backend is
+            # streaming-only, rejects store=true and every max-token knob,
+            # and expects instructions to be present.
+            if self.access.system_prefix:
+                payload.setdefault("instructions", self.access.system_prefix)
+            payload["store"] = False
+            payload["stream"] = True
+            payload.pop("max_output_tokens", None)
+            payload.pop("max_completion_tokens", None)
+            payload.pop("max_tokens", None)
         return payload
 
     def build_request(self, request: Request, stream: bool) -> TransportRequest:
@@ -1045,10 +1112,20 @@ class OpenAILM(BaseProviderLM):
 
     # ─── Streaming over OpenAI Realtime for live models ──────────────
 
+    def complete(self, request: Request) -> Response:
+        if self._codex:
+            # Streaming-first backend: materialize the stream so callers get
+            # the same synchronous complete() surface.
+            return materialize_response(self.stream(request), request)
+        return BaseProviderLM.complete(self, request)
+
     def stream(self, request: Request) -> Iterator[StreamEvent]:
-        if self._should_use_live_completion(request):
+        if not self._codex and self._should_use_live_completion(request):
             yield from self._stream_via_live_completion(request)
             return
+        # BaseProviderLM.stream applies the MAP-3 coalescer: the Codex
+        # backend sends response.completed (usage) and then [DONE], two
+        # adapter-level end frames merged into one.
         yield from BaseProviderLM.stream(self, request)
 
     def _should_use_live_completion(self, request: Request) -> bool:
@@ -1393,15 +1470,28 @@ class OpenAILM(BaseProviderLM):
     # ─── Other endpoints ────────────────────────────────────────────
 
     def _models_request(self):
+        params = None
+        if self._codex:
+            # The Codex backend's /models requires a client_version query
+            # parameter (a Codex CLI release); the policy carries it.
+            params = {"client_version": self.access.backend_options.get("client_version", "")}
         return make_json_request(
             method="GET",
             url=f"{self.base_url.rstrip('/')}/models",
+            params=params,
             headers=self._headers(),
             read_timeout=30.0,
         )
 
     def _models_from_body(self, body: str):
         data = json.loads(body)
+        if self._codex:
+            # The Codex backend's usable model names are the `slug` values,
+            # and the list lives under "models" (not the OpenAI "data" envelope).
+            entries = data.get("models") if isinstance(data, dict) else None
+            return model_infos_from_entries(
+                entries, provider=self.provider, api_family="openai_responses", id_of=lambda entry: entry.get("slug"),
+            )
         entries = data.get("data") if isinstance(data, dict) else None
         return model_infos_from_entries(
             entries,

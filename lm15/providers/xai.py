@@ -36,37 +36,27 @@ import json
 import os
 from typing import Any, ClassVar
 
-from ..auth import XAI_LOGIN_HINT, get_xai_access_token
-from ..errors import ProviderError, UnsupportedFeatureError, with_credential_hint
-from ..features import EndpointSupport, ProviderManifest
+from ..access import DEFAULT_XAI_BASE_URL, XAI
+from ..errors import ProviderError, UnsupportedFeatureError
+from ..features import ProviderManifest
 from ..transports import TransportRequest
 from ..types import ImageGenerationRequest, ImageGenerationResponse, ImagePart, Request, Usage, VideoGenerationRequest, VideoJobInfo, VideoPart
 from .base import Credential, HttpResponse, SyncTransport, default_transport
 from .common import make_json_request
 from .openai_chat import OpenAIChatLM
 
-DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1"
-
 
 class XaiLM(OpenAIChatLM):
-    """Chat Completions adapter for xAI, with subscription OAuth fallback."""
+    """Chat Completions adapter for xAI, with subscription OAuth fallback.
 
-    supports: ClassVar[EndpointSupport] = EndpointSupport(complete=True, stream=True, models=True, images=True, video=True)
-    manifest: ClassVar[ProviderManifest] = ProviderManifest(
-        provider="xai",
-        supports=supports,
-        auth_modes=("bearer", "xai-oauth"),
-        env_keys=("XAI_API_KEY",),
-        credential_policy="oauth-unless-explicit",
-    )
+    xAI is a provider, not an access path: its image and video wire, and
+    its refusals (reasoning off, logprobs, the MAP-8 cells), are provider
+    facts and live here. Only the credential path is composed: the
+    ``lm15.access.XAI`` policy carries the ``oauth-unless-explicit`` chain,
+    the login hint, and the endpoint surfaces.
+    """
 
-    @classmethod
-    def has_stored_credential(cls) -> bool:
-        """Offline probe the router uses for the ``oauth-unless-explicit``
-        policy: is a usable subscription login stored locally?"""
-        from ..auth import usable_xai_credential
-
-        return usable_xai_credential()
+    manifest: ClassVar[ProviderManifest] = XAI
 
     def __init__(
         self,
@@ -76,25 +66,13 @@ class XaiLM(OpenAIChatLM):
         transport: SyncTransport | None = None,
         base_url: str = DEFAULT_XAI_BASE_URL,
     ) -> None:
-        self._oauth = api_key is None
-        if api_key is not None:
-            credential: Credential = api_key
-        else:
-            # Validate now — get_xai_access_token raises typed, re-login-guided
-            # errors (NotConfiguredError / AuthError) — then re-resolve per
-            # request so a long-lived client always sends a fresh token
-            # (rotations on disk are picked up, expiry refreshes and persists).
-            get_xai_access_token(credentials_path)
-
-            def credential() -> str:
-                return get_xai_access_token(credentials_path)
-
         super().__init__(
-            api_key=credential,
+            api_key=api_key,
             transport=transport or default_transport(),
             base_url=base_url,
             compat="xai",
-            provider="xai",
+            access=XAI,
+            credentials_path=credentials_path,
         )
 
     def _payload(self, request: Request, stream: bool) -> dict[str, Any]:
@@ -278,10 +256,10 @@ class XaiLM(OpenAIChatLM):
                 body = json.dumps({"error": {"message": data["error"], "code": data.get("code")}})
         except ValueError:
             pass
-        error = super().normalize_error(status, body)
         # Auth failures on the subscription path guide the user back to
-        # login; on the API-key path the generic message already fits.
-        return with_credential_hint(error, XAI_LOGIN_HINT) if self._oauth else error
+        # login (the access policy's hint, applied by the shared mapping
+        # when the stored login was the rung that won).
+        return super().normalize_error(status, body)
 
 
 # ─── Media generation (captured live 2026-09-01) ─────────────────────

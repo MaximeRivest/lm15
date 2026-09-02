@@ -1,36 +1,30 @@
+"""
+lm15.providers.claude_code — the Anthropic dialect on a Claude Code login.
+
+``ClaudeCodeLM`` is a *name*, not a behaviour: it is ``AnthropicLM`` bound
+to ``lm15.access.CLAUDE_CODE``. Every wire difference from an API-key
+client — bearer auth, the ``anthropic-beta`` and ``x-app``/``user-agent``
+headers, the required system-prompt prefix, the re-login hint on auth
+errors, no files/batch/live — is a field of that policy, consulted by the
+dialect at stated points. A port needs the policy table and the dialect,
+not this class.
+"""
+
 from __future__ import annotations
 
 import os
 from typing import ClassVar
 
-from ..auth import (
-    CLAUDE_CODE_LOGIN_HINT,
-    get_claude_code_access_token,
-)
-from ..errors import ProviderError, UnsupportedFeatureError, with_credential_hint
-from ..features import EndpointSupport, ProviderManifest
-from ..protocols import LiveSession
-from ..types import BatchEntry, BatchJobInfo, BatchRequest, BuiltinTool, FileInfo, FilePage, FileUploadRequest, LiveConfig, Request
+from ..access import CLAUDE_CODE, DEFAULT_CLAUDE_CODE_SYSTEM_PROMPT, DEFAULT_CLAUDE_CODE_VERSION  # noqa: F401
+from ..features import ProviderManifest
 from .anthropic import AnthropicLM
-from .base import Credential, SyncTransport, default_transport, resolve_credential
-
-DEFAULT_CLAUDE_CODE_VERSION = "2.1.170"
-DEFAULT_CLAUDE_CODE_SYSTEM_PROMPT = "You are Claude Code, Anthropic's official CLI for Claude."
+from .base import Credential, SyncTransport, default_transport
 
 
 class ClaudeCodeLM(AnthropicLM):
     """Anthropic Messages adapter authenticated with local Claude Code OAuth."""
 
-    # models=True: the Anthropic /v1/models hooks are inherited and work with
-    # the OAuth headers (validated live 2026-08-31, HTTP 200).
-    supports: ClassVar[EndpointSupport] = EndpointSupport(complete=True, stream=True, models=True)
-    manifest: ClassVar[ProviderManifest] = ProviderManifest(
-        provider="claude-code",
-        supports=supports,
-        auth_modes=("claude-code-oauth", "bearer-oauth"),
-        env_keys=(),
-        credential_policy="oauth",
-    )
+    manifest: ClassVar[ProviderManifest] = CLAUDE_CODE
 
     def __init__(
         self,
@@ -42,25 +36,17 @@ class ClaudeCodeLM(AnthropicLM):
         api_version: str = "2023-06-01",
         claude_code_version: str = DEFAULT_CLAUDE_CODE_VERSION,
     ) -> None:
-        if api_key:
-            credential: Credential = api_key
-        else:
-            # Validate now — get_claude_code_access_token raises typed,
-            # re-login-guided errors (NotConfiguredError / AuthError) — then
-            # re-resolve per request so a long-lived client always sends a
-            # fresh token (rotations on disk are picked up, expiry refreshes).
-            get_claude_code_access_token(credentials_path)
-
-            def credential() -> str:
-                return get_claude_code_access_token(credentials_path)
-
         self.claude_code_version = claude_code_version
+        policy = CLAUDE_CODE
+        if claude_code_version != DEFAULT_CLAUDE_CODE_VERSION:
+            policy = policy.with_headers({"user-agent": f"claude-cli/{claude_code_version}"})
         super().__init__(
-            api_key=credential,
+            api_key=api_key,
             transport=transport or default_transport(),
             base_url=base_url,
             api_version=api_version,
-            provider="claude-code",
+            access=policy,
+            credentials_path=credentials_path,
         )
 
     @classmethod
@@ -78,79 +64,3 @@ class ClaudeCodeLM(AnthropicLM):
             base_url=base_url,
             claude_code_version=claude_code_version,
         )
-
-    def __repr__(self) -> str:  # never leak the OAuth token (dataclass repr would)
-        return (
-            f"{type(self).__name__}(provider={self.provider!r}, "
-            f"base_url={self.base_url!r}, api_key=<redacted>)"
-        )
-
-    def normalize_error(self, status: int, body: str) -> ProviderError:
-        # Same canonical mapping as AnthropicLM, but auth failures guide the
-        # user to re-login (there is no env var for subscription auth).
-        return with_credential_hint(super().normalize_error(status, body), CLAUDE_CODE_LOGIN_HINT)
-
-    def _headers(self, request: Request | None = None) -> dict[str, str]:
-        betas = ["claude-code-20250219", "oauth-2025-04-20"]
-        if request is not None and any(
-            isinstance(tool, BuiltinTool) and tool.name == "code_execution" for tool in request.tools
-        ):
-            betas.append("code-execution-2025-05-22")
-        return {
-            "Authorization": f"Bearer {resolve_credential(self.api_key)}",
-            "anthropic-version": self.api_version,
-            "content-type": "application/json",
-            "anthropic-dangerous-direct-browser-access": "true",
-            "anthropic-beta": ",".join(betas),
-            "x-app": "cli",
-            "user-agent": f"claude-cli/{self.claude_code_version}",
-        }
-
-    def _payload(self, request: Request, stream: bool) -> dict[str, object]:
-        payload = super()._payload(request, stream)
-        default_system = {"type": "text", "text": DEFAULT_CLAUDE_CODE_SYSTEM_PROMPT}
-        existing = payload.get("system")
-        if existing is None:
-            payload["system"] = [default_system]
-        elif isinstance(existing, list):
-            payload["system"] = [default_system, *existing]
-        else:
-            payload["system"] = [default_system, {"type": "text", "text": str(existing)}]
-        return payload
-
-    # Files are an API-key surface; the subscription credential does not
-    # carry them. Block every inherited driver, not just upload.
-    def file_upload(self, request: FileUploadRequest) -> FileInfo:
-        raise UnsupportedFeatureError("claude-code: files are not supported", provider=self.provider)
-
-    def file_get(self, file_id: str) -> FileInfo:
-        raise UnsupportedFeatureError("claude-code: files are not supported", provider=self.provider)
-
-    def file_list(self, limit: int = 20, cursor: str | None = None) -> FilePage:
-        raise UnsupportedFeatureError("claude-code: files are not supported", provider=self.provider)
-
-    def file_delete(self, file_id: str) -> None:
-        raise UnsupportedFeatureError("claude-code: files are not supported", provider=self.provider)
-
-    def file_download(self, file_id: str) -> bytes:
-        raise UnsupportedFeatureError("claude-code: files are not supported", provider=self.provider)
-
-    # Batch is an API-key surface; the subscription credential does not
-    # carry it. Block every inherited driver, not just submit.
-    def batch_submit(self, request: BatchRequest) -> BatchJobInfo:
-        raise UnsupportedFeatureError("claude-code: batch is not supported", provider=self.provider)
-
-    def batch_status(self, batch_id: str) -> BatchJobInfo:
-        raise UnsupportedFeatureError("claude-code: batch is not supported", provider=self.provider)
-
-    def batch_results(self, batch_id: str) -> tuple[BatchEntry, ...]:
-        raise UnsupportedFeatureError("claude-code: batch is not supported", provider=self.provider)
-
-    def batch_cancel(self, batch_id: str) -> BatchJobInfo:
-        raise UnsupportedFeatureError("claude-code: batch is not supported", provider=self.provider)
-
-    def batch_list(self, limit: int = 20) -> tuple[BatchJobInfo, ...]:
-        raise UnsupportedFeatureError("claude-code: batch is not supported", provider=self.provider)
-
-    def live(self, config: LiveConfig) -> LiveSession:
-        raise UnsupportedFeatureError("claude-code: live is not supported", provider=self.provider)

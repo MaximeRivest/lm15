@@ -155,6 +155,30 @@ If you need that key's account — team billing, its rate limits — pass it
 explicitly. When in doubt, run `lm15.doctor.explain_auth("xai")`: it
 shows exactly which credential rung won and which were shadowed.
 
+### What a subscription adapter is
+
+`ClaudeCodeLM` and `OpenAICodexLM` are names, not separate implementations.
+Each is a dialect adapter bound to an **access policy**: a plain value that
+says which credential travels in which header, which static headers ride
+along, which endpoint surfaces the login carries, and which backend
+variant the dialect must switch on. The same wire comes out of the long
+form:
+
+```python
+from lm15 import AnthropicLM, OpenAILM
+from lm15.access import CLAUDE_CODE, OPENAI_CODEX
+
+lm = AnthropicLM(access=CLAUDE_CODE)            # == ClaudeCodeLM()
+lm = OpenAILM(access=OPENAI_CODEX)              # == OpenAICodexLM()
+print(lm.access.provider, lm.supports.files)    # 'openai-codex' False
+```
+
+This is what lets a Go or Rust port carry the same facts as a table
+instead of a class hierarchy. The policy table and its consult points are
+normative (contract `spec/auth.md` AUTH-10). Custom policies are ordinary
+values too — `CLAUDE_CODE.with_headers({...})` is how `claude_code_version`
+is applied.
+
 ## Keyless local servers
 
 `ollama:`, `vllm:`, and `sglang:` model strings need no configuration —
