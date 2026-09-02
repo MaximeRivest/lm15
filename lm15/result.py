@@ -169,10 +169,31 @@ class StreamAccumulator:
                 self.part_continuation.setdefault(delta.part_index, []).append(state)
 
     def response(self) -> Response:
-        """Build a complete Response from the accumulated state."""
+        """Build a complete Response from the accumulated state.
+
+        Raises :class:`StreamAssemblyError` when a tool call's fragments
+        never carried a name (MAP-9): the error carries everything else
+        that did assemble as ``partial``.
+        """
+        unnamed = sorted(
+            idx for idx, meta in self.tool_call_meta.items() if not meta.get("name")
+        )
+        if unnamed:
+            partial = self._assemble(skip=frozenset(unnamed))
+            from .errors import StreamAssemblyError
+
+            raise StreamAssemblyError(
+                f"tool call at part {unnamed[0]} arrived without a name; the adapter "
+                "that produced this stream must set ToolCallDelta.name on the call's "
+                "first fragment (MAP-9: lm15 does not guess which tool the model meant)",
+                partial=partial,
+                part_index=unnamed[0],
+            )
+        return self._assemble(skip=frozenset())
+
+    def _assemble(self, *, skip: frozenset[int]) -> Response:
         parts: list[Part] = []
 
-        tool_names = [t.name for t in self.request.tools if t.type == "function"]
         part_indexes = sorted(
             set(self.thinking_parts)
             | set(self.text_parts)
@@ -183,8 +204,9 @@ class StreamAccumulator:
             | set(self.part_continuation)
         )
 
-        for pos, idx in enumerate(part_indexes):
+        for idx in part_indexes:
             continuation = tuple(self.part_continuation.get(idx, ()))
+            has_tool = idx in self.tool_call_meta and idx not in skip
             if idx in self.thinking_parts:
                 parts.append(ThinkingPart(text="".join(self.thinking_parts[idx]), continuation=continuation))
             if idx in self.text_parts:
@@ -201,23 +223,18 @@ class StreamAccumulator:
                     parts.append(make_audio(data=raw_data, media_type=media_type, continuation=continuation))
             if idx in self.citation_parts:
                 parts.extend(replace(part, continuation=continuation) for part in self.citation_parts[idx])
-            if idx in self.tool_call_meta:
+            if has_tool:
                 meta = self.tool_call_meta[idx]
                 payload = meta.get("input")
                 if not isinstance(payload, dict):
                     payload = _parse_json_best_effort(self.tool_call_raw.get(idx, ""))
-                tc_name = meta.get("name")
-                if not tc_name:
-                    if len(tool_names) == 1:
-                        tc_name = tool_names[0]
-                    elif pos < len(tool_names):
-                        tc_name = tool_names[pos]
-                    else:
-                        tc_name = "tool"
+                # A missing id gets an lm15-minted correlator (Gemini sends
+                # none); a missing name is never minted — see response().
                 tc_id = str(meta.get("id") or f"tool_call_{idx}")
-                parts.append(ToolCallPart(id=tc_id, name=str(tc_name), input=payload, continuation=continuation))
+                parts.append(ToolCallPart(id=tc_id, name=str(meta["name"]), input=payload, continuation=continuation))
             elif (
-                idx not in self.thinking_parts
+                idx not in skip
+                and idx not in self.thinking_parts
                 and idx not in self.text_parts
                 and idx not in self.image_parts
                 and idx not in self.audio_chunks

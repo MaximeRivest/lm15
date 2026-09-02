@@ -131,6 +131,7 @@ from .types import (
 # ── Errors ───────────────────────────────────────────────────────────
 from .errors import (
     LM15Error,
+    StreamAssemblyError,
     TransportError,
     ConfigurationError,
     CapabilityError,
@@ -233,7 +234,7 @@ __all__ = [
     "Role", "PartType", "FinishReason", "ReasoningEffort", "ErrorCode",
     "StreamEventType", "ROLE_VALUES", "FINISH_REASONS", "ERROR_CODES",
     # errors (the catchable taxonomy + the retry predicate)
-    "LM15Error", "TransportError", "ConfigurationError", "CapabilityError",
+    "LM15Error", "TransportError", "StreamAssemblyError", "ConfigurationError", "CapabilityError",
     "ProviderError", "AuthError", "BillingError", "RateLimitError",
     "InvalidRequestError", "ContextLengthError", "TimeoutError",
     "ServerError", "UnsupportedModelError", "UnsupportedFeatureError",

@@ -21,7 +21,7 @@ from typing import Any, Callable, Iterator, Literal, get_args, get_origin
 
 from . import types as lm15_types
 from . import serde
-from .errors import canonical_error_code
+from .errors import LM15Error, StreamAssemblyError, canonical_error_code
 from .providers import AnthropicLM, GeminiLM, HttpResponse, OpenAIChatLM, OpenAILM
 from .providers.base import BaseProviderLM
 from .result import coalesce_stream, materialize_response
@@ -229,8 +229,14 @@ def op_replay_stream(msg: JsonObject) -> JsonObject:
     request = serde.request_from_dict(msg["canonical_request"])
     body = base64.b64decode(msg["body_b64"])
     events = _parse_stream_body(lm, request, body)
-    response = materialize_response(iter(events), request)
-    result: JsonObject = {"events": [serde.stream_event_to_dict(e) for e in events]}
+    event_dicts = [serde.stream_event_to_dict(e) for e in events]
+    try:
+        response = materialize_response(iter(events), request)
+    except StreamAssemblyError as exc:
+        # The trace parsed; assembly refused (MAP-9). Report the trace with
+        # the error so the golden pins both what arrived and the refusal.
+        raise _OpFailure(exc, {"events": event_dicts}) from exc
+    result: JsonObject = {"events": event_dicts}
     result.update(_response_result(response))
     return result
 
@@ -646,14 +652,31 @@ HANDLERS: dict[str, Callable[[JsonObject], JsonObject]] = {
 }
 
 
+class _OpFailure(Exception):
+    """An op failed with a typed error plus extra fields for the error reply."""
+
+    def __init__(self, cause: BaseException, extra: JsonObject) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.extra = extra
+
+
 def _error_reply(req_id: Any, exc: BaseException) -> JsonObject:
-    # lm15-typed errors report the canonical class name; unexpected
-    # exceptions report the native exception name. Both are __name__.
-    return {
-        "id": req_id,
-        "ok": False,
-        "error": {"type": type(exc).__name__, "message": str(exc)},
-    }
+    # lm15-typed errors report the canonical class name and ErrorCode;
+    # unexpected exceptions report the native exception name. A
+    # StreamAssemblyError also carries the partial Response it salvaged
+    # (MAP-9), so a golden can pin a raise and what survived it.
+    extra: JsonObject = {}
+    if isinstance(exc, _OpFailure):
+        extra = exc.extra
+        exc = exc.cause
+    error: JsonObject = {"type": type(exc).__name__, "message": str(exc)}
+    if isinstance(exc, LM15Error) and exc.code is not None:
+        error["code"] = exc.code
+    if isinstance(exc, StreamAssemblyError) and exc.partial is not None:
+        error["partial_response"] = _response_result(exc.partial)["canonical_response"]
+    error.update(extra)
+    return {"id": req_id, "ok": False, "error": error}
 
 
 def handle_line(line: str) -> JsonObject:

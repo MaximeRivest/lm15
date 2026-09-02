@@ -8,6 +8,7 @@ serialization and wire formats.
 Hierarchy:
     LM15Error
     ├── TransportError              (network/connection failures at the LM layer)
+    ├── StreamAssemblyError         (a stream cannot become a Response without inventing a fact; MAP-9)
     ├── ConfigurationError          (local SDK/configuration failures)
     │   └── NotConfiguredError      (no API key or required provider config)
     ├── CapabilityError             (local provider-adapter capability failures)
@@ -26,6 +27,10 @@ Hierarchy:
 from __future__ import annotations
 
 import builtins
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .types import Response
 
 
 class LM15Error(Exception):
@@ -71,6 +76,36 @@ class TransportError(LM15Error):
     """
 
     default_code = "transport"
+
+
+class StreamAssemblyError(LM15Error):
+    """A stream could not be assembled into a Response without inventing a fact.
+
+    Raised by the accumulator (MAP-9) when a tool call's fragments never
+    carried a name: an unnamed call is not actionable (MAP-1), and guessing
+    a name from the request dispatches the wrong function silently.  This is
+    an adapter defect, not model behaviour — every shipped dialect names a
+    call on its first fragment — so the message points at the adapter.
+
+    ``partial`` is everything that did assemble (text, thinking, other
+    parts, usage, finish reason) with the unnamed call(s) left out, so a
+    caller that wants to salvage the turn can; ``part_index`` is the first
+    offending part.
+    """
+
+    default_code = "stream_assembly"
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        partial: "Response | None" = None,
+        part_index: int | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(message, **kwargs)
+        self.partial = partial
+        self.part_index = part_index
 
 
 class ConfigurationError(LM15Error):

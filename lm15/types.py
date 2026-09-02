@@ -93,6 +93,7 @@ ErrorCode = Literal[
     "unsupported_feature",
     "not_configured",
     "transport",
+    "stream_assembly",
     "provider",
 ]
 ERROR_CODES = frozenset(get_args(ErrorCode))

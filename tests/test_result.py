@@ -5,6 +5,7 @@ import base64
 
 import pytest
 
+from lm15.errors import StreamAssemblyError
 from lm15.result import (
     AsyncResponseStream,
     ResponseStream,
@@ -229,7 +230,7 @@ def test_result_module_has_no_tool_execution_helpers() -> None:
         assert not hasattr(result_mod, name)
 
 
-# ─── MAP-9: a missing tool-call name is filled from the request ──────
+# ─── MAP-9: a missing tool-call name is never invented ─────────────
 
 
 def _assemble(tools, events):
@@ -241,40 +242,58 @@ def _call(idx: int, name: str | None = None) -> StreamDeltaEvent:
     return StreamDeltaEvent(delta=ToolCallDelta(input='{"q": 1}', part_index=idx, name=name))
 
 
-def test_map9_single_declared_tool_names_the_call() -> None:
-    resp = _assemble([FunctionTool(name="lookup")], [_call(0), StreamEndEvent(finish_reason="tool_call")])
-    (call,) = resp.tool_calls
-    assert call.name == "lookup"
-    assert call.id == "tool_call_0"
+def test_map9_unnamed_call_raises_even_with_one_declared_tool() -> None:
+    # One declared tool makes the guess *nearly* safe; nearly is still a
+    # guess, and it hides the adapter bug that dropped the name.
+    with pytest.raises(StreamAssemblyError) as info:
+        _assemble([FunctionTool(name="lookup")], [_call(0), StreamEndEvent(finish_reason="tool_call")])
+    assert info.value.code == "stream_assembly"
+    assert info.value.part_index == 0
+    assert "ToolCallDelta.name" in str(info.value)
 
 
-def test_map9_position_among_all_parts_picks_the_tool() -> None:
-    # The text part at index 0 occupies position 0, so the unnamed call at
-    # index 1 takes the tool at position 1 — the stated part-position rule.
+def test_map9_error_carries_everything_that_did_assemble() -> None:
     events = [
-        StreamDeltaEvent(delta=TextDelta(text="thinking", part_index=0)),
+        StreamDeltaEvent(delta=TextDelta(text="Let me check", part_index=0)),
         _call(1),
-        StreamEndEvent(finish_reason="tool_call"),
+        StreamEndEvent(finish_reason="tool_call", usage=Usage(input_tokens=3, output_tokens=4)),
     ]
+    with pytest.raises(StreamAssemblyError) as info:
+        _assemble([FunctionTool(name="alpha"), FunctionTool(name="beta")], events)
+    partial = info.value.partial
+    assert partial is not None
+    assert [p.type for p in partial.message.parts] == ["text"]
+    assert partial.message.parts[0].text == "Let me check"
+    assert partial.usage.total_tokens == 7
+    assert partial.tool_calls == []
+    assert info.value.part_index == 1
+
+
+def test_map9_named_calls_still_assemble_and_missing_id_is_minted() -> None:
+    events = [_call(0, name="beta"), StreamEndEvent(finish_reason="tool_call")]
+    resp = _assemble([FunctionTool(name="alpha"), FunctionTool(name="beta")], events)
+    (call,) = resp.tool_calls
+    assert call.name == "beta"
+    assert call.id == "tool_call_0"  # the lm15-minted correlator, stated in MAP-9
+
+
+def test_map9_name_on_any_fragment_is_enough() -> None:
+    events = [_call(0), _call(0, name="beta"), StreamEndEvent(finish_reason="tool_call")]
     resp = _assemble([FunctionTool(name="alpha"), FunctionTool(name="beta")], events)
     (call,) = resp.tool_calls
     assert call.name == "beta"
 
 
-def test_map9_no_candidate_falls_back_to_literal_tool() -> None:
-    events = [
-        StreamDeltaEvent(delta=TextDelta(text="a", part_index=0)),
-        StreamDeltaEvent(delta=TextDelta(text="b", part_index=1)),
-        _call(2),
-        StreamEndEvent(finish_reason="tool_call"),
-    ]
-    resp = _assemble([FunctionTool(name="alpha"), FunctionTool(name="beta")], events)
-    (call,) = resp.tool_calls
-    assert call.name == "tool"
-
-
-def test_map9_delivered_name_wins_over_fallback() -> None:
-    events = [_call(0, name="beta"), _call(0), StreamEndEvent(finish_reason="tool_call")]
-    resp = _assemble([FunctionTool(name="alpha"), FunctionTool(name="beta")], events)
-    (call,) = resp.tool_calls
-    assert call.name == "beta"
+def test_map9_stream_wrapper_raises_when_the_stream_ends() -> None:
+    # Text already yielded stays yielded; the defect surfaces at the end
+    # of iteration, the earliest moment the assembler can know a name
+    # never arrived.
+    request = Request(model="m", messages=(Message.user("hi"),), tools=(FunctionTool(name="alpha"),))
+    events = [StreamDeltaEvent(delta=TextDelta(text="hi", part_index=0)), _call(1), StreamEndEvent(finish_reason="tool_call")]
+    stream = ResponseStream(iter(events), request)
+    seen = []
+    with pytest.raises(StreamAssemblyError) as info:
+        for text in stream:
+            seen.append(text)
+    assert seen == ["hi"]
+    assert info.value.partial.message.parts[0].text == "hi"

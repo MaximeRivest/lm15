@@ -305,31 +305,40 @@ silently is the worst failure a tool-using loop can have.
 
 ---
 
-## MAP-9 — Stream assembly fills a missing tool-call name from the request
+## MAP-9 — Stream assembly never invents a tool-call name
 
-When a stream's tool-call deltas for one part index never carry a `name`,
-the assembler (`lm15.result.ResponseAccumulator.response`) fills it from
-`Request.tools`, in this order:
+When a stream's tool-call fragments for one part index never carry a
+`name`, the assembler (`lm15.result.StreamAccumulator.response`) does not
+guess. It raises `StreamAssemblyError` (ErrorCode `stream_assembly`) whose
+`partial` is the Response assembled from everything else that arrived —
+text, thinking, media, citations, named calls, usage, the provider's finish
+reason — with the unnamed call(s) left out, and whose `part_index` is the
+first offending part. Wrappers surface it at the earliest point the defect
+is known: `materialize_response` when called, `ResponseStream` at the end
+of iteration (text already yielded stays yielded).
 
-1. exactly one function tool is declared → that tool's name;
-2. otherwise the function tool at the same **position** as the part, where
-   position is the part's rank among all assembled parts of the message
-   (thinking, text, image, audio, citation, and tool-call parts alike), not
-   its rank among tool calls;
-3. otherwise the literal name `"tool"`.
+What lm15 does mint: a missing `id` becomes `tool_call_<index>`. That is an
+lm15-owned correlator, stated, needed because Gemini sends no call ids; it
+is not a guess about what the model meant.
 
-A missing `id` becomes `tool_call_<index>`. When deltas do carry a name,
-the last non-`None` name wins and the fallback never runs.
+**Why:** an unnamed call is not actionable (MAP-1), and every shipped
+dialect names a call on its first fragment, so a missing name is an adapter
+defect, not model behaviour. The previous rule filled the name from
+`Request.tools` by position — one declared tool, else the tool at the
+part's rank among all parts, else the literal `"tool"`. That guess flipped
+when the model emitted text before the call, and an agent loop dispatching
+on the guessed name would run the wrong function with no error. That is the
+silent failure MAP-8 refuses on the wire; MAP-9 refuses it in assembly.
+`partial` exists so a caller who wants the turn's text can still have it,
+on the same principle as the MAP-3 coalescer: never fabricate, never
+discard what arrived.
 
-**Why:** every provider dialect lm15 ships sends the name on the first
-delta of a call, so this path is defensive, not a wire fact. It exists so
-that a degraded stream still yields a `ToolCallPart` the application can
-act on (MAP-1) rather than a dropped call. It is written down because a
-port that guesses differently would assemble a different `Response` from
-the same events. Stated trade-off: rule 2 keys on the part position, not
-the tool-call position; a thinking or text part before the call shifts the
-guess. Left as-is on 2026-09-01 (maintainer delegation) because no fixture
-exercises the fallback; changing it needs a fixture that does.
+Pinned by `lm15-contract/cases/openai_chat/tool_call_unnamed.json`, a
+hand-built degraded OpenAI-compatible stream (arguments and id, no
+`function.name`), whose golden pins the raise, the salvaged partial, and
+the event trace. The `partial.finish_reason` is the provider's `tool_call`,
+kept as reported even though the partial holds no call: the caller is
+holding the error and knows why.
 
 ---
 
@@ -343,5 +352,8 @@ MAP-5 was written on 2026-09-01 after a reasoning-off audit found four
 adapters silently omitting the disable (see
 `lm15-contract/changes/2026-09-01-reasoning-off.md`). MAP-6 was written on
 2026-09-01/02 from the first design pass, MAP-7 and MAP-8 on 2026-09-02 from the second, third, and fourth (`lm15-contract/playbooks/design-pass.md`).
-MAP-9 transcribes a fallback that had lived only in code since the first
-accumulator; written down 2026-09-02 under the same delegation.
+MAP-9 was first written on 2026-09-02 as a transcription of the
+positional name guess that had lived in the accumulator since its first
+version, then replaced the same day by the refusal rule after the
+maintainer chose it over the guess
+(`lm15-contract/changes/2026-09-02-stream-assembly-no-guess.md`).

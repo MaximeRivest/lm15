@@ -10,6 +10,17 @@ said otherwise). Endpoint support lives in `lm.supports` / `lm.manifest`,
 pinned by `spec/support-matrix.json`; modalities and prices are per model
 on `ModelInfo`. Callers reading `lm.capabilities` get `AttributeError`.
 
+**Stream assembly never invents a tool-call name** (MAP-9, ErrorCode
+`stream_assembly`). When a streamed tool call's fragments never carried a
+name, the accumulator used to guess one from `Request.tools` by position
+and could dispatch the wrong function silently. It now raises
+`StreamAssemblyError`, carrying `partial` (the Response assembled from
+everything else) and `part_index`. `ResponseStream` raises at the end of
+iteration; text already yielded stays yielded. No shipped dialect
+triggers this — every one names a call on its first fragment — so the
+change is visible only to code that fed hand-built events into the
+accumulator.
+
 **Honest usage counters and a silent `[DONE]`** (INV-029, MAP-3):
 
 - Adapters no longer write `0` for `input_tokens`/`output_tokens` the
