@@ -207,6 +207,10 @@ OpenAIChatStreamUsage = Literal["auto", "include", "omit"]
 OpenAIChatAssistantAfterToolResult = Literal["auto", "insert", "omit"]
 OpenAIChatThinkingReplay = Literal["auto", "native", "as_text", "omit"]
 OpenAIChatAssistantReasoningContent = Literal["auto", "include_empty", "omit"]
+# "deepseek" names a wire SHAPE — thinking={"type": enabled|disabled} plus
+# reasoning_effort — not a company: DeepSeek, xAI and Z.AI all speak it
+# (docs.z.ai chat--create.md ChatThinking; the earlier "zai" value sent
+# Qwen's enable_thinking and was never live-validated; removed 2026-09-03).
 OpenAIChatThinkingFormat = Literal[
     "auto",
     "none",
@@ -215,7 +219,6 @@ OpenAIChatThinkingFormat = Literal[
     "deepseek",
     "qwen",
     "qwen_chat_template",
-    "zai",
 ]
 # BuiltinTool policy for the chat dialect. The base Chat Completions wire
 # carries function/custom tools ONLY (doc: chat--create.md), and some
@@ -231,6 +234,17 @@ OpenAIChatBuiltinTools = Literal["auto", "reject", "groq"]
 # 2026-09-03: 200 either way, no echo) — so the documented name is the
 # only one that can be trusted to do anything.
 OpenAIChatUserField = Literal["auto", "user", "user_id"]
+# Whether the server honours a tool_choice other than "auto" (required,
+# none, a named function, an allowlist).  "reject" makes the adapter raise
+# UnsupportedFeatureError before the wire.  Z.AI documents auto only and
+# ignores the rest silently (live 2026-09-03: mode=required answered text,
+# mode=none called the tool) — a silent widen is worse than an error (MAP-8).
+OpenAIChatForcedToolChoice = Literal["auto", "send", "reject"]
+# Whether the server honours response_format.type=json_schema.  "reject"
+# raises before the wire.  DeepSeek answers 400 (loud, nothing to do); Z.AI
+# answers 200 with free-form, fenced JSON that ignores the schema (live
+# 2026-09-03) — silent, so the adapter must refuse.
+OpenAIChatJsonSchema = Literal["auto", "send", "reject"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,6 +268,8 @@ class OpenAIChatCompat:
     builtin_tools: OpenAIChatBuiltinTools | None = None
     cache_control: OpenAICacheControl | None = None
     user_field: OpenAIChatUserField | None = None
+    forced_tool_choice: OpenAIChatForcedToolChoice | None = None
+    json_schema: OpenAIChatJsonSchema | None = None
     routing: JsonObject | None = None
     extensions: JsonObject | None = None
 
@@ -278,6 +294,8 @@ class OpenAIChatCompat:
         _check_literal_or_none(self.builtin_tools, OpenAIChatBuiltinTools, "builtin_tools")
         _check_literal_or_none(self.cache_control, OpenAICacheControl, "cache_control")
         _check_literal_or_none(self.user_field, OpenAIChatUserField, "user_field")
+        _check_literal_or_none(self.forced_tool_choice, OpenAIChatForcedToolChoice, "forced_tool_choice")
+        _check_literal_or_none(self.json_schema, OpenAIChatJsonSchema, "json_schema")
         _check_json_object_or_none(self.routing, "routing")
         _check_json_object_or_none(self.extensions, "extensions")
 
@@ -422,14 +440,26 @@ OPENAI_CHAT_PRESETS: dict[str, OpenAIChatCompat] = {
         strict_tools="omit",
         cache_control="none",
     ),
+    # Z.AI (docs.z.ai, scraped 2026-09-03 — lm15-contract/scrapes/zai/pages):
+    # thinking={"type": enabled|disabled} + reasoning_effort (chat--create.md
+    # ChatThinking, the deepseek wire shape; GLM-5.3 cannot disable and the
+    # request fails loudly — model--glm-5.3.md); max_tokens; interleaved
+    # thinking asks for reasoning_content to be returned with tool results
+    # (guide--thinking-mode.md); implicit context caching, usage in
+    # prompt_tokens_details.cached_tokens (guide--cache.md); user_id 6–128
+    # chars is the documented identity field (chat--create.md).
     "zai": OpenAIChatCompat(
         instruction_role="system",
         max_tokens_field="max_tokens",
         stream_usage="include",
-        thinking_format="zai",
+        thinking_format="deepseek",
+        thinking_replay="native",
         tool_result_name="omit",
         strict_tools="omit",
         cache_control="none",
+        user_field="user_id",
+        forced_tool_choice="reject",
+        json_schema="reject",
     ),
 }
 
@@ -449,6 +479,9 @@ OPENAI_CHAT_PRESET_BASE_URLS: dict[str, str] = {
     # api-docs.deepseek.com/first-call.md: base_url https://api.deepseek.com
     # (no /v1; the site also answers /v1, but the documented form wins).
     "deepseek": "https://api.deepseek.com",
+    # docs.z.ai introduction.md: the general endpoint.  The GLM Coding Plan
+    # uses a different, subscription-bound endpoint that lm15 does not name.
+    "zai": "https://api.z.ai/api/paas/v4",
 }
 
 
@@ -468,7 +501,6 @@ class ResolvedOpenAIChatCompat:
         "deepseek",
         "qwen",
         "qwen_chat_template",
-        "zai",
     ] = "reasoning_effort"
     thinking_replay: Literal["native", "as_text", "omit"] = "as_text"
     assistant_reasoning_content: Literal["include_empty", "omit"] = "omit"
@@ -476,6 +508,8 @@ class ResolvedOpenAIChatCompat:
     builtin_tools: Literal["reject", "groq"] = "reject"
     cache_control: Literal["none", "openai", "anthropic"] = "openai"
     user_field: Literal["user", "user_id"] = "user"
+    forced_tool_choice: Literal["send", "reject"] = "send"
+    json_schema: Literal["send", "reject"] = "send"
     routing: JsonObject | None = None
     extensions: JsonObject | None = None
 
@@ -493,6 +527,8 @@ _CHAT_AUTO_DEFAULTS: dict[str, str] = {
     "builtin_tools": "reject",
     "cache_control": "openai",
     "user_field": "user",
+    "forced_tool_choice": "send",
+    "json_schema": "send",
 }
 
 

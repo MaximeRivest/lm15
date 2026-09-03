@@ -714,7 +714,7 @@ def test_deepseek_qwen_zai_reasoning_off_unchanged() -> None:
     expectations = {
         "deepseek": ("thinking", {"type": "disabled"}),
         "qwen": ("enable_thinking", False),
-        "zai": ("enable_thinking", False),
+        "zai": ("thinking", {"type": "disabled"}),  # docs.z.ai ChatThinking; the deepseek wire shape
     }
     for preset, (field, value) in expectations.items():
         lm = OpenAIChatLM(

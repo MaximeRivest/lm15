@@ -454,6 +454,7 @@ class OpenAILM(BaseProviderLM):
         "context_length_exceeded": ContextLengthError,
         "invalid_api_key": AuthError,
         "insufficient_quota": BillingError,
+        "1113": BillingError,  # Z.AI insufficient balance (docs.z.ai api-code.md)
         "authentication_error": AuthError,
         "rate_limit_error": RateLimitError,
     }
@@ -548,7 +549,11 @@ class OpenAILM(BaseProviderLM):
                     status=status,
                     provider_code=provider_code,
                 )
-            if code == "insufficient_quota" or err_type == "insufficient_quota":
+            # Billing before rate-limit: both can ride HTTP 429, and only one
+            # is retryable.  "insufficient_quota" is OpenAI's spelling; "1113"
+            # is Z.AI's ("Insufficient balance or no resource package",
+            # docs.z.ai api-code.md; observed live 2026-09-03 as 429).
+            if code in {"insufficient_quota", "1113"} or err_type == "insufficient_quota":
                 return self._provider_error(
                     BillingError,
                     msg,

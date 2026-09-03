@@ -189,6 +189,17 @@ DEEPSEEK = AccessPolicy(
     base_url=OPENAI_CHAT_PRESET_BASE_URLS["deepseek"],
 )
 
+# Z.AI (docs.z.ai, scraped 2026-09-03): bearer key from z.ai/manage-apikey,
+# general endpoint only.  The GLM Coding Plan is a subscription with its own
+# endpoint and its own terms (docs.z.ai/devpack); lm15 does not name it.
+ZAI = AccessPolicy(
+    provider="zai",
+    supports=EndpointSupport(complete=True, stream=True, models=True),
+    auth_modes=("bearer",),
+    env_keys=("ZAI_API_KEY",),
+    base_url=OPENAI_CHAT_PRESET_BASE_URLS["zai"],
+)
+
 # Keyless local servers: no env key; the registry supplies the placeholder
 # the server accepts when nothing is configured.
 OLLAMA = AccessPolicy(

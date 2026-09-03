@@ -16,6 +16,20 @@ binds the `groq` access policy, so the LM's `provider` is `"groq"` (was
 names `GROQ_API_KEY`. Constructing `OpenAIChatLM(compat="groq")` directly is
 unchanged.
 
+**Z.AI (GLM)** (`zai:` prefix, `ZAI_API_KEY`, `https://api.z.ai/api/paas/v4`)
+is live-verified: 10 cases, 2 pinned refusals, 4 error envelopes
+(`lm15-contract/changes/2026-09-03-zai-live.md`). The `zai` compat preset
+was wrong and is rewritten from the wire: Z.AI's thinking switch is
+`thinking: {type}` + `reasoning_effort` (the `deepseek` shape), not Qwen's
+`enable_thinking`; the never-validated `"zai"` value is removed from
+`OpenAIChatThinkingFormat`. Two new compat fields, both `"send" | "reject"`:
+`forced_tool_choice` (Z.AI honours `auto` only and silently ignores the
+rest — `required` answered text, `none` called the tool) and `json_schema`
+(Z.AI returns 200 with free-form fenced JSON). The `zai` preset rejects
+both, so lm15 raises `UnsupportedFeatureError` before the wire. Z.AI code
+`1113` ("insufficient balance", sent on HTTP 429) now maps to
+`BillingError`; it was `RateLimitError`, which is retryable.
+
 **DeepSeek** (`deepseek:` prefix, `DEEPSEEK_API_KEY`,
 `https://api.deepseek.com`) joins as the first registry-only provider: a
 declaration plus a compat preset, no class. The preset now replays

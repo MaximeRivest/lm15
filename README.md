@@ -1,26 +1,12 @@
 # lm15
 
-**lm15** is a small, typed, provider-neutral interface for foundation-model
-requests, responses, streams, tools, media parts, endpoint APIs, errors, and
-canonical JSON serialization. This repository is its Python reference
-implementation.
+**lm15** is a small, typed, provider-neutral interface for foundation-model requests, responses, streams, tools, media parts, endpoint APIs, errors, and canonical JSON serialization. This repository is its Python reference implementation.
 
-**What lm15 is — and deliberately is not.** lm15 is a low-level foundation
-library: one canonical representation, exact serde for it, and adapters that
-translate it to and from each provider's wire format — stdlib-only, with its
-own HTTP transport (`websockets` is the single optional extra, for live
-sessions). It is NOT an opinionated user-facing API: no magic `call()`, no
-automatic tool loops, no DSL. lm15 is meant to be **the dependency** for
-libraries that want to build their own take on the right way to talk to AI
-systems in Python — you bring the opinions, lm15 brings every provider.
+**What lm15 is — and deliberately is not.** lm15 is a low-level foundation library: one canonical representation, exact serde for it, and adapters that translate it to and from each provider's wire format — stdlib-only, with its own HTTP transport (`websockets` is the single optional extra, for live sessions). It is NOT an opinionated user-facing API: no magic `call()`, no automatic tool loops, no DSL. lm15 is meant to be **the dependency** for libraries that want to build their own take on the right way to talk to AI systems in Python — you bring the opinions, lm15 brings every provider.
 
-The public API is the top-level package: `from lm15 import AnthropicLM,
-Request, Message, ...` (see `lm15/__init__.py` for the full curated surface).
-Transport plumbing stays under `lm15.transports`, live sessions under
-`lm15.live`, and the conformance shim under `lm15.vet`.
+The public API is the top-level package: `from lm15 import AnthropicLM, Request, Message, ...` (see `lm15/__init__.py` for the full curated surface). Transport plumbing stays under `lm15.transports`, live sessions under `lm15.live`, and the conformance shim under `lm15.vet`.
 
-The code blocks below are documentation that runs: every ```output``` block is
-the real, captured output of the example above it.
+The code blocks below are documentation that runs: every ```output``` block is the real, captured output of the example above it.
 
 <!-- footprint:generated:start -->
 ## Footprint
@@ -52,8 +38,7 @@ git clone https://github.com/lm15-dev/lm15-python && cd lm15-python
 python3 -m pip install -e '.[live]'
 ```
 
-lm15 has zero required dependencies — it is stdlib-only, including its HTTP
-transports.
+lm15 has zero required dependencies — it is stdlib-only, including its HTTP transports.
 
 ## Quickstart
 
@@ -124,11 +109,7 @@ anthropic Hello! How can I help you today?
 gemini Hello! How can I help you today?
 ```
 
-And the same shape reaches every OpenAI-compatible server through
-`OpenAIChatLM`, the Chat Completions dialect adapter. A compat preset name —
-`"ollama"`, `"groq"`, `"openrouter"`, `"deepseek"`, `"vllm"`, `"sglang"`, ... — bundles
-that server's wire-format quirks *and* its default `base_url`, so a local
-Ollama is one constructor argument away:
+And the same shape reaches every OpenAI-compatible server through `OpenAIChatLM`, the Chat Completions dialect adapter. A compat preset name — `"ollama"`, `"groq"`, `"openrouter"`, `"deepseek"`, `"zai"`, `"vllm"`, `"sglang"`, ... — bundles that server's wire-format quirks *and* its default `base_url`, so a local Ollama is one constructor argument away:
 
 ```python
 from lm15 import Config, Message, OpenAIChatLM, Request
@@ -150,17 +131,11 @@ print(response.text)
 Hello there! I'm ready to help. What would you like me to discuss?
 ```
 
-Swap `compat="groq"` (plus your Groq key) or `compat="openrouter"` and the
-same request hits those servers; pass an explicit `base_url` to point a
-preset anywhere. Server-specific knobs ride in `Config.extensions` and pass
-through verbatim.
+Swap `compat="groq"` (plus your Groq key) or `compat="openrouter"` and the same request hits those servers; pass an explicit `base_url` to point a preset anywhere. Server-specific knobs ride in `Config.extensions` and pass through verbatim.
 
 ## Streaming
 
-`stream()` yields typed `StreamEvent` objects. Text arrives as
-`StreamDeltaEvent(delta=TextDelta(...))`, and the stream is normalized across
-providers: exactly one `StreamEndEvent` ends the stream, carrying
-`finish_reason` and `usage` (mapping rule MAP-3).
+`stream()` yields typed `StreamEvent` objects. Text arrives as `StreamDeltaEvent(delta=TextDelta(...))`, and the stream is normalized across providers: exactly one `StreamEndEvent` ends the stream, carrying `finish_reason` and `usage` (mapping rule MAP-3).
 
 ```python
 import os
@@ -195,14 +170,11 @@ print(response.text)
 Montreal is a vibrant, multicultural city in Canada known for its rich history and cuisine.
 ```
 
-The materialized `Response` is identical in shape to one from `complete()` —
-same `message`, `finish_reason`, `usage`, and `provider_data`.
+The materialized `Response` is identical in shape to one from `complete()` — same `message`, `finish_reason`, `usage`, and `provider_data`.
 
 ## Tools: the full round-trip
 
-lm15 distinguishes **function tools** that your application executes from
-**provider-native built-in tools** like web search. Here is the complete
-function-tool round-trip — model asks, you run your function, you answer back:
+lm15 distinguishes **function tools** that your application executes from **provider-native built-in tools** like web search. Here is the complete function-tool round-trip — model asks, you run your function, you answer back:
 
 ```python
 import os
@@ -236,8 +208,7 @@ for call in response.tool_calls:
 get_weather {'city': 'Montreal'}
 ```
 
-Now run your function and hand the result back. The model's tool-call turn is
-`response.message`; your answer is `Message.tool(call_id, result)`:
+Now run your function and hand the result back. The model's tool-call turn is `response.message`; your answer is `Message.tool(call_id, result)`:
 
 ```python
 call = response.tool_calls[0]
@@ -252,11 +223,9 @@ print(final.text)
 The weather in Montreal is sunny with a temperature of 22°C. Would you like to know the forecast for the coming days or any other information?
 ```
 
-lm15 will never run the loop for you — that's your layer. This is the whole
-loop.
+lm15 will never run the loop for you — that's your layer. This is the whole loop.
 
-Built-in tools are provider-executed; you just declare them and read the
-results (citations come back as typed parts):
+Built-in tools are provider-executed; you just declare them and read the results (citations come back as typed parts):
 
 ```python
 from lm15 import BuiltinTool, Message, Request
@@ -281,12 +250,7 @@ Los Angeles 2028 Summer Olympic Games | Bidding, Host, Venues, Planning, Sports,
 
 ## Async
 
-Every adapter has an async mirror — `AsyncOpenAILM`, `AsyncAnthropicLM`,
-`AsyncGeminiLM`, `AsyncOpenAIChatLM`, `AsyncClaudeCodeLM`,
-`AsyncOpenAICodexLM` — with the same constructor fields, the same canonical
-`Request` in, and the same `Response`/stream events out. `await` is the only
-difference: `complete()` is `async def`, and `stream()` is an
-`async for`-able iterator of the same events.
+Every adapter has an async mirror — `AsyncOpenAILM`, `AsyncAnthropicLM`, `AsyncGeminiLM`, `AsyncOpenAIChatLM`, `AsyncClaudeCodeLM`, `AsyncOpenAICodexLM` — with the same constructor fields, the same canonical `Request` in, and the same `Response`/stream events out. `await` is the only difference: `complete()` is `async def`, and `stream()` is an `async for`-able iterator of the same events.
 
 ```python
 import asyncio
@@ -324,25 +288,17 @@ Two examples of natural and artificial colors are **red** and **blue**.
 Two common names for a color are **red** (or crimson) and **blue** (often called indigo, cobalt, or azure). Other examples include green, yellow, purple, and brown.
 ```
 
-The non-chat endpoints (files, batch, image, audio, live) are
-sync-only for now; the async classes raise `UnsupportedFeatureError` for them
-rather than pretending. Async endpoint mirrors are planned.
+The non-chat endpoints (files, batch, image, audio, live) are sync-only for now; the async classes raise `UnsupportedFeatureError` for them rather than pretending. Async endpoint mirrors are planned.
 
 ## Local subscription adapters
 
-The ordinary provider adapters use API keys that callers pass explicitly:
-`OpenAILM(api_key=...)`, `AnthropicLM(api_key=...)`, and
-`GeminiLM(api_key=...)`.
+The ordinary provider adapters use API keys that callers pass explicitly: `OpenAILM(api_key=...)`, `AnthropicLM(api_key=...)`, and `GeminiLM(api_key=...)`.
 
-lm15 also has explicit local-developer subscription adapters for users who are
-already signed in to provider CLIs. These adapters do not read API-key
-environment variables. They read local OAuth credentials created by the CLI and
-send provider-specific OAuth headers.
+lm15 also has explicit local-developer subscription adapters for users who are already signed in to provider CLIs. These adapters do not read API-key environment variables. They read local OAuth credentials created by the CLI and send provider-specific OAuth headers.
 
 ### Claude Code subscription auth
 
-Use `ClaudeCodeLM.from_claude_code()` when Claude Code is installed and logged
-in as the same OS user:
+Use `ClaudeCodeLM.from_claude_code()` when Claude Code is installed and logged in as the same OS user:
 
 ```python
 from lm15 import ClaudeCodeLM, Config, Message, Request
@@ -360,28 +316,21 @@ response = lm.complete(
 print(response.text)
 ```
 
-The default credential path is `~/.claude/.credentials.json`. If the
-credential is missing or expired, run Claude Code and log in again (`claude`,
-then `/login` if prompted).
+The default credential path is `~/.claude/.credentials.json`. If the credential is missing or expired, run Claude Code and log in again (`claude`, then `/login` if prompted).
 
-`ClaudeCodeLM` always prepends the Claude Code system prompt required by this
-OAuth route:
+`ClaudeCodeLM` always prepends the Claude Code system prompt required by this OAuth route:
 
 ```text
 You are Claude Code, Anthropic's official CLI for Claude.
 ```
 
-If `Request.system` is also provided, lm15 keeps both: the required Claude Code
-prompt comes first, then the caller's system instruction.
+If `Request.system` is also provided, lm15 keeps both: the required Claude Code prompt comes first, then the caller's system instruction.
 
-Fable 5 note: Fable may spend part of `max_tokens` on hidden thinking, so a
-too-small budget can return no visible text with `finish_reason="length"`.
-Use `Config(max_tokens=128)` or higher for non-trivial prompts.
+Fable 5 note: Fable may spend part of `max_tokens` on hidden thinking, so a too-small budget can return no visible text with `finish_reason="length"`. Use `Config(max_tokens=128)` or higher for non-trivial prompts.
 
 ### OpenAI Codex / ChatGPT subscription auth
 
-Use `OpenAICodexLM.from_codex_cli()` when Codex CLI is installed and signed in
-with ChatGPT:
+Use `OpenAICodexLM.from_codex_cli()` when Codex CLI is installed and signed in with ChatGPT:
 
 ```python
 from lm15 import Message, OpenAICodexLM, Request
@@ -398,24 +347,15 @@ response = lm.complete(
 print(response.text)
 ```
 
-The default credential path is `~/.codex/auth.json`. `OpenAICodexLM` reads the
-local ChatGPT OAuth access token and account id from that file, then calls the
-Codex subscription endpoint. The Codex subscription backend is
-streaming-first, so `complete()` internally streams and materializes a normal
-`Response`.
+The default credential path is `~/.codex/auth.json`. `OpenAICodexLM` reads the local ChatGPT OAuth access token and account id from that file, then calls the Codex subscription endpoint. The Codex subscription backend is streaming-first, so `complete()` internally streams and materializes a normal `Response`.
 
-Current Codex route note: lm15 intentionally omits max-token fields here
-because the verified local Codex route accepts the request shape without them;
-set output limits in your application layer if you need a hard cap.
+Current Codex route note: lm15 intentionally omits max-token fields here because the verified local Codex route accepts the request shape without them; set output limits in your application layer if you need a hard cap.
 
-These subscription adapters are intended for local interactive development, not
-server or CI deployments. Treat the credential files as secrets; do not print or
-log their bearer tokens.
+These subscription adapters are intended for local interactive development, not server or CI deployments. Treat the credential files as secrets; do not print or log their bearer tokens.
 
 ## Media and non-chat endpoints
 
-Multimodal input uses typed media parts (`ImagePart`, `AudioPart`,
-`DocumentPart`, ...):
+Multimodal input uses typed media parts (`ImagePart`, `AudioPart`, `DocumentPart`, ...):
 
 ```python
 import os
@@ -445,10 +385,7 @@ print(lm.complete(request).text)
 This image shows a blue atomic symbol, often used to represent an atom or atomic energy.
 ```
 
-Non-chat endpoints have separate request/response types —
-`ImageGenerationRequest`, `AudioGenerationRequest`, `FileUploadRequest`,
-`BatchRequest`, `LiveConfig` — and generated media comes back as the same
-typed parts you send in:
+Non-chat endpoints have separate request/response types — `ImageGenerationRequest`, `AudioGenerationRequest`, `FileUploadRequest`, `BatchRequest`, `LiveConfig` — and generated media comes back as the same typed parts you send in:
 
 ```python
 import base64
@@ -470,9 +407,7 @@ image/png 1156899 bytes
 
 ## Canonical JSON serialization
 
-The serde functions convert every public lm15 type to canonical
-JSON-compatible dicts and back, exactly — this is the wire format the
-conformance corpus pins:
+The serde functions convert every public lm15 type to canonical JSON-compatible dicts and back, exactly — this is the wire format the conformance corpus pins:
 
 ```python
 from lm15 import Message, Request, request_from_dict, request_to_dict
@@ -489,9 +424,7 @@ True
 
 ## Error normalization
 
-Provider-specific HTTP/API errors are normalized into one lm15 error
-hierarchy, so callers handle `AuthError`, `RateLimitError`,
-`ContextLengthError`, ... identically across providers:
+Provider-specific HTTP/API errors are normalized into one lm15 error hierarchy, so callers handle `AuthError`, `RateLimitError`, `ContextLengthError`, ... identically across providers:
 
 ```python
 import os
@@ -516,54 +449,31 @@ Check API key: ('OPENAI_API_KEY',)
 
 ## Model metadata
 
-`ModelRegistry.discover()` hydrates optional, advisory model metadata
-(pricing, context windows, capability hints) from installed catalog packages
-via the `lm15.model_catalogs` entry-point group — the `aimo` catalog is one
-such package. Hydrated metadata never changes what an adapter sends: requests
-are byte-identical with or without it. See
-[docs/model-hydration.md](docs/model-hydration.md) for the contract.
+`ModelRegistry.discover()` hydrates optional, advisory model metadata (pricing, context windows, capability hints) from installed catalog packages via the `lm15.model_catalogs` entry-point group — the `aimo` catalog is one such package. Hydrated metadata never changes what an adapter sends: requests are byte-identical with or without it. See [docs/model-hydration.md](docs/model-hydration.md) for the contract.
 
 ## Design notes
 
-- [docs/design-rationale.md](docs/design-rationale.md) — why `config=Config(...)`
-  instead of kwargs, why there is no automatic tool loop, why request
-  `extensions` and response `provider_data` are different names on purpose.
-- [docs/serde-rules.md](docs/serde-rules.md) — the canonical JSON omission and
-  round-trip rules.
-- [docs/mapping-rules.md](docs/mapping-rules.md) — the provider mapping
-  invariants (MAP-1, MAP-2, MAP-3, ...).
-- Behavior is pinned by a cross-language conformance corpus: the sibling
-  `lm15-contract` repository is the spec; this package is the reference
-  implementation, not the authority — the full story is in
-  [How lm15 is specified](https://lm15-dev.github.io/lm15-python/how-lm15-is-specified/).
+- [docs/design-rationale.md](docs/design-rationale.md) — why `config=Config(...)` instead of kwargs, why there is no automatic tool loop, why request `extensions` and response `provider_data` are different names on purpose.
+- [docs/serde-rules.md](docs/serde-rules.md) — the canonical JSON omission and round-trip rules.
+- [docs/mapping-rules.md](docs/mapping-rules.md) — the provider mapping invariants (MAP-1, MAP-2, MAP-3, ...).
+- Behavior is pinned by a cross-language conformance corpus: the sibling `lm15-contract` repository is the spec; this package is the reference implementation, not the authority — the full story is in [How lm15 is specified](https://lm15-dev.github.io/lm15-python/how-lm15-is-specified/).
 
 ## Documentation
 
-The full documentation site — getting started, guides, runnable cookbooks,
-API reference, the specification pages, benchmarks, and the
-[roadmap](https://lm15-dev.github.io/lm15-python/roadmap/) — lives at
-**[lm15-dev.github.io/lm15-python](https://lm15-dev.github.io/lm15-python/)**.
+The full documentation site — getting started, guides, runnable cookbooks, API reference, the specification pages, benchmarks, and the [roadmap](https://lm15-dev.github.io/lm15-python/roadmap/) — lives at **[lm15-dev.github.io/lm15-python](https://lm15-dev.github.io/lm15-python/)**.
 
 ## Contributing
 
-Fixture and conformance workflows, the doc-drift checker, the provider
-adapter development guide, and the useful-commands cheat sheet live in
-[CONTRIBUTING.md](CONTRIBUTING.md).
+Fixture and conformance workflows, the doc-drift checker, the provider adapter development guide, and the useful-commands cheat sheet live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Reporting bugs and security issues
 
-- **Bugs and unexpected behavior**: open an issue on the
-  [issue tracker](https://github.com/lm15-dev/lm15-python/issues). Include
-  the lm15 version, the provider and endpoint involved, and a minimal
-  reproduction. Wire-level evidence (the exact request/response bytes)
-  makes triage much faster.
-- **Security vulnerabilities**: never open a public issue. Follow
-  [SECURITY.md](SECURITY.md) to report privately.
+- **Bugs and unexpected behavior**: open an issue on the [issue tracker](https://github.com/lm15-dev/lm15-python/issues). Include the lm15 version, the provider and endpoint involved, and a minimal reproduction. Wire-level evidence (the exact request/response bytes) makes triage much faster.
+- **Security vulnerabilities**: never open a public issue. Follow [SECURITY.md](SECURITY.md) to report privately.
 
 ## Project repositories
 
-lm15 is a multi-repository project under the
-[lm15-dev](https://github.com/lm15-dev) organization:
+lm15 is a multi-repository project under the [lm15-dev](https://github.com/lm15-dev) organization:
 
 | Repository | Status | Role |
 | --- | --- | --- |
@@ -576,6 +486,4 @@ lm15 is a multi-repository project under the
 | [spec](https://github.com/lm15-dev/spec) | archived | Superseded by lm15-contract. |
 | [curl-fixtures](https://github.com/lm15-dev/curl-fixtures), [cross-sdk-curl-tests](https://github.com/lm15-dev/cross-sdk-curl-tests) | archived | Moved into the conformance corpus. |
 
-`lm15-contract` is the source of truth for behavior; each implementation
-repo must pass its conformance harness at the SHA pinned in its
-`CONTRACT_PIN` file.
+`lm15-contract` is the source of truth for behavior; each implementation repo must pass its conformance harness at the SHA pinned in its `CONTRACT_PIN` file.

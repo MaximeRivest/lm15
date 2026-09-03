@@ -40,7 +40,7 @@ string — colons and all — is a bare model id.
 Known providers: `openai` (Responses API), `openai-chat` (Chat
 Completions), `anthropic`, `gemini`, `xai`, `claude-code`,
 `openai-codex` — plus the Chat Completions preset providers `groq`,
-`openrouter`, `deepseek`, `ollama`, `vllm`, and `sglang`, which route to
+`openrouter`, `deepseek`, `zai`, `ollama`, `vllm`, and `sglang`, which route to
 `OpenAIChatLM(compat=<preset>, access=<policy>)` with that server's
 default `base_url` and its own credential. The whole list, with each
 provider's dialect, env keys, and console URL, is one table:
@@ -173,7 +173,7 @@ yourself when:
   a self-hosted gateway, a nonstandard port. The router deliberately has
   no syntax for this; `OpenAIChatLM(api_key=..., compat="ollama",
   base_url=...)` is the documented path and is one line. (The stock
-  groq/openrouter/deepseek/ollama/vllm/sglang endpoints route by name
+  groq/openrouter/deepseek/zai/ollama/vllm/sglang endpoints route by name
   already.)
 - you are a **library** wrapping lm15: take an LM object from your
   caller; don't impose string parsing on your API.

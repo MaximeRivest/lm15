@@ -239,6 +239,11 @@ _DEFINITIONS: tuple[ProviderDefinition, ...] = (
         console_url="https://platform.deepseek.com/api_keys",
         note="DeepSeek (Chat Completions dialect; thinking mode on by default)",
     ),
+    _chat_bound(
+        _access.ZAI,
+        console_url="https://z.ai/manage-apikey/apikey-list",
+        note="Z.AI GLM (Chat Completions dialect; general endpoint, not the Coding Plan)",
+    ),
     _chat_bound(_access.OLLAMA, placeholder_key="ollama", note="local ollama server (keyless)"),
     _chat_bound(_access.VLLM, placeholder_key="EMPTY", note="local vLLM server (keyless)"),
     _chat_bound(_access.SGLANG, placeholder_key="EMPTY", note="local SGLang server (keyless)"),

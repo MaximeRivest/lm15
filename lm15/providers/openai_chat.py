@@ -403,10 +403,33 @@ class OpenAIChatLM(BaseProviderLM):
                 payload["tools"] = tools_wire
         tool_choice = self._tool_choice_payload(request)
         if tool_choice is not None:
+            tc = request.config.tool_choice
+            if compat.forced_tool_choice == "reject" and (tc.mode != "auto" or tc.allowed):
+                # MAP-8: the server documents tool_choice=auto only and ignores
+                # every other form without an error (Z.AI, live 2026-09-03:
+                # required → text answer, none → a tool call).  A silent widen
+                # is worse than an error; omit tool_choice or use "auto".
+                raise UnsupportedFeatureError(
+                    f"{self.provider}: tool_choice mode={tc.mode!r}"
+                    + (f" allowed={list(tc.allowed)}" if tc.allowed else "")
+                    + " is silently ignored by this server (only 'auto' is honoured); "
+                    "omit tool_choice, or send only the tools you want callable",
+                    provider=self.provider,
+                )
             payload["tool_choice"] = tool_choice
         if request.config.tool_choice and request.config.tool_choice.parallel is not None:
             payload["parallel_tool_calls"] = request.config.tool_choice.parallel
         if request.config.response_format:
+            if compat.json_schema == "reject" and request.config.response_format["type"] != "json_object":
+                # The server accepts response_format.type=json_schema and
+                # ignores it (Z.AI, live 2026-09-03: HTTP 200, fenced JSON with
+                # keys the schema never named).  json_object is honoured.
+                raise UnsupportedFeatureError(
+                    f"{self.provider}: response_format type "
+                    f"{request.config.response_format['type']!r} is silently ignored by this "
+                    "server; use {'type': 'json_object'} and describe the shape in the prompt",
+                    provider=self.provider,
+                )
             payload["response_format"] = _response_format_to_chat(request.config.response_format)
         if request.config.reasoning:
             reasoning = request.config.reasoning
@@ -443,7 +466,7 @@ class OpenAIChatLM(BaseProviderLM):
                 elif compat.thinking_format == "deepseek":
                     payload["thinking"] = {"type": "enabled"}
                     payload["reasoning_effort"] = effort
-                elif compat.thinking_format in {"qwen", "zai"}:
+                elif compat.thinking_format == "qwen":
                     payload["enable_thinking"] = True
                 elif compat.thinking_format == "qwen_chat_template":
                     payload["chat_template_kwargs"] = {
@@ -463,7 +486,7 @@ class OpenAIChatLM(BaseProviderLM):
                     payload["reasoning"] = {"enabled": False}
                 elif compat.thinking_format == "deepseek":
                     payload["thinking"] = {"type": "disabled"}
-                elif compat.thinking_format in {"qwen", "zai"}:
+                elif compat.thinking_format == "qwen":
                     payload["enable_thinking"] = False
                 elif compat.thinking_format == "qwen_chat_template":
                     payload["chat_template_kwargs"] = {"enable_thinking": False}

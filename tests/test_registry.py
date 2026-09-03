@@ -170,3 +170,40 @@ class TestBinding:
             assert ({"user", "user_id"} - {field_name}).isdisjoint(body), preset
         with pytest.raises(ValueError):
             OpenAIChatCompat(user_field="uid")  # type: ignore[arg-type]
+
+    def test_zai_declaration(self) -> None:
+        d = PROVIDERS["zai"]
+        assert d.dialect == "openai-chat" and d.bound
+        assert d.env_keys == ("ZAI_API_KEY",)
+        assert d.base_url == "https://api.z.ai/api/paas/v4"
+        compat = OpenAIChatCompat.preset("zai")
+        # The wire shape docs.z.ai documents (ChatThinking) — the deepseek
+        # shape — not Qwen's enable_thinking the preset sent before 2026-09-03.
+        assert compat.thinking_format == "deepseek"
+        assert compat.thinking_replay == "native"
+        assert compat.assistant_reasoning_content is None  # Z.AI answered 200 without it (live 2026-09-03)
+        assert compat.user_field == "user_id"
+        assert compat.forced_tool_choice == "reject" and compat.json_schema == "reject"
+
+    def test_zai_refuses_silent_cells_before_the_wire(self) -> None:
+        # Live 2026-09-03: tool_choice=required answered text, =none called
+        # the tool, json_schema returned fenced free-form JSON — all HTTP 200.
+        from lm15 import Config, FunctionTool, Message, Request, ToolChoice
+        from lm15.errors import UnsupportedFeatureError
+
+        tool = FunctionTool(name="w", description="d", parameters={"type": "object", "properties": {}})
+        lm = LMRouter(RouterConfig(env={"ZAI_API_KEY": "k"})).lm("zai:glm-5.3-flash")
+        for cfg in (
+            Config(tool_choice=ToolChoice(mode="required")),
+            Config(tool_choice=ToolChoice(mode="none")),
+            Config(tool_choice=ToolChoice(mode="auto", allowed=("w",))),
+            Config(response_format={"type": "json_schema", "name": "x", "schema": {"type": "object"}}),
+        ):
+            with pytest.raises(UnsupportedFeatureError, match="zai: .*silently ignored"):
+                lm.build_request(Request(model="glm-5.3-flash", messages=(Message.user("x"),), tools=(tool,), config=cfg), stream=False)
+        # The honoured forms still go out.
+        for cfg in (Config(tool_choice=ToolChoice(mode="auto")), Config(response_format={"type": "json_object"})):
+            lm.build_request(Request(model="glm-5.3-flash", messages=(Message.user("x"),), tools=(tool,), config=cfg), stream=False)
+        # Other presets are untouched: the knob is per server, not dialect-wide.
+        groq = LMRouter(RouterConfig(env={"GROQ_API_KEY": "k"})).lm("groq:m")
+        groq.build_request(Request(model="m", messages=(Message.user("x"),), tools=(tool,), config=Config(tool_choice=ToolChoice(mode="required"))), stream=False)

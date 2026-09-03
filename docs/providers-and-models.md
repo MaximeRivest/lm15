@@ -37,6 +37,7 @@ detail: the list of providers, the shortcuts, and the metadata.
 | Groq | `groq` | `GROQ_API_KEY` | — |
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | — |
 | DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | — (see note) |
+| Z.AI (GLM) | `zai` | `ZAI_API_KEY` | — (see note) |
 | ollama (local) | `ollama` | none | — |
 | vLLM (local) | `vllm` | none | — |
 | SGLang (local) | `sglang` | none | — |
@@ -60,13 +61,27 @@ is on [Authentication](authentication.md).
     the People's Republic of China (DeepSeek privacy policy); prepaid
     balance, so a drained account is a 402, never a surprise bill.
 
+!!! note "Z.AI: thinking is on by default at maximum effort"
+    GLM-5.3 models always reason and default to `reasoning_effort: max` —
+    "Say ok." cost 127 reasoning tokens in the pinned capture. Pass
+    `Config(reasoning=Reasoning(effort="low"))` for cheap calls; an
+    explicit `effort="off"` is refused by the server with a clear 400
+    (GLM-5.2 still honours it). Only `tool_choice` mode `auto` and
+    `response_format` `json_object` are honoured; lm15 raises
+    `UnsupportedFeatureError` before the wire for the other forms because
+    the server accepts them and silently ignores them (verified live
+    2026-09-03). `Config.user_id` is sent as Z.AI's `user_id` and must be
+    6–128 characters. A drained balance is a `BillingError` (Z.AI reports
+    it on HTTP 429). Data is processed in Singapore; the GLM Coding Plan is
+    a separate product with its own endpoint that lm15 does not name.
+
 !!! note "You may also see `openai-chat`"
     OpenAI has two wire dialects: its current **Responses API** (what
     the `openai` string uses) and the older **Chat Completions**
     dialect that half the industry adopted as a de-facto standard.
     lm15 ships both. The `openai-chat` adapter speaks Chat
     Completions — and it is the same adapter that powers the Groq,
-    OpenRouter, DeepSeek, ollama, vLLM, and SGLang rows above, each via
+    OpenRouter, DeepSeek, Z.AI, ollama, vLLM, and SGLang rows above, each via
     a preset that knows that server's URL and quirks. You rarely type
     `openai-chat` yourself; the presets do.
 
