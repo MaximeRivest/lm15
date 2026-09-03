@@ -41,7 +41,8 @@ Known providers: `openai` (Responses API), `openai-chat` (Chat
 Completions), `anthropic`, `gemini`, `xai`, `claude-code`,
 `openai-codex` — plus the Chat Completions preset providers `groq`,
 `openrouter`, `deepseek`, `zai`, `ollama`, `vllm`, and `sglang`, which route to
-`OpenAIChatLM(compat=<preset>, access=<policy>)` with that server's
+`OpenAIChatLM(compat=<preset>, access=<policy>)`, and `deepseek-anthropic`,
+which routes to `AnthropicLM(compat="deepseek", access=<policy>)`, with that server's
 default `base_url` and its own credential. The whole list, with each
 provider's dialect, env keys, and console URL, is one table:
 `lm15.registry.PROVIDERS`.

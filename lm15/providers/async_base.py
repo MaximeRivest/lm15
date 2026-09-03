@@ -517,6 +517,7 @@ class AsyncAnthropicLM(AsyncBaseProviderLM):
     transport: AsyncTransport = field(default_factory=default_async_transport)
     base_url: str = "https://api.anthropic.com/v1"
     api_version: str = "2023-06-01"
+    compat: Any | None = None
     access: ProviderManifest | None = field(default=None, repr=False)
     credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
 
@@ -531,10 +532,15 @@ class AsyncAnthropicLM(AsyncBaseProviderLM):
             transport=_ForbiddenTransport(),
             base_url=self.base_url,
             api_version=self.api_version,
+            compat=self.compat,
             access=self.access,
             credentials_path=self.credentials_path,
         )
         self._mirror_binding()
+        # The sync sibling resolves compat presets (and that server's default
+        # base_url); mirror the resolved values, as AsyncOpenAIChatLM does.
+        self.base_url = self._inner.base_url
+        self.compat = self._inner.compat
 
 
 @dataclass(slots=True)

@@ -16,6 +16,20 @@ binds the `groq` access policy, so the LM's `provider` is `"groq"` (was
 names `GROQ_API_KEY`. Constructing `OpenAIChatLM(compat="groq")` directly is
 unchanged.
 
+**DeepSeek over the Anthropic wire** (`deepseek-anthropic:` prefix, same
+`DEEPSEEK_API_KEY`, `https://api.deepseek.com/anthropic/v1`) is the
+registry's first binding on a second dialect. New `AnthropicCompat` (small:
+`thinking_format` anthropic | deepseek, `cache_control`, `structured_output`,
+`parallel_tool_calls`, `model_prefixes`), `AnthropicLM(compat=…)`, presets
+`anthropic` and `deepseek`. On this endpoint an explicit `effort="off"` is
+sent as `thinking: {type: disabled}` (absence means on there), effort rides
+`output_config.effort` (budget_tokens is ignored, so a `thinking_budget`
+raises), a JSON schema and `tool_choice.parallel` raise (silently ignored
+server-side), and `claude-*` model names raise `UnsupportedModelError`
+because the endpoint silently serves them with DeepSeek models (live
+2026-09-03). Plain `AnthropicLM` is unchanged. 9 cases, 4 pinned refusals,
+3 error envelopes (`lm15-contract/changes/2026-09-03-deepseek-anthropic-live.md`).
+
 **Z.AI (GLM)** (`zai:` prefix, `ZAI_API_KEY`, `https://api.z.ai/api/paas/v4`)
 is live-verified: 10 cases, 2 pinned refusals, 4 error envelopes
 (`lm15-contract/changes/2026-09-03-zai-live.md`). The `zai` compat preset

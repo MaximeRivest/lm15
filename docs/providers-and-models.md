@@ -37,6 +37,7 @@ detail: the list of providers, the shortcuts, and the metadata.
 | Groq | `groq` | `GROQ_API_KEY` | — |
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | — |
 | DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | — (see note) |
+| DeepSeek, Anthropic wire | `deepseek-anthropic` | `DEEPSEEK_API_KEY` | — (see note) |
 | Z.AI (GLM) | `zai` | `ZAI_API_KEY` | — (see note) |
 | ollama (local) | `ollama` | none | — |
 | vLLM (local) | `vllm` | none | — |
@@ -60,6 +61,13 @@ is on [Authentication](authentication.md).
     with a clear 400. Requests and responses are processed and stored in
     the People's Republic of China (DeepSeek privacy policy); prepaid
     balance, so a drained account is a 402, never a surprise bill.
+    The same key also opens DeepSeek's Anthropic-format endpoint as
+    `deepseek-anthropic` — a second provider string because it is a
+    different wire. On that wire lm15 refuses `claude-*` model names
+    before sending: the endpoint would silently answer with a DeepSeek
+    model (`claude-opus*` → `deepseek-v4-pro`, verified live 2026-09-03).
+    Name the DeepSeek model you want. No model listing there; use
+    `deepseek` for that.
 
 !!! note "Z.AI: thinking is on by default at maximum effort"
     GLM-5.3 models always reason and default to `reasoning_effort: max` —

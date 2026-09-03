@@ -36,7 +36,6 @@ from .errors import NotConfiguredError
 from .providers import Credential
 from .router import (
     ADAPTERS,
-    CHAT_PRESET_ROUTES,
     RouterConfig,
     _api_keys_entry,
     _canonical_provider,
@@ -174,7 +173,9 @@ def explain_auth(
 
     canonical = _canonical_provider(provider)
     if not _routable(canonical, ADAPTERS):
-        known = sorted(set(ADAPTERS) | set(CHAT_PRESET_ROUTES))
+        from .registry import PROVIDERS
+
+        known = sorted(PROVIDERS)
         raise ValueError(f"Unknown provider {provider!r}. Known providers: {', '.join(known)}")
 
     policy = _credential_policy(canonical)
@@ -229,8 +230,10 @@ def explain_auth(
                 AuthStep(kind=f"env:{key}", source=f"env ${key}", detail="not set", state="absent")
             )
 
-    route = CHAT_PRESET_ROUTES.get(canonical)
-    if route is not None and route.default_key is not None:
+    from .registry import PROVIDERS
+
+    definition = PROVIDERS.get(canonical)
+    if definition is not None and definition.placeholder_key is not None:
         state = "shadowed" if selected else "selected"
         steps.append(
             AuthStep(

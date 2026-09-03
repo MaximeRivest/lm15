@@ -15,10 +15,11 @@ Two kinds of entries share one shape:
   (``OpenAILM``, ``AnthropicLM``, ``GeminiLM``, ``XaiLM``, ``ClaudeCodeLM``,
   ``OpenAICodexLM``).  The entry points at the class; ``access`` IS the
   class manifest.
-- **bound** — ``OpenAIChatLM`` with an access policy bound at construction
-  plus a compat preset (``groq``, ``openrouter``, ``deepseek``, ``ollama``,
-  ``vllm``, ``sglang``).  Pure data: adding one is a declaration in this
-  file plus a live receipt in the contract, never a new class.
+- **bound** — a dialect class with an access policy bound at construction
+  plus a compat preset: ``OpenAIChatLM`` for ``groq``, ``openrouter``,
+  ``deepseek``, ``zai``, ``ollama``, ``vllm``, ``sglang``; ``AnthropicLM``
+  for ``deepseek-anthropic``.  Pure data: adding one is a declaration in
+  this file plus a live receipt in the contract, never a new class.
 
 Rules this table enforces (``tests/test_registry.py``):
 
@@ -27,8 +28,8 @@ Rules this table enforces (``tests/test_registry.py``):
   wire behavior, not credential ownership);
 - ``access.provider`` equals the entry id (hyphenated form; the chat
   dialect's own manifest keeps its historical ``openai_chat`` spelling);
-- a bound entry's ``access.base_url`` equals the compat table's URL for
-  the same preset — one copy of each URL;
+- a bound entry's ``access.base_url`` equals its dialect's compat table
+  URL for the same preset — one copy of each URL;
 - an entry with ``placeholder_key`` declares no env keys (keyless local
   servers), and vice versa.
 """
@@ -40,7 +41,7 @@ from types import MappingProxyType
 from typing import Literal, Mapping
 
 from . import access as _access
-from .compat import OPENAI_CHAT_PRESET_BASE_URLS, OpenAIChatCompat
+from .compat import ANTHROPIC_PRESET_BASE_URLS, OPENAI_CHAT_PRESET_BASE_URLS, AnthropicCompat, OpenAIChatCompat
 from .features import AccessPolicy, CredentialPolicy, EndpointSupport
 from .providers import (
     AnthropicLM,
@@ -70,6 +71,14 @@ __all__ = [
 # The wire formats lm15 speaks.  A dialect is a class; a provider is a
 # dialect plus an access policy (plus a compat preset for the chat dialect).
 Dialect = Literal["openai-responses", "openai-chat", "anthropic", "gemini"]
+
+
+# Per dialect: the compat preset constructor and the preset → base URL table
+# a bound entry is validated against.  A dialect absent here cannot bind.
+_COMPAT_TABLES: dict[str, tuple] = {
+    "openai-chat": (OpenAIChatCompat.preset, OPENAI_CHAT_PRESET_BASE_URLS),
+    "anthropic": (AnthropicCompat.preset, ANTHROPIC_PRESET_BASE_URLS),
+}
 
 
 def canonical_provider(name: str) -> str:
@@ -116,8 +125,9 @@ class ProviderDefinition:
         if self.bound:
             if self.compat is None:
                 raise ValueError(f"{self.id}: a bound entry names its compat preset")
-            OpenAIChatCompat.preset(self.compat)  # raises for an unknown preset
-            expected = OPENAI_CHAT_PRESET_BASE_URLS.get(self.compat)
+            presets, urls = _COMPAT_TABLES[self.dialect]
+            presets(self.compat)  # raises for an unknown preset
+            expected = urls.get(self.compat)
             if self.access.base_url != expected:
                 raise ValueError(
                     f"{self.id}: access.base_url {self.access.base_url!r} != "
@@ -187,6 +197,25 @@ def _chat_bound(
     )
 
 
+def _anthropic_bound(
+    access: AccessPolicy,
+    *,
+    compat: str,
+    console_url: str | None = None,
+    note: str = "",
+) -> ProviderDefinition:
+    return ProviderDefinition(
+        id=access.provider,
+        dialect="anthropic",
+        adapter=AnthropicLM,
+        async_adapter=AsyncAnthropicLM,
+        access=access,
+        compat=compat,
+        console_url=console_url,
+        note=note,
+    )
+
+
 # Declaration order is presentation order (docs tables, `known providers`
 # lists are sorted separately).  Adapter-owned entries first, then the
 # chat-bound services, then the keyless local servers.
@@ -238,6 +267,12 @@ _DEFINITIONS: tuple[ProviderDefinition, ...] = (
         _access.DEEPSEEK,
         console_url="https://platform.deepseek.com/api_keys",
         note="DeepSeek (Chat Completions dialect; thinking mode on by default)",
+    ),
+    _anthropic_bound(
+        _access.DEEPSEEK_ANTHROPIC,
+        compat="deepseek",
+        console_url="https://platform.deepseek.com/api_keys",
+        note="DeepSeek over the Anthropic Messages wire (same key as `deepseek`; no model listing)",
     ),
     _chat_bound(
         _access.ZAI,

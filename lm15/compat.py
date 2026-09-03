@@ -566,7 +566,135 @@ def resolve_openai_chat_compat(partial: OpenAIChatCompat) -> ResolvedOpenAIChatC
     )
 
 
-CompatProfile: TypeAlias = OpenAIResponsesCompat | OpenAIChatCompat
+# ─── Anthropic Messages compatibility ───────────────────────────────
+#
+# The Messages wire has few dialects, so this policy is small.  It exists
+# for servers that speak the format but not all of it: DeepSeek's Anthropic
+# endpoint (api-docs.deepseek.com guide--anthropic-api.md, live 2026-09-03)
+# is the first.  Fields default to None (inherit), "auto" is the dialect's
+# own behavior, same convention as the OpenAI policies above.
+
+# How reasoning is switched and steered.  "anthropic": the model-class rule
+# (MAP-7 rule 10: manual class takes thinking.type=enabled + budget_tokens,
+# adaptive class takes thinking.type=adaptive + output_config.effort; off
+# is absence).  "deepseek": thinking.type=enabled|disabled +
+# output_config.effort, no budget (the server ignores budget_tokens), and
+# off MUST be sent — absence means on for DeepSeek.
+AnthropicThinkingFormat = Literal["auto", "anthropic", "deepseek"]
+# Whether cache_control marks are placed.  "none": the server ignores marks
+# and caches implicitly; nothing is placed and, as on the chat dialect's
+# "none", an explicit CacheConfig is not an error (implicit caching applies).
+AnthropicCacheControl = Literal["auto", "anthropic", "none"]
+# Whether output_config.format (a JSON schema) is honoured.  "reject" raises
+# before the wire: DeepSeek answers 200 and ignores the schema (live
+# 2026-09-03) — silent, so the adapter refuses.
+AnthropicStructuredOutput = Literal["auto", "send", "reject"]
+# Whether disable_parallel_tool_use is honoured.  DeepSeek documents it as
+# ignored; a silent no-op on ToolChoice.parallel=False is refused (MAP-8 §2).
+AnthropicParallelToolCalls = Literal["auto", "send", "reject"]
+
+
+@dataclass(frozen=True, slots=True)
+class AnthropicCompat:
+    """Partial compatibility policy for Anthropic Messages-family APIs.
+
+    ``model_prefixes`` refuses, before the wire, any model id that does not
+    start with one of the prefixes: DeepSeek's endpoint silently serves
+    ``claude-opus*`` as ``deepseek-v4-pro`` and ``claude-haiku*`` /
+    ``claude-sonnet*`` as ``deepseek-v4-flash`` (docs and live 2026-09-03);
+    lm15 does not take part in a substitution the caller cannot see.
+    None means any model id goes out as typed.
+    """
+
+    thinking_format: AnthropicThinkingFormat | None = None
+    cache_control: AnthropicCacheControl | None = None
+    structured_output: AnthropicStructuredOutput | None = None
+    parallel_tool_calls: AnthropicParallelToolCalls | None = None
+    model_prefixes: tuple[str, ...] | None = None
+    extensions: JsonObject | None = None
+
+    def __post_init__(self) -> None:
+        _check_literal_or_none(self.thinking_format, AnthropicThinkingFormat, "thinking_format")
+        _check_literal_or_none(self.cache_control, AnthropicCacheControl, "cache_control")
+        _check_literal_or_none(self.structured_output, AnthropicStructuredOutput, "structured_output")
+        _check_literal_or_none(self.parallel_tool_calls, AnthropicParallelToolCalls, "parallel_tool_calls")
+        if self.model_prefixes is not None:
+            object.__setattr__(self, "model_prefixes", tuple(str(p) for p in self.model_prefixes))
+            if not self.model_prefixes:
+                raise ValueError("model_prefixes must be None or a non-empty tuple")
+        _check_json_object_or_none(self.extensions, "extensions")
+
+    @classmethod
+    def preset(cls, name: str) -> "AnthropicCompat":
+        key = _preset_key(name)
+        try:
+            return ANTHROPIC_PRESETS[key]
+        except KeyError:
+            raise ValueError(f"unknown AnthropicCompat preset: {name!r}") from None
+
+
+ANTHROPIC_PRESETS: dict[str, AnthropicCompat] = {
+    "anthropic": AnthropicCompat(),
+    # DeepSeek over the Anthropic wire (api-docs.deepseek.com
+    # guide--anthropic-api.md; live 2026-09-03, receipts/2026-09-03-deepseek-anthropic):
+    # thinking={"type": enabled|disabled} + output_config.effort, budget_tokens
+    # ignored; cache_control ignored (implicit caching reports
+    # cache_read_input_tokens); output_config.format accepted and ignored;
+    # disable_parallel_tool_use ignored; claude-* model names silently
+    # remapped to DeepSeek models.
+    "deepseek": AnthropicCompat(
+        thinking_format="deepseek",
+        cache_control="none",
+        structured_output="reject",
+        parallel_tool_calls="reject",
+        model_prefixes=("deepseek-",),
+    ),
+}
+
+# Default base URLs for the Anthropic presets that name a server.
+ANTHROPIC_PRESET_BASE_URLS: dict[str, str] = {
+    "anthropic": "https://api.anthropic.com/v1",
+    # api-docs.deepseek.com first-call.md: base_url https://api.deepseek.com/anthropic,
+    # which the Anthropic SDK completes to /anthropic/v1/messages (both the
+    # /anthropic and /anthropic/v1 roots answer, live 2026-09-03).
+    "deepseek": "https://api.deepseek.com/anthropic/v1",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedAnthropicCompat:
+    """Fully resolved Anthropic Messages compatibility policy."""
+
+    thinking_format: Literal["anthropic", "deepseek"] = "anthropic"
+    cache_control: Literal["anthropic", "none"] = "anthropic"
+    structured_output: Literal["send", "reject"] = "send"
+    parallel_tool_calls: Literal["send", "reject"] = "send"
+    model_prefixes: tuple[str, ...] | None = None
+    extensions: JsonObject | None = None
+
+
+_ANTHROPIC_AUTO_DEFAULTS: dict[str, str] = {
+    "thinking_format": "anthropic",
+    "cache_control": "anthropic",
+    "structured_output": "send",
+    "parallel_tool_calls": "send",
+}
+
+
+def resolve_anthropic_compat(partial: AnthropicCompat) -> ResolvedAnthropicCompat:
+    """Resolve a partial Anthropic compat object into concrete serializer policy."""
+    kwargs: dict[str, object] = {}
+    for field_name, default in _ANTHROPIC_AUTO_DEFAULTS.items():
+        value = getattr(partial, field_name)
+        kwargs[field_name] = default if value in {None, "auto"} else value
+    return ResolvedAnthropicCompat(
+        model_prefixes=partial.model_prefixes,
+        extensions=partial.extensions,
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+CompatProfile: TypeAlias = OpenAIResponsesCompat | OpenAIChatCompat | AnthropicCompat
 
 
 # ─── Merge helpers ──────────────────────────────────────────────────

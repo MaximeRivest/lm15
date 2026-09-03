@@ -21,6 +21,7 @@ from ..errors import (
     map_http_error,
 )
 from ..access import ANTHROPIC_API, auth_header
+from ..compat import ANTHROPIC_PRESET_BASE_URLS, AnthropicCompat, ResolvedAnthropicCompat, resolve_anthropic_compat
 from ..features import ProviderManifest
 from ..sse import SSEEvent
 from ..transports import TransportRequest
@@ -242,15 +243,30 @@ class AnthropicLM(BaseProviderLM):
     transport: SyncTransport = field(default_factory=default_transport)
     base_url: str = _DEFAULT_BASE_URL
     api_version: str = "2023-06-01"
+    compat: AnthropicCompat | str | None = None
     access: ProviderManifest | None = None
     credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
 
     provider: str = field(default="anthropic", init=False)
     account_id: str | None = field(default=None, init=False, repr=False)
     manifest: ClassVar[ProviderManifest] = ANTHROPIC_API
+    _resolved_compat: ResolvedAnthropicCompat = field(init=False, repr=False, default=ResolvedAnthropicCompat())
 
     def __post_init__(self) -> None:
         self._bind_access(self.access, credentials_path=self.credentials_path, default_base_url=_DEFAULT_BASE_URL)
+        compat = self.compat
+        if isinstance(compat, str):
+            # A preset name also supplies that server's default base_url; an
+            # explicit non-default base_url argument always wins (same rule
+            # as OpenAIChatLM).
+            resolved = resolve_anthropic_compat(AnthropicCompat.preset(compat))
+            if self.base_url == _DEFAULT_BASE_URL:
+                self.base_url = ANTHROPIC_PRESET_BASE_URLS.get(compat.lower(), _DEFAULT_BASE_URL)
+        elif isinstance(compat, AnthropicCompat):
+            resolved = resolve_anthropic_compat(compat)
+        else:
+            resolved = resolve_anthropic_compat(AnthropicCompat())
+        self._resolved_compat = resolved
 
     _error_type_map: ClassVar[dict[str, type[ProviderError]]] = {
         "authentication_error": AuthError,
@@ -472,9 +488,23 @@ class AnthropicLM(BaseProviderLM):
         return payload
 
     def _payload(self, request: Request, stream: bool) -> dict[str, Any]:
+        compat = self._resolved_compat
+        if compat.model_prefixes is not None and not request.model.startswith(compat.model_prefixes):
+            # The server maps foreign model names onto its own models without
+            # saying so (DeepSeek: claude-opus* → deepseek-v4-pro, live
+            # 2026-09-03, the response `model` field is the only tell).
+            raise UnsupportedModelError(
+                f"{self.provider}: model {request.model!r} is not one this endpoint serves as typed "
+                f"(expected a prefix in {list(compat.model_prefixes)}); it would be silently "
+                "substituted by another model. Name the model you actually want.",
+                provider=self.provider,
+            )
         cache_cfg = request.config.cache
-        use_cache = cache_cfg is not None and cache_cfg.mode != "off"
-        long_cache = cache_cfg is not None and cache_cfg.retention == "long"
+        # cache_control="none": the server ignores marks and caches
+        # implicitly; nothing is placed and an explicit CacheConfig is not an
+        # error — the same rule as the chat dialect's "none" presets.
+        use_cache = cache_cfg is not None and cache_cfg.mode != "off" and compat.cache_control == "anthropic"
+        long_cache = cache_cfg is not None and cache_cfg.retention == "long" and compat.cache_control == "anthropic"
 
         messages = [self._message(m) for m in request.messages]
 
@@ -512,7 +542,11 @@ class AnthropicLM(BaseProviderLM):
                     last_block.setdefault("cache_control", marker)
 
         reasoning = request.config.reasoning
-        adaptive = reasoning is not None and not reasoning.is_off and anthropic_adaptive_class(request.model)
+        deepseek_thinking = compat.thinking_format == "deepseek"
+        adaptive = (
+            reasoning is not None and not reasoning.is_off
+            and (deepseek_thinking or anthropic_adaptive_class(request.model))
+        )
         if reasoning is not None and not reasoning.is_off:
             if reasoning.summary in ("concise", "detailed"):
                 raise UnsupportedFeatureError(
@@ -523,12 +557,14 @@ class AnthropicLM(BaseProviderLM):
             if adaptive:
                 if reasoning.thinking_budget is not None:
                     raise UnsupportedFeatureError(
-                        f"anthropic: reasoning.thinking_budget is not supported on {request.model} — "
-                        "this model class takes thinking.type 'adaptive' with output_config.effort; "
-                        "budget_tokens is rejected by the API (live 2026-09-02)",
+                        f"{self.provider}: reasoning.thinking_budget is not supported on {request.model} — "
+                        + ("this server ignores budget_tokens (a silent no-op); effort is the dial"
+                           if deepseek_thinking else
+                           "this model class takes thinking.type 'adaptive' with output_config.effort; "
+                           "budget_tokens is rejected by the API (live 2026-09-02)"),
                         provider=self.provider,
                     )
-                if reasoning.effort == "minimal":
+                if reasoning.effort == "minimal" and not deepseek_thinking:
                     raise UnsupportedFeatureError(
                         "anthropic: reasoning.effort='minimal' has no level on this model class "
                         "(output_config.effort is low|medium|high|xhigh|max); 'low' is the floor",
@@ -569,8 +605,27 @@ class AnthropicLM(BaseProviderLM):
             payload["tools"] = tools_wire
         tool_choice = self._tool_choice_payload(request)
         if tool_choice is not None:
+            tc = request.config.tool_choice
+            if compat.parallel_tool_calls == "reject" and tc is not None and tc.parallel is not None:
+                # disable_parallel_tool_use is documented as ignored
+                # (guide--anthropic-api.md); a silent no-op is refused (MAP-8 §2).
+                raise UnsupportedFeatureError(
+                    f"{self.provider}: tool_choice.parallel is silently ignored by this server "
+                    "(disable_parallel_tool_use is not applied); omit it",
+                    provider=self.provider,
+                )
             payload["tool_choice"] = tool_choice
-        if adaptive:
+        if deepseek_thinking:
+            # DeepSeek over the Anthropic wire (guide--anthropic-api.md; live
+            # 2026-09-03): thinking is ON by default, so absence is not off —
+            # an explicit off must reach the wire.  On: type=enabled and
+            # output_config.effort (budget_tokens is ignored by the server).
+            if reasoning is not None and reasoning.is_off:
+                payload["thinking"] = {"type": "disabled"}
+            elif reasoning is not None:
+                payload["thinking"] = {"type": "enabled"}
+                payload["output_config"] = {"effort": reasoning.effort}
+        elif adaptive:
             # MAP-7 rule 2 on the adaptive class (live 2026-09-02, Sonnet 5):
             # the model decides when to think; effort steers depth.
             payload["thinking"] = {"type": "adaptive"}
@@ -581,6 +636,15 @@ class AnthropicLM(BaseProviderLM):
                 "budget_tokens": thinking_budget,
             }
         if request.config.response_format:
+            if compat.structured_output == "reject":
+                # The server accepts output_config.format and ignores the
+                # schema (DeepSeek, live 2026-09-03: 200 with keys the schema
+                # never named).  Silent, so refuse before the wire.
+                raise UnsupportedFeatureError(
+                    f"{self.provider}: response_format is silently ignored by this server "
+                    "(output_config.format is accepted and not applied); describe the shape in the prompt",
+                    provider=self.provider,
+                )
             output_config = _response_format_to_anthropic_output_config(request.config.response_format)
             payload["output_config"] = {**payload.get("output_config", {}), **output_config}
         # Promoted cross-provider knobs (changes/2026-09-01-extensions-burn-down):

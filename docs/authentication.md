@@ -36,7 +36,7 @@ only in the router, explicitly and inspectably.
 | `xai` | `XAI_API_KEY` (used only when no subscription login is stored) | console.x.ai |
 | `groq` | `GROQ_API_KEY` | console.groq.com/keys |
 | `openrouter` | `OPENROUTER_API_KEY` | openrouter.ai/keys |
-| `deepseek` | `DEEPSEEK_API_KEY` | platform.deepseek.com/api_keys |
+| `deepseek`, `deepseek-anthropic` | `DEEPSEEK_API_KEY` | platform.deepseek.com/api_keys |
 | `zai` | `ZAI_API_KEY` | z.ai/manage-apikey/apikey-list |
 | `ollama`, `vllm`, `sglang` | — (keyless, placeholder sent) | — |
 | `claude-code`, `openai-codex` | — (local CLI credential) | — |

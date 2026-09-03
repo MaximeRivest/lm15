@@ -180,27 +180,43 @@ class PresetRoute:
 
 
 # Chat Completions preset providers, keyed by provider string: the
-# chat-bound half of the registry.  Same spirit as DEFAULT_RULES — the
+# chat-bound entries of the registry.  Same spirit as DEFAULT_RULES — the
 # complete built-in knowledge, inspectable and printable.  A new entry is
 # an AccessPolicy in lm15.access plus a registry declaration, landed with
-# live receipts first, like every provider behavior.
+# live receipts first, like every provider behavior.  Bound entries of
+# other dialects (deepseek-anthropic) are routable too; they are read from
+# the registry directly, not from this table.
 CHAT_PRESET_ROUTES: Mapping[str, PresetRoute] = MappingProxyType(
     {
         d.id: PresetRoute(d.id, env_keys=d.env_keys, default_key=d.placeholder_key, note=d.note)
         for d in PROVIDERS.values()
-        if d.bound
+        if d.bound and d.dialect == "openai-chat"
     }
 )
 
 
+def _bound(provider: str, adapters: Mapping[str, type]) -> ProviderDefinition | None:
+    """The registry's bound entry for ``provider``, or None when the provider
+    is adapter-owned (a key of ``adapters``) or unknown."""
+    if provider in adapters:
+        return None
+    definition = PROVIDERS.get(provider)
+    return definition if definition is not None and definition.bound else None
+
+
 def _routable(provider: str, adapters: Mapping[str, type]) -> bool:
-    return provider in adapters or provider in CHAT_PRESET_ROUTES
+    return provider in adapters or _bound(provider, adapters) is not None
 
 
 def _adapter_for(provider: str, adapters: Mapping[str, type]) -> type:
     if provider in adapters:
         return adapters[provider]
-    return adapters["openai-chat"]  # chat-bound entry
+    definition = PROVIDERS[provider]  # bound entry: its dialect class
+    return definition.async_adapter if adapters is ASYNC_ADAPTERS else definition.adapter
+
+
+def _bound_ids(adapters: Mapping[str, type]) -> set[str]:
+    return {d.id for d in PROVIDERS.values() if d.bound and d.id not in adapters}
 
 
 # --------------------------------------------------------------- errors ----
@@ -284,8 +300,9 @@ class Resolution:
                                     # None for OAuth providers or when an
                                     # explicit api_keys entry overrides env
     model_info: ModelInfo | None = None  # catalog metadata when source == "catalog"
-    compat: str | None = None       # OpenAIChatLM preset name when routed
-                                    # through CHAT_PRESET_ROUTES
+    compat: str | None = None       # compat preset name when routed through
+                                    # a bound registry entry (CHAT_PRESET_ROUTES
+                                    # or an Anthropic-dialect binding)
 
     def describe(self) -> str:
         """One-paragraph human-readable explanation of this resolution."""
@@ -300,9 +317,9 @@ class Resolution:
             note = f" — {self.rule.note}" if self.rule.note else ""
             parts.append(f"via built-in rule prefix={self.rule.prefix!r}{note}")
         if self.compat is not None:
-            parts.append(f"Chat Completions compat preset {self.compat!r}")
+            parts.append(f"compat preset {self.compat!r}")
         parts.append(f"wire model {self.model!r}")
-        route = CHAT_PRESET_ROUTES.get(self.provider)
+        definition = _bound(self.provider, ADAPTERS)
         policy = _credential_policy(self.provider)
         if policy == "oauth-unless-explicit":
             # resolve() is pure (no file reads), so it describes the chain
@@ -315,7 +332,7 @@ class Resolution:
             parts.append(f"key from ${self.env_key}")
         elif policy == "oauth":
             parts.append("local OAuth credential (no env key)")
-        elif route is not None and route.default_key is not None:
+        elif definition is not None and definition.placeholder_key is not None:
             parts.append("key from explicit api_keys or the preset's local-server default")
         else:
             parts.append("key from explicit api_keys")
@@ -364,7 +381,7 @@ def _resolution(
     rule: RouteRule | None = None,
     model_info: ModelInfo | None = None,
 ) -> Resolution:
-    route = CHAT_PRESET_ROUTES.get(provider) if provider not in adapters else None
+    definition = _bound(provider, adapters)
     return Resolution(
         requested=requested,
         model=wire_model,
@@ -374,7 +391,7 @@ def _resolution(
         rule=rule,
         env_key=_env_key_for(provider, config, adapters),
         model_info=model_info,
-        compat=route.provider if route is not None else None,
+        compat=definition.compat if definition is not None else None,
     )
 
 
@@ -504,7 +521,7 @@ def _resolve(model: str, config: RouterConfig, adapters: Mapping[str, type]) -> 
         import difflib
 
         head = _canonical_provider(model.split(":", 1)[0])
-        close = difflib.get_close_matches(head, sorted({*adapters, *CHAT_PRESET_ROUTES}), n=1, cutoff=0.75)
+        close = difflib.get_close_matches(head, sorted({*adapters, *_bound_ids(adapters)}), n=1, cutoff=0.75)
         if close:
             hints.append(f'Did you mean "{close[0]}:{model.split(":", 1)[1]}"?')
     if object_provider is not None:
@@ -534,13 +551,13 @@ def _resolve(model: str, config: RouterConfig, adapters: Mapping[str, type]) -> 
 
 
 def _known_providers(adapters: Mapping[str, type]) -> str:
-    return ", ".join(sorted({*adapters, *CHAT_PRESET_ROUTES}))
+    return ", ".join(sorted({*adapters, *_bound_ids(adapters)}))
 
 
 def _declared_env_keys(provider: str, adapters: Mapping[str, type]) -> tuple[str, ...]:
-    route = CHAT_PRESET_ROUTES.get(provider) if provider not in adapters else None
-    if route is not None:
-        return route.env_keys
+    definition = _bound(provider, adapters)
+    if definition is not None:
+        return definition.env_keys
     return adapters[provider].manifest.env_keys
 
 
@@ -575,7 +592,7 @@ def _env_key_for(provider: str, config: RouterConfig, adapters: Mapping[str, typ
 
 def _build_lm(resolution: Resolution, config: RouterConfig, adapters: Mapping[str, type]):
     cls = _adapter_for(resolution.provider, adapters)
-    route = CHAT_PRESET_ROUTES.get(resolution.provider) if resolution.provider not in adapters else None
+    definition = _bound(resolution.provider, adapters)
     extra: dict = {}
     if config.transport is not None:
         extra["transport"] = config.transport
@@ -594,8 +611,8 @@ def _build_lm(resolution: Resolution, config: RouterConfig, adapters: Mapping[st
             if value:
                 api_key = value
                 break
-    if api_key is None and route is not None and route.default_key is not None:
-        api_key = route.default_key
+    if api_key is None and definition is not None and definition.placeholder_key is not None:
+        api_key = definition.placeholder_key
     if not api_key and policy == "oauth-unless-explicit":
         # Nothing anywhere: the constructor raises the typed login-hint error.
         return cls(**extra)
@@ -608,12 +625,11 @@ def _build_lm(resolution: Resolution, config: RouterConfig, adapters: Mapping[st
             provider=resolution.provider,
             env_keys=env_keys,
         )
-    if route is not None:
-        # Chat-bound entry: the dialect class with this provider's access
-        # policy (credential header, surfaces, base_url) and compat preset
-        # bound at construction.  The LM then names itself by the provider
-        # (errors, ModelInfo.provider), not by the dialect.
-        definition = PROVIDERS[resolution.provider]
+    if definition is not None:
+        # Bound entry: the dialect class with this provider's access policy
+        # (credential header, surfaces, base_url) and compat preset bound at
+        # construction.  The LM then names itself by the provider (errors,
+        # ModelInfo.provider), not by the dialect.
         return cls(api_key=api_key, compat=definition.compat, access=definition.access, **extra)
     return cls(api_key=api_key, **extra)
 

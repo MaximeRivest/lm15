@@ -13,10 +13,10 @@ import dataclasses
 import pytest
 
 from lm15 import access
-from lm15.compat import OPENAI_CHAT_PRESET_BASE_URLS, OpenAIChatCompat
+from lm15.compat import ANTHROPIC_PRESET_BASE_URLS, OPENAI_CHAT_PRESET_BASE_URLS, AnthropicCompat, OpenAIChatCompat
 from lm15.doctor import explain_auth
 from lm15.features import AccessPolicy, EndpointSupport
-from lm15.providers import OpenAIChatLM
+from lm15.providers import AnthropicLM, OpenAIChatLM
 from lm15.registry import PROVIDERS, ProviderDefinition, canonical_provider, lookup
 from lm15.router import ADAPTERS, ASYNC_ADAPTERS, CHAT_PRESET_ROUTES, LMRouter, RouterConfig
 from lm15.vet import op_surface_dump
@@ -33,10 +33,11 @@ class TestShape:
         # the dialect, so two entries never share an id (a mapping cannot)
         # and every entry names a dialect the class actually speaks.
         dialect_of = {"openai-responses": "OpenAI", "openai-chat": "OpenAIChat", "anthropic": "Anthropic", "gemini": "Gemini"}
+        bound_class = {"openai-chat": OpenAIChatLM, "anthropic": AnthropicLM}
         for d in PROVIDERS.values():
             assert d.adapter.__name__.endswith("LM")
             if d.bound:
-                assert d.adapter is OpenAIChatLM
+                assert d.adapter is bound_class[d.dialect], d.id
             else:
                 # Adapter-owned classes speak their dialect directly or by
                 # subclassing it (XaiLM is an OpenAIChatLM).
@@ -49,8 +50,12 @@ class TestShape:
                 assert d.placeholder_key is None
                 continue
             assert d.compat is not None
-            OpenAIChatCompat.preset(d.compat)  # exists
-            assert d.access.base_url == OPENAI_CHAT_PRESET_BASE_URLS[d.compat]
+            if d.dialect == "openai-chat":
+                OpenAIChatCompat.preset(d.compat)  # exists
+                assert d.access.base_url == OPENAI_CHAT_PRESET_BASE_URLS[d.compat]
+            else:
+                AnthropicCompat.preset(d.compat)
+                assert d.access.base_url == ANTHROPIC_PRESET_BASE_URLS[d.compat]
             assert d.access.credential_policy == "key"
 
     def test_keyless_means_no_env_keys(self) -> None:
@@ -92,9 +97,9 @@ class TestShape:
 class TestViews:
     def test_router_tables_are_views(self) -> None:
         owned = {d.id for d in PROVIDERS.values() if not d.bound}
-        bound = {d.id for d in PROVIDERS.values() if d.bound}
+        chat_bound = {d.id for d in PROVIDERS.values() if d.bound and d.dialect == "openai-chat"}
         assert set(ADAPTERS) == set(ASYNC_ADAPTERS) == owned
-        assert set(CHAT_PRESET_ROUTES) == bound
+        assert set(CHAT_PRESET_ROUTES) == chat_bound  # the table's name says chat; other dialects route from the registry
         for pid, route in CHAT_PRESET_ROUTES.items():
             d = PROVIDERS[pid]
             assert route.env_keys == d.env_keys
@@ -143,6 +148,60 @@ class TestBinding:
             assert lm.access is PROVIDERS[pid].access
             assert lm.base_url == PROVIDERS[pid].base_url
             assert lm.supports == EndpointSupport(complete=True, stream=True, models=True)
+        # The second bound dialect: same key, a different wire, its own class.
+        lm = router.lm("deepseek-anthropic:deepseek-v4-flash")
+        assert isinstance(lm, AnthropicLM) and lm.provider == "deepseek-anthropic"
+        assert lm.base_url == "https://api.deepseek.com/anthropic/v1"
+        assert lm.supports.models is False
+        assert router.resolve("deepseek-anthropic:deepseek-v4-flash").adapter == "AnthropicLM"
+        from lm15.router import AsyncLMRouter
+        from lm15.providers import AsyncAnthropicLM
+
+        alm = AsyncLMRouter(RouterConfig(env={"DEEPSEEK_API_KEY": "d"})).lm("deepseek-anthropic:m")
+        assert isinstance(alm, AsyncAnthropicLM) and alm.base_url == lm.base_url
+
+    def test_deepseek_anthropic_declaration_and_refusals(self) -> None:
+        import json
+
+        from lm15 import Config, FunctionTool, Message, Reasoning, Request, ToolChoice
+        from lm15.errors import UnsupportedFeatureError, UnsupportedModelError
+
+        d = PROVIDERS["deepseek-anthropic"]
+        assert d.dialect == "anthropic" and d.bound and d.compat == "deepseek"
+        assert d.env_keys == ("DEEPSEEK_API_KEY",) and d.access.auth_header == "x-api-key"
+        lm = LMRouter(RouterConfig(env={"DEEPSEEK_API_KEY": "d"})).lm("deepseek-anthropic:deepseek-v4-flash")
+        say = (Message.user("x"),)
+        tool = FunctionTool(name="w", description="d", parameters={"type": "object", "properties": {}})
+
+        def body(cfg, model="deepseek-v4-flash"):
+            return json.loads(lm.build_request(Request(model=model, messages=say, tools=(tool,), config=cfg), stream=False).body)
+
+        # Thinking: DeepSeek's shape, and an explicit off reaches the wire
+        # (absence means ON there; live 2026-09-03).
+        assert "thinking" not in body(Config(max_tokens=100))
+        assert body(Config(max_tokens=100, reasoning=Reasoning(effort="off")))["thinking"] == {"type": "disabled"}
+        b = body(Config(max_tokens=100, reasoning=Reasoning(effort="low")))
+        assert b["thinking"] == {"type": "enabled"} and b["output_config"] == {"effort": "low"} and b["max_tokens"] == 100
+        # Silent cells refused before the wire (guide--anthropic-api.md; live 2026-09-03).
+        for cfg in (
+            Config(reasoning=Reasoning(effort="low", thinking_budget=4096)),   # budget_tokens ignored
+            Config(response_format={"type": "json_schema", "name": "x", "schema": {"type": "object"}}),  # schema ignored
+            Config(tool_choice=ToolChoice(mode="auto", parallel=False)),      # disable_parallel_tool_use ignored
+        ):
+            with pytest.raises(UnsupportedFeatureError, match="deepseek-anthropic: .*ignore"):
+                body(cfg)
+        # claude-* is silently served by a DeepSeek model: refuse before the wire.
+        with pytest.raises(UnsupportedModelError, match="silently substituted"):
+            body(Config(max_tokens=10), model="claude-opus-4-1")
+        # cache marks: not placed, not an error (implicit caching applies).
+        from lm15 import CacheConfig
+
+        b = body(Config(max_tokens=10, cache=CacheConfig(mode="auto")))
+        assert "cache_control" not in json.dumps(b)
+        # Plain Anthropic is untouched: manual class still sends a budget.
+        plain = json.loads(AnthropicLM(api_key="k").build_request(
+            Request(model="claude-haiku-4-5", messages=say, config=Config(max_tokens=100, reasoning=Reasoning(effort="low"))), stream=False).body)
+        assert plain["thinking"]["type"] == "enabled" and "budget_tokens" in plain["thinking"]
 
     def test_deepseek_declaration(self) -> None:
         d = PROVIDERS["deepseek"]

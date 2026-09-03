@@ -48,7 +48,7 @@ from .auth import (
     get_xai_access_token,
     usable_xai_credential,
 )
-from .compat import OPENAI_CHAT_PRESET_BASE_URLS
+from .compat import ANTHROPIC_PRESET_BASE_URLS, OPENAI_CHAT_PRESET_BASE_URLS
 from .errors import NotConfiguredError
 from .features import AccessPolicy, AuthHeader, CredentialPolicy, EndpointSupport  # noqa: F401 — re-exported
 
@@ -198,6 +198,22 @@ ZAI = AccessPolicy(
     auth_modes=("bearer",),
     env_keys=("ZAI_API_KEY",),
     base_url=OPENAI_CHAT_PRESET_BASE_URLS["zai"],
+)
+
+# ─── Anthropic Messages servers reached through AnthropicLM ─────────────
+
+# DeepSeek's Anthropic-format endpoint (guide--anthropic-api.md; live
+# 2026-09-03): the same DEEPSEEK_API_KEY, sent as x-api-key.  No /models on
+# this root (404) — list models through `deepseek`.  A separate provider
+# string because a provider name describes wire behavior: `deepseek` is the
+# Chat Completions wire, `deepseek-anthropic` the Messages wire.
+DEEPSEEK_ANTHROPIC = AccessPolicy(
+    provider="deepseek-anthropic",
+    supports=EndpointSupport(complete=True, stream=True),
+    auth_modes=("x-api-key",),
+    env_keys=("DEEPSEEK_API_KEY",),
+    auth_header="x-api-key",
+    base_url=ANTHROPIC_PRESET_BASE_URLS["deepseek"],
 )
 
 # Keyless local servers: no env key; the registry supplies the placeholder
