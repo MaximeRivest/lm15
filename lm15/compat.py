@@ -276,118 +276,159 @@ class OpenAIChatCompat:
 
     @classmethod
     def preset(cls, name: str) -> "OpenAIChatCompat":
-        key = name.lower().replace("-", "_").replace(" ", "_")
+        """The named server dialect from :data:`OPENAI_CHAT_PRESETS`.
 
-        if key in {"openai", "openai_chat", "chat", "chat_completions"}:
-            return cls(
-                instruction_role="system",
-                max_tokens_field="max_completion_tokens",
-                stream_usage="include",
-                thinking_format="reasoning_effort",
-                tool_result_name="omit",
-                strict_tools="omit",
-                cache_control="openai",
-            )
-
-        if key in {"ollama", "lmstudio", "lm_studio"}:
-            return cls(
-                instruction_role="system",
-                max_tokens_field="max_tokens",
-                stream_usage="include",
-                thinking_format="none",
-                tool_result_name="omit",
-                strict_tools="omit",
-                cache_control="none",
-            )
-
-        if key == "groq":
-            return cls(
-                instruction_role="system",
-                max_tokens_field="max_tokens",
-                stream_usage="include",
-                thinking_format="reasoning_effort",
-                tool_result_name="omit",
-                strict_tools="omit",
-                builtin_tools="groq",
-                cache_control="none",
-            )
-
-        if key == "openrouter":
-            return cls(
-                instruction_role="system",
-                max_tokens_field="max_tokens",
-                stream_usage="include",
-                thinking_format="openrouter",
-                tool_result_name="omit",
-                strict_tools="omit",
-                cache_control="openai",
-            )
-
-        if key == "xai":
-            # Pinned live 2026-09-01 against grok-4.6: max_tokens accepted,
-            # reasoning arrives as message.reasoning_content (deepseek shape),
-            # stream_options.include_usage honored, no cache_control field
-            # (prompt caching is automatic; usage reports cached_tokens).
-            return cls(
-                instruction_role="system",
-                max_tokens_field="max_tokens",
-                stream_usage="include",
-                thinking_format="deepseek",
-                tool_result_name="omit",
-                strict_tools="omit",
-                cache_control="none",
-            )
-
-        if key in {"vllm", "sglang"}:
-            return cls(
-                instruction_role="system",
-                max_tokens_field="max_tokens",
-                stream_usage="include",
-                thinking_format="reasoning_effort",
-                tool_result_name="omit",
-                strict_tools="omit",
-                cache_control="none",
-            )
-
-        if key == "deepseek":
-            return cls(
-                instruction_role="system",
-                max_tokens_field="max_tokens",
-                stream_usage="include",
-                thinking_format="deepseek",
-                tool_result_name="omit",
-                strict_tools="omit",
-                cache_control="none",
-            )
-
-        if key in {"qwen", "dashscope_qwen"}:
-            return cls(
-                instruction_role="system",
-                max_tokens_field="max_tokens",
-                stream_usage="include",
-                thinking_format="qwen",
-                tool_result_name="omit",
-                strict_tools="omit",
-                cache_control="none",
-            )
-
-        if key in {"zai", "z_ai"}:
-            return cls(
-                instruction_role="system",
-                max_tokens_field="max_tokens",
-                stream_usage="include",
-                thinking_format="zai",
-                tool_result_name="omit",
-                strict_tools="omit",
-                cache_control="none",
-            )
-
-        raise ValueError(f"unknown OpenAIChatCompat preset: {name!r}")
+        Accepts the permanent spelling aliases (``lm-studio``, ``z.ai``,
+        ``openai_chat``); raises ``ValueError`` for an unknown name.
+        """
+        key = _preset_key(name)
+        try:
+            return OPENAI_CHAT_PRESETS[key]
+        except KeyError:
+            raise ValueError(f"unknown OpenAIChatCompat preset: {name!r}") from None
 
 
-# Default base URLs for OpenAI Chat Completions preset names.  Used by
-# OpenAIChatLM when a compat preset is given by name and no explicit
-# base_url overrides it.
+def _preset_key(name: str) -> str:
+    key = name.lower().replace("-", "_").replace(" ", "_").replace(".", "_")
+    return _OPENAI_CHAT_PRESET_ALIASES.get(key, key)
+
+
+# Spelling aliases → canonical preset key.  Every alias is permanent.
+_OPENAI_CHAT_PRESET_ALIASES: dict[str, str] = {
+    "openai_chat": "openai",
+    "chat": "openai",
+    "chat_completions": "openai",
+    "lmstudio": "ollama",
+    "lm_studio": "ollama",
+    "dashscope_qwen": "qwen",
+    "z_ai": "zai",
+}
+
+# The Chat Completions server dialects lm15 knows, as data.  A preset
+# describes ONE server's quirks (instruction role, token-limit field,
+# thinking wire shape, …); it says nothing about credentials or routing —
+# that is the provider registry (lm15.registry), which names a preset by
+# key.  Every field value here is pinned by a live receipt or the server's
+# own documentation, cited inline; a preset changes with new evidence, not
+# with a hunch.
+OPENAI_CHAT_PRESETS: dict[str, OpenAIChatCompat] = {
+    "openai": OpenAIChatCompat(
+        instruction_role="system",
+        max_tokens_field="max_completion_tokens",
+        stream_usage="include",
+        thinking_format="reasoning_effort",
+        tool_result_name="omit",
+        strict_tools="omit",
+        cache_control="openai",
+    ),
+    # ollama / LM Studio: max_tokens, no reasoning dial on the wire.
+    "ollama": OpenAIChatCompat(
+        instruction_role="system",
+        max_tokens_field="max_tokens",
+        stream_usage="include",
+        thinking_format="none",
+        tool_result_name="omit",
+        strict_tools="omit",
+        cache_control="none",
+    ),
+    # Groq: server-executed builtin tools (browser_search / code_interpreter,
+    # live 2026-09-01); reasoning_effort dial; no cache_control field.
+    "groq": OpenAIChatCompat(
+        instruction_role="system",
+        max_tokens_field="max_tokens",
+        stream_usage="include",
+        thinking_format="reasoning_effort",
+        tool_result_name="omit",
+        strict_tools="omit",
+        builtin_tools="groq",
+        cache_control="none",
+    ),
+    # OpenRouter: unified reasoning object; OpenAI-shaped cache_control.
+    "openrouter": OpenAIChatCompat(
+        instruction_role="system",
+        max_tokens_field="max_tokens",
+        stream_usage="include",
+        thinking_format="openrouter",
+        tool_result_name="omit",
+        strict_tools="omit",
+        cache_control="openai",
+    ),
+    # xAI, pinned live 2026-09-01 against grok-4.6: max_tokens accepted,
+    # reasoning arrives as message.reasoning_content (deepseek shape),
+    # stream_options.include_usage honored, no cache_control field (prompt
+    # caching is automatic; usage reports cached_tokens).
+    "xai": OpenAIChatCompat(
+        instruction_role="system",
+        max_tokens_field="max_tokens",
+        stream_usage="include",
+        thinking_format="deepseek",
+        tool_result_name="omit",
+        strict_tools="omit",
+        cache_control="none",
+    ),
+    "vllm": OpenAIChatCompat(
+        instruction_role="system",
+        max_tokens_field="max_tokens",
+        stream_usage="include",
+        thinking_format="reasoning_effort",
+        tool_result_name="omit",
+        strict_tools="omit",
+        cache_control="none",
+    ),
+    "sglang": OpenAIChatCompat(
+        instruction_role="system",
+        max_tokens_field="max_tokens",
+        stream_usage="include",
+        thinking_format="reasoning_effort",
+        tool_result_name="omit",
+        strict_tools="omit",
+        cache_control="none",
+    ),
+    # DeepSeek (api-docs.deepseek.com, scraped 2026-09-03 —
+    # lm15-contract/scrapes/deepseek/pages): thinking={"type": enabled|
+    # disabled} + reasoning_effort (guide--thinking-mode.md); max_tokens
+    # (chat--create.md); usage in the final stream chunk via
+    # stream_options.include_usage; context caching is automatic on disk,
+    # no cache_control field (guide--kv-cache.md).  thinking_replay=native
+    # + include_empty: with tools present, every assistant turn must carry
+    # reasoning_content back — even turns that made no call — or the API
+    # answers 400 (guide--thinking-mode.md § Tool Calls).
+    "deepseek": OpenAIChatCompat(
+        instruction_role="system",
+        max_tokens_field="max_tokens",
+        stream_usage="include",
+        thinking_format="deepseek",
+        thinking_replay="native",
+        assistant_reasoning_content="include_empty",
+        tool_result_name="omit",
+        strict_tools="omit",
+        cache_control="none",
+    ),
+    "qwen": OpenAIChatCompat(
+        instruction_role="system",
+        max_tokens_field="max_tokens",
+        stream_usage="include",
+        thinking_format="qwen",
+        tool_result_name="omit",
+        strict_tools="omit",
+        cache_control="none",
+    ),
+    "zai": OpenAIChatCompat(
+        instruction_role="system",
+        max_tokens_field="max_tokens",
+        stream_usage="include",
+        thinking_format="zai",
+        tool_result_name="omit",
+        strict_tools="omit",
+        cache_control="none",
+    ),
+}
+
+
+# Default base URLs for the Chat Completions presets that name a server.
+# Used by OpenAIChatLM when a compat preset is given by name and no
+# explicit base_url overrides it; the provider registry's access policies
+# point here so there is one copy of each URL.
 OPENAI_CHAT_PRESET_BASE_URLS: dict[str, str] = {
     "openai": "https://api.openai.com/v1",
     "ollama": "http://localhost:11434/v1",
@@ -396,6 +437,9 @@ OPENAI_CHAT_PRESET_BASE_URLS: dict[str, str] = {
     "xai": "https://api.x.ai/v1",
     "vllm": "http://localhost:8000/v1",
     "sglang": "http://localhost:30000/v1",
+    # api-docs.deepseek.com/first-call.md: base_url https://api.deepseek.com
+    # (no /v1; the site also answers /v1, but the documented form wins).
+    "deepseek": "https://api.deepseek.com",
 }
 
 

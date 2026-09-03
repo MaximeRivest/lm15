@@ -48,6 +48,7 @@ from .auth import (
     get_xai_access_token,
     usable_xai_credential,
 )
+from .compat import OPENAI_CHAT_PRESET_BASE_URLS
 from .errors import NotConfiguredError
 from .features import AccessPolicy, AuthHeader, CredentialPolicy, EndpointSupport  # noqa: F401 — re-exported
 
@@ -148,6 +149,67 @@ GEMINI_API = AccessPolicy(
     auth_modes=("query-api-key", "x-goog-api-key"),
     env_keys=("GEMINI_API_KEY", "GOOGLE_API_KEY"),
     auth_header="x-api-key",  # the dialect renders it as x-goog-api-key
+)
+
+# ─── Chat Completions servers reached through OpenAIChatLM ───────────
+#
+# These policies are bound onto the chat dialect by the provider registry
+# (lm15.registry): the class is OpenAIChatLM, the compat preset of the
+# same name names the server's quirks, and this value names the credential
+# and the surfaces.  base_url points at the compat table so each URL has
+# one copy.
+
+GROQ = AccessPolicy(
+    provider="groq",
+    supports=EndpointSupport(complete=True, stream=True, models=True),
+    auth_modes=("bearer",),
+    env_keys=("GROQ_API_KEY",),
+    base_url=OPENAI_CHAT_PRESET_BASE_URLS["groq"],
+)
+
+OPENROUTER = AccessPolicy(
+    provider="openrouter",
+    supports=EndpointSupport(complete=True, stream=True, models=True),
+    auth_modes=("bearer",),
+    env_keys=("OPENROUTER_API_KEY",),
+    base_url=OPENAI_CHAT_PRESET_BASE_URLS["openrouter"],
+)
+
+# DeepSeek (api-docs.deepseek.com, scraped 2026-09-03): bearer key from
+# platform.deepseek.com, prepaid balance (a drained balance is HTTP 402,
+# never a surprise bill).  The same key also opens an Anthropic-format
+# endpoint (/anthropic) and a Responses-format endpoint; `deepseek` names
+# the Chat Completions wire only — a provider string never guesses a
+# protocol.
+DEEPSEEK = AccessPolicy(
+    provider="deepseek",
+    supports=EndpointSupport(complete=True, stream=True, models=True),
+    auth_modes=("bearer",),
+    env_keys=("DEEPSEEK_API_KEY",),
+    base_url=OPENAI_CHAT_PRESET_BASE_URLS["deepseek"],
+)
+
+# Keyless local servers: no env key; the registry supplies the placeholder
+# the server accepts when nothing is configured.
+OLLAMA = AccessPolicy(
+    provider="ollama",
+    supports=EndpointSupport(complete=True, stream=True, models=True),
+    auth_modes=("bearer",),
+    base_url=OPENAI_CHAT_PRESET_BASE_URLS["ollama"],
+)
+
+VLLM = AccessPolicy(
+    provider="vllm",
+    supports=EndpointSupport(complete=True, stream=True, models=True),
+    auth_modes=("bearer",),
+    base_url=OPENAI_CHAT_PRESET_BASE_URLS["vllm"],
+)
+
+SGLANG = AccessPolicy(
+    provider="sglang",
+    supports=EndpointSupport(complete=True, stream=True, models=True),
+    auth_modes=("bearer",),
+    base_url=OPENAI_CHAT_PRESET_BASE_URLS["sglang"],
 )
 
 

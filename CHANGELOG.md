@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+**One provider registry.** `lm15.registry.PROVIDERS` is the one table of
+named providers: id, wire dialect, access policy (`lm15.access`), Chat
+Completions compat preset, keyless placeholder, console URL. `ADAPTERS`,
+`ASYNC_ADAPTERS`, and `CHAT_PRESET_ROUTES` are now read-only views of it
+(same keys, same values, now `MappingProxyType`); `OpenAIChatCompat.preset`
+reads the `OPENAI_CHAT_PRESETS` table instead of an if-chain; the doctor
+and the vet surface dump walk the registry, so the contract's support
+matrix now pins every routable provider, not only the seven adapter
+classes. Behavior change for routed chat presets: `router.lm("groq:…")`
+binds the `groq` access policy, so the LM's `provider` is `"groq"` (was
+`"openai_chat"`) in errors and `ModelInfo.provider`, and `lm.access.env_keys`
+names `GROQ_API_KEY`. Constructing `OpenAIChatLM(compat="groq")` directly is
+unchanged.
+
+**DeepSeek** (`deepseek:` prefix, `DEEPSEEK_API_KEY`,
+`https://api.deepseek.com`) joins as the first registry-only provider: a
+declaration plus a compat preset, no class. The preset now replays
+`reasoning_content` natively and sends it on every assistant turn when
+tools are present — DeepSeek answers 400 otherwise (api-docs.deepseek.com,
+thinking-mode guide, scraped 2026-09-03). Live receipts pending; see
+`lm15-contract/research/providers/deepseek/`.
+
 **One truth per support fact.** The adapter-level `Capabilities` object
 (`lm.capabilities`: free-text `features`, adapter-wide modalities) is
 removed. Nothing in lm15 read it, it was not in the contract, and it had

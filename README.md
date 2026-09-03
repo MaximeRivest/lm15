@@ -126,7 +126,7 @@ gemini Hello! How can I help you today?
 
 And the same shape reaches every OpenAI-compatible server through
 `OpenAIChatLM`, the Chat Completions dialect adapter. A compat preset name —
-`"ollama"`, `"groq"`, `"openrouter"`, `"vllm"`, `"sglang"`, ... — bundles
+`"ollama"`, `"groq"`, `"openrouter"`, `"deepseek"`, `"vllm"`, `"sglang"`, ... — bundles
 that server's wire-format quirks *and* its default `base_url`, so a local
 Ollama is one constructor argument away:
 

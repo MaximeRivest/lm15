@@ -22,11 +22,12 @@ itself:
 
 Nothing else.  No plugins, no callbacks, no fallback chains.
 
-A provider is routable when it has a first-class adapter (a key of
-:data:`ADAPTERS`) or an OpenAI Chat Completions compat preset (a key of
-:data:`CHAT_PRESET_ROUTES`: groq, openrouter, ollama, vllm, sglang).
-Preset providers route to ``OpenAIChatLM(compat=<preset>)``, which also
-supplies that server's default base_url.
+A provider is routable when the provider registry (``lm15.registry``)
+declares it: either adapter-owned (a key of :data:`ADAPTERS`) or
+chat-bound (a key of :data:`CHAT_PRESET_ROUTES`: groq, openrouter,
+deepseek, ollama, vllm, sglang).  Chat-bound providers route to
+``OpenAIChatLM(compat=<preset>, access=<policy>)``: the preset names the
+server's quirks and default base_url, the access policy its credential.
 
 Model-string grammar
 --------------------
@@ -61,27 +62,13 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, replace
+from types import MappingProxyType
 from typing import AsyncIterator, Iterator, Mapping
 
 from .errors import LM15Error, NotConfiguredError
 from .models import ModelInfo, ModelRegistry
-from .providers import (
-    AnthropicLM,
-    AsyncAnthropicLM,
-    AsyncClaudeCodeLM,
-    AsyncGeminiLM,
-    AsyncOpenAIChatLM,
-    AsyncOpenAICodexLM,
-    AsyncOpenAILM,
-    ClaudeCodeLM,
-    Credential,
-    GeminiLM,
-    AsyncXaiLM,
-    OpenAIChatLM,
-    OpenAICodexLM,
-    OpenAILM,
-    XaiLM,
-)
+from .providers import Credential
+from .registry import PROVIDERS, ProviderDefinition, canonical_provider as _canonical_provider
 from .types import Request, Response, StreamEvent
 
 __all__ = [
@@ -138,36 +125,38 @@ DEFAULT_RULES: tuple[RouteRule, ...] = (
 )
 
 
-# provider string -> LM class.  Hardcoded, exported, inspectable.
+# provider string -> LM class.  Read-only views of the provider registry
+# (lm15.registry.PROVIDERS): adapter-owned entries here, chat-bound
+# entries in CHAT_PRESET_ROUTES.  Exported and inspectable, as before;
+# the registry is the one place a provider is declared.
 # Values are the *sync* classes; AsyncLMRouter uses ASYNC_ADAPTERS.
-ADAPTERS: Mapping[str, type] = {
-    "openai": OpenAILM,
-    "openai-chat": OpenAIChatLM,
-    "anthropic": AnthropicLM,
-    "gemini": GeminiLM,
-    "claude-code": ClaudeCodeLM,
-    "openai-codex": OpenAICodexLM,
-    "xai": XaiLM,
-}
+ADAPTERS: Mapping[str, type] = MappingProxyType(
+    {d.id: d.adapter for d in PROVIDERS.values() if not d.bound}
+)
 
-ASYNC_ADAPTERS: Mapping[str, type] = {
-    "openai": AsyncOpenAILM,
-    "openai-chat": AsyncOpenAIChatLM,
-    "anthropic": AsyncAnthropicLM,
-    "gemini": AsyncGeminiLM,
-    "claude-code": AsyncClaudeCodeLM,
-    "openai-codex": AsyncOpenAICodexLM,
-    "xai": AsyncXaiLM,
-}
+ASYNC_ADAPTERS: Mapping[str, type] = MappingProxyType(
+    {d.id: d.async_adapter for d in PROVIDERS.values() if not d.bound}
+)
+
+
+def _definition(provider: str) -> ProviderDefinition | None:
+    return PROVIDERS.get(provider)
+
 
 def _credential_policy(provider: str, adapters: Mapping[str, type] | None = None) -> str:
-    """The provider's declared ``ProviderManifest.credential_policy``.
+    """The provider's declared ``AccessPolicy.credential_policy``.
 
-    Chat-preset routes (groq, openrouter, local servers) have no manifest
-    of their own and are always ordinary ``"key"`` providers.  This is the
-    single source the router and doctor consult — there is deliberately no
-    hardcoded provider-name list that could drift from the manifests.
+    Read from the registry entry's access policy — for an adapter-owned
+    entry that is the class manifest; for a chat-bound entry the bound
+    policy (always ``"key"`` today).  This is the single source the router
+    and doctor consult — there is deliberately no hardcoded provider-name
+    list that could drift from the declarations.  ``adapters`` lets tests
+    substitute fake classes; a provider found there but not in the
+    registry answers with its class manifest.
     """
+    definition = _definition(provider)
+    if definition is not None:
+        return definition.credential_policy
     lookup = ADAPTERS if adapters is None else adapters
     cls = lookup.get(provider)
     if cls is None:
@@ -178,10 +167,11 @@ def _credential_policy(provider: str, adapters: Mapping[str, type] | None = None
 @dataclass(frozen=True, slots=True)
 class PresetRoute:
     """A provider routable through ``OpenAIChatLM`` with a named compat
-    preset.  Pure data: the provider string doubles as the preset name
-    (which also supplies the server's default base_url); ``env_keys`` is
-    that server's own key convention; ``default_key`` is the placeholder
-    local servers accept when no key is configured."""
+    preset — the registry's chat-bound entry, projected to the fields this
+    table always carried.  Pure data: the provider string doubles as the
+    preset name (which also supplies the server's default base_url);
+    ``env_keys`` is that server's own key convention; ``default_key`` is
+    the placeholder local servers accept when no key is configured."""
 
     provider: str
     env_keys: tuple[str, ...] = ()
@@ -189,24 +179,18 @@ class PresetRoute:
     note: str = ""
 
 
-# Chat Completions preset providers, keyed by provider string.  Same
-# spirit as DEFAULT_RULES: the complete built-in knowledge, inspectable
-# and printable.  Only presets whose base_url is pinned in
-# OPENAI_CHAT_PRESET_BASE_URLS belong here; new entries land with live
-# receipts first, like every provider behavior.
-CHAT_PRESET_ROUTES: Mapping[str, PresetRoute] = {
-    "groq": PresetRoute("groq", env_keys=("GROQ_API_KEY",), note="Groq Cloud (Chat Completions dialect)"),
-    "openrouter": PresetRoute("openrouter", env_keys=("OPENROUTER_API_KEY",), note="OpenRouter (Chat Completions dialect)"),
-    "ollama": PresetRoute("ollama", default_key="ollama", note="local ollama server (keyless)"),
-    "vllm": PresetRoute("vllm", default_key="EMPTY", note="local vLLM server (keyless)"),
-    "sglang": PresetRoute("sglang", default_key="EMPTY", note="local SGLang server (keyless)"),
-}
-
-
-def _canonical_provider(name: str) -> str:
-    """Provider strings are hyphenated (``openai-chat``); the underscore
-    spelling is accepted everywhere as a permanent alias."""
-    return name.replace("_", "-")
+# Chat Completions preset providers, keyed by provider string: the
+# chat-bound half of the registry.  Same spirit as DEFAULT_RULES — the
+# complete built-in knowledge, inspectable and printable.  A new entry is
+# an AccessPolicy in lm15.access plus a registry declaration, landed with
+# live receipts first, like every provider behavior.
+CHAT_PRESET_ROUTES: Mapping[str, PresetRoute] = MappingProxyType(
+    {
+        d.id: PresetRoute(d.id, env_keys=d.env_keys, default_key=d.placeholder_key, note=d.note)
+        for d in PROVIDERS.values()
+        if d.bound
+    }
+)
 
 
 def _routable(provider: str, adapters: Mapping[str, type]) -> bool:
@@ -216,7 +200,7 @@ def _routable(provider: str, adapters: Mapping[str, type]) -> bool:
 def _adapter_for(provider: str, adapters: Mapping[str, type]) -> type:
     if provider in adapters:
         return adapters[provider]
-    return adapters["openai-chat"]  # preset route
+    return adapters["openai-chat"]  # chat-bound entry
 
 
 # --------------------------------------------------------------- errors ----
@@ -625,7 +609,12 @@ def _build_lm(resolution: Resolution, config: RouterConfig, adapters: Mapping[st
             env_keys=env_keys,
         )
     if route is not None:
-        return cls(api_key=api_key, compat=route.provider, **extra)
+        # Chat-bound entry: the dialect class with this provider's access
+        # policy (credential header, surfaces, base_url) and compat preset
+        # bound at construction.  The LM then names itself by the provider
+        # (errors, ModelInfo.provider), not by the dialect.
+        definition = PROVIDERS[resolution.provider]
+        return cls(api_key=api_key, compat=definition.compat, access=definition.access, **extra)
     return cls(api_key=api_key, **extra)
 
 

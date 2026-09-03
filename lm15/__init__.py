@@ -24,8 +24,11 @@ The top level is curated for application developers.  Deeper audiences
 import one module (API review, 2026-07-13):
 `lm15.serde` (the complete to_dict/from_dict pairs), `lm15.providers`
 (BaseProviderLM, ProviderDialect, transports protocols, Credential),
-`lm15.errors` (map_http_error and friends), `lm15.router` (the
-RouteRule/DEFAULT_RULES/PresetRoute/CHAT_PRESET_ROUTES tables),
+`lm15.errors` (map_http_error and friends), `lm15.registry` (the one
+table of named providers: PROVIDERS / ProviderDefinition — dialect,
+access policy, compat preset, console URL), `lm15.router` (the
+RouteRule/DEFAULT_RULES tables and the ADAPTERS/CHAT_PRESET_ROUTES views
+of the registry),
 `lm15.profiles` / `lm15.compat` (profile and compat-policy machinery),
 `lm15.sse`, `lm15.transports` (HTTP plumbing), `lm15.live` (realtime
 sessions; optional `websockets` dependency), `lm15.auth` (local

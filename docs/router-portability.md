@@ -35,13 +35,17 @@ language-neutrally so each port can implement it idiomatically.
    (hyphenated is canonical; the underscore spelling is a permanent
    alias accepted at every rung and in the per-provider key map) —
    plus the Chat Completions **preset routes**: `groq`, `openrouter`,
-   `ollama`, `vllm`, `sglang`. A preset route is pure data (provider
-   string doubling as the compat preset name, that server's `env_keys`
-   convention, an optional `default_key` placeholder for keyless local
-   servers) and routes to the implementation's Chat Completions adapter
-   with that preset (which also supplies the server's pinned default
-   base URL). Both tables are hardcoded, exported, and inspectable
-   data; preset entries land with live receipts first, like every
+   `deepseek`, `ollama`, `vllm`, `sglang`. A preset route is pure data
+   (provider string doubling as the compat preset name, that server's
+   `env_keys` convention, an optional `default_key` placeholder for
+   keyless local servers) and routes to the implementation's Chat
+   Completions adapter with that preset and that provider's access
+   policy bound (so the LM names the provider in errors and model
+   listings, and the preset supplies the server's pinned default base
+   URL). Both tables are views of one provider registry
+   (`lm15.registry.PROVIDERS` in the reference: id, dialect, access
+   policy, compat preset, console URL); a port copies that table as
+   data. Preset entries land with live receipts first, like every
    provider behavior.
 3. **Resolution algorithm** — exactly four rungs, fixed order, first
    match wins, order not configurable:

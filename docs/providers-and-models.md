@@ -36,6 +36,7 @@ detail: the list of providers, the shortcuts, and the metadata.
 | xAI | `xai` | `XAI_API_KEY` or Grok subscription | images, video |
 | Groq | `groq` | `GROQ_API_KEY` | — |
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | — |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | — |
 | ollama (local) | `ollama` | none | — |
 | vLLM (local) | `vllm` | none | — |
 | SGLang (local) | `sglang` | none | — |
@@ -53,8 +54,8 @@ is on [Authentication](authentication.md).
     dialect that half the industry adopted as a de-facto standard.
     lm15 ships both. The `openai-chat` adapter speaks Chat
     Completions — and it is the same adapter that powers the Groq,
-    OpenRouter, ollama, vLLM, and SGLang rows above, each via a preset
-    that knows that server's URL and quirks. You rarely type
+    OpenRouter, DeepSeek, ollama, vLLM, and SGLang rows above, each via
+    a preset that knows that server's URL and quirks. You rarely type
     `openai-chat` yourself; the presets do.
 
 Chat — the part all of this rests on — is **stable**: it is frozen by

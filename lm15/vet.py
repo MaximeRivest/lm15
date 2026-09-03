@@ -22,7 +22,7 @@ from typing import Any, Callable, Iterator, Literal, get_args, get_origin
 from . import types as lm15_types
 from . import serde
 from .errors import LM15Error, StreamAssemblyError, canonical_error_code
-from .providers import AnthropicLM, GeminiLM, HttpResponse, OpenAIChatLM, OpenAILM
+from .providers import HttpResponse
 from .providers.base import BaseProviderLM
 from .result import coalesce_stream, materialize_response
 from .sse import parse_sse
@@ -48,32 +48,29 @@ _PARSE_ONLY_KEY = "vet-parse-only"
 # ─── Adapters ────────────────────────────────────────────────────────
 
 def adapter_for_provider(provider: str, api_key: str, base_url: str | None = None) -> BaseProviderLM:
+    """The LM a contract case's ``provider`` string names, from the registry.
+
+    A chat-bound provider (groq, deepseek, …) is the chat dialect with that
+    provider's compat preset and access policy bound, exactly as the router
+    builds it; an adapter-owned provider is its class.  ``base_url``
+    overrides the provider's default (local vLLM/SGLang cases).
+    """
+    from .registry import lookup
+
+    definition = lookup(provider)
+    if definition is None:
+        raise ValueError(f"unknown provider: {provider}")
     kwargs: dict[str, Any] = {"api_key": api_key}
     if base_url is not None:
         kwargs["base_url"] = base_url
-    if provider == "openai":
-        return OpenAILM(**kwargs)
-    if provider in ("openai_chat", "openai-chat"):
-        return OpenAIChatLM(**kwargs)
-    if provider == "anthropic":
-        return AnthropicLM(**kwargs)
-    if provider == "gemini":
-        return GeminiLM(**kwargs)
-    if provider in ("claude-code", "claude_code"):
-        from .providers.claude_code import ClaudeCodeLM
-
-        return ClaudeCodeLM(**kwargs)
-    if provider == "xai":
-        from .providers.xai import XaiLM
-
-        return XaiLM(**kwargs)
-    if provider in ("openai-codex", "openai_codex"):
-        from .providers.openai_codex import OpenAICodexLM
-
+    if definition.bound:
+        kwargs["compat"] = definition.compat
+        kwargs["access"] = definition.access
+    if definition.id == "openai-codex":
         # PROTOCOL.md pins the harness account id: the ctor cannot derive one
         # from a non-JWT injected key, and the wire header must be exact.
-        return OpenAICodexLM(account_id="test-account", **kwargs)
-    raise ValueError(f"unknown provider: {provider}")
+        kwargs["account_id"] = "test-account"
+    return definition.adapter(**kwargs)
 
 
 # ─── Serde kind table ────────────────────────────────────────────────
@@ -550,17 +547,17 @@ def op_surface_dump(msg: JsonObject) -> JsonObject:
 
 
 def _reflect_providers() -> JsonObject:
-    """Every first-class adapter's manifest: who supports what, by reflection.
+    """Every registered provider's access policy: who supports what, by reflection.
 
     This is the support matrix the contract pins (spec/support-matrix.json):
     a port that silently disagrees about endpoint support fails the audit,
     not a user at runtime.
     """
-    from .router import ADAPTERS
+    from .registry import PROVIDERS
 
     out: JsonObject = {}
-    for provider in sorted(ADAPTERS):
-        manifest = ADAPTERS[provider].manifest
+    for provider in sorted(PROVIDERS):
+        manifest = PROVIDERS[provider].access
         supports = manifest.supports
         out[provider] = {
             "supports": {
