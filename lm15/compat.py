@@ -225,6 +225,12 @@ OpenAIChatThinkingFormat = Literal[
 # types (browser_search / code_interpreter, both verified live
 # 2026-09-01).
 OpenAIChatBuiltinTools = Literal["auto", "reject", "groq"]
+# Which request field carries Config.user_id.  OpenAI's dialect spells it
+# `user`; DeepSeek documents `user_id` (content-safety, KV-cache and
+# scheduling isolation, rate-limit.md) and accepts `user` silently (live
+# 2026-09-03: 200 either way, no echo) — so the documented name is the
+# only one that can be trusted to do anything.
+OpenAIChatUserField = Literal["auto", "user", "user_id"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +253,7 @@ class OpenAIChatCompat:
     strict_tools: OpenAIStrictTools | None = None
     builtin_tools: OpenAIChatBuiltinTools | None = None
     cache_control: OpenAICacheControl | None = None
+    user_field: OpenAIChatUserField | None = None
     routing: JsonObject | None = None
     extensions: JsonObject | None = None
 
@@ -270,6 +277,7 @@ class OpenAIChatCompat:
         _check_literal_or_none(self.strict_tools, OpenAIStrictTools, "strict_tools")
         _check_literal_or_none(self.builtin_tools, OpenAIChatBuiltinTools, "builtin_tools")
         _check_literal_or_none(self.cache_control, OpenAICacheControl, "cache_control")
+        _check_literal_or_none(self.user_field, OpenAIChatUserField, "user_field")
         _check_json_object_or_none(self.routing, "routing")
         _check_json_object_or_none(self.extensions, "extensions")
 
@@ -403,6 +411,7 @@ OPENAI_CHAT_PRESETS: dict[str, OpenAIChatCompat] = {
         tool_result_name="omit",
         strict_tools="omit",
         cache_control="none",
+        user_field="user_id",
     ),
     "qwen": OpenAIChatCompat(
         instruction_role="system",
@@ -466,6 +475,7 @@ class ResolvedOpenAIChatCompat:
     strict_tools: Literal["include", "omit"] = "omit"
     builtin_tools: Literal["reject", "groq"] = "reject"
     cache_control: Literal["none", "openai", "anthropic"] = "openai"
+    user_field: Literal["user", "user_id"] = "user"
     routing: JsonObject | None = None
     extensions: JsonObject | None = None
 
@@ -482,6 +492,7 @@ _CHAT_AUTO_DEFAULTS: dict[str, str] = {
     "strict_tools": "omit",
     "builtin_tools": "reject",
     "cache_control": "openai",
+    "user_field": "user",
 }
 
 

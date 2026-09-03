@@ -476,13 +476,14 @@ class OpenAIChatLM(BaseProviderLM):
 
         # Promoted cross-provider knobs (changes/2026-09-01-extensions-burn-down):
         # Chat Completions spellings — user_id rides the dialect's `user`
-        # field (safety_identifier is Responses-only). Servers that do not
-        # implement a field reject it themselves; the dialect adapter cannot
-        # know each compat server's support statically.
+        # field (safety_identifier is Responses-only), or the server's own
+        # name when the compat says so (DeepSeek: `user_id`). Servers that
+        # do not implement a field reject it themselves; the dialect adapter
+        # cannot know each compat server's support statically.
         if request.config.service_tier is not None:
             payload["service_tier"] = request.config.service_tier
         if request.config.user_id is not None:
-            payload["user"] = request.config.user_id
+            payload[compat.user_field] = request.config.user_id
         if request.config.store is not None:
             payload["store"] = request.config.store
 

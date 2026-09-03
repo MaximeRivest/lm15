@@ -36,7 +36,7 @@ detail: the list of providers, the shortcuts, and the metadata.
 | xAI | `xai` | `XAI_API_KEY` or Grok subscription | images, video |
 | Groq | `groq` | `GROQ_API_KEY` | — |
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | — |
-| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | — |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | — (see note) |
 | ollama (local) | `ollama` | none | — |
 | vLLM (local) | `vllm` | none | — |
 | SGLang (local) | `sglang` | none | — |
@@ -47,6 +47,18 @@ Every provider does chat with streaming and tools — that column would
 be all checkmarks, so the table only lists what each offers *beyond*
 it. Setting the key is one `export`; every other way to authenticate
 is on [Authentication](authentication.md).
+
+!!! note "DeepSeek: thinking is on by default"
+    DeepSeek models reason before they answer unless you say otherwise
+    (`Config(reasoning=Reasoning(effort="off"))`). While thinking is on,
+    the server accepts `temperature` and `top_p` and silently ignores
+    them (its documentation says so; verified live 2026-09-03) — lm15
+    does not raise, because that is the provider's default mode.
+    `Config.user_id` is sent as DeepSeek's `user_id` field. Structured
+    output is `json_object` only; a JSON schema is refused by the server
+    with a clear 400. Requests and responses are processed and stored in
+    the People's Republic of China (DeepSeek privacy policy); prepaid
+    balance, so a drained account is a 402, never a surprise bill.
 
 !!! note "You may also see `openai-chat`"
     OpenAI has two wire dialects: its current **Responses API** (what

@@ -154,3 +154,19 @@ class TestBinding:
         assert compat.thinking_replay == "native"
         assert compat.assistant_reasoning_content == "include_empty"
         assert compat.max_tokens_field == "max_tokens"
+        assert compat.user_field == "user_id"
+
+    def test_user_field_rides_the_compat_name(self) -> None:
+        # DeepSeek documents `user_id` and accepts `user` silently (live
+        # 2026-09-03); OpenAI's dialect spells it `user`.
+        import json
+
+        from lm15 import Config, Message, Request
+
+        req = Request(model="m", messages=(Message.user("x"),), config=Config(user_id="u1"))
+        for preset, field_name in (("openai", "user"), ("groq", "user"), ("deepseek", "user_id")):
+            body = json.loads(OpenAIChatLM(api_key="k", compat=preset).build_request(req, stream=False).body)
+            assert body[field_name] == "u1", preset
+            assert ({"user", "user_id"} - {field_name}).isdisjoint(body), preset
+        with pytest.raises(ValueError):
+            OpenAIChatCompat(user_field="uid")  # type: ignore[arg-type]

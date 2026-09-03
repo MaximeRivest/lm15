@@ -20,9 +20,12 @@ unchanged.
 `https://api.deepseek.com`) joins as the first registry-only provider: a
 declaration plus a compat preset, no class. The preset now replays
 `reasoning_content` natively and sends it on every assistant turn when
-tools are present — DeepSeek answers 400 otherwise (api-docs.deepseek.com,
-thinking-mode guide, scraped 2026-09-03). Live receipts pending; see
-`lm15-contract/research/providers/deepseek/`.
+tools are present — DeepSeek answers 400 otherwise (captured verbatim,
+`errors/cases/deepseek.json`). Live-verified 2026-09-03: eleven cases,
+four error envelopes, thirteen probes (`lm15-contract/changes/
+2026-09-03-deepseek-live.md`). New `OpenAIChatCompat.user_field`
+(`"user"` | `"user_id"`, default `user`): `Config.user_id` rides the
+server's documented field name; the `deepseek` preset sends `user_id`.
 
 **One truth per support fact.** The adapter-level `Capabilities` object
 (`lm.capabilities`: free-text `features`, adapter-wide modalities) is
