@@ -75,8 +75,9 @@ had already established. The event trace would then contradict the
 materialized `Response`.
 
 **`StreamEndEvent.provider_data` is the wire frame that supplied `usage`,
-verbatim (the JSON object of that frame); if no frame supplied usage, the
-frame that supplied `finish_reason`. Bare terminators contribute nothing.
+verbatim (the JSON object of that frame; when several frames carry usage,
+the last one — the coalescer's later-fills reading); if no frame supplied
+usage, the frame that supplied `finish_reason`. Bare terminators contribute nothing.
 It is an escape hatch, not a canonical fact: the harness compares it for
 presence and JSON type only.** Chat: the usage chunk. Anthropic: the
 `message_delta` frame. Responses: `response.completed` (the event
