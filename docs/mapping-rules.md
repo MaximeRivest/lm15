@@ -400,7 +400,14 @@ after the independent review found it lived only in code):
    lifted into the Response (pinned by the reviewed `openai_chat.streaming`
    and by `xai.streaming`; a wire fact dropped by rule, stated here).
    The fields the wire withholds on the stream path (INV-051), per
-   dialect, today: chat dialect — `id` (this rule). Continuation state
+   dialect, today: chat dialect — `id` (this rule) and the served `model`
+   snapshot (a chunk's `model` may be the dated snapshot while the complete
+   body's is the alias; the stream keeps the request's model, MAP-4);
+   Gemini — `id` (no start frame carries one). Nothing else. A minted
+   tool-call id is `tool_call_<index>` on both paths (parity verified
+   2026-09-06 over every pinned stream body; the complete Gemini path
+   used to mint `fc_<index>`, corrected the same day with the three
+   frozen Gemini goldens re-reviewed). Continuation state
    is never withheld: state known at start is emitted immediately after
    `start` as a message-level `ContinuationDelta`; state known at a
    part's end is emitted at that end. No dialect emits

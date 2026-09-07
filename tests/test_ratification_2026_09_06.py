@@ -305,13 +305,7 @@ _WITHHELD: dict[str, tuple[str, ...]] = {
     "gemini": ("id",),
 }
 
-# Known parity gaps, reported 2026-09-06 and not repaired here: repairing
-# them changes goldens outside the scripted D5/D8/D9 migration.
-_KNOWN_GAPS: dict[str, str] = {
-    # Gemini sends no call id; the complete path mints `fc_<n>` (pinned by the
-    # frozen gemini.tools golden), the assembler mints `tool_call_<n>` (MAP-9).
-    "gemini.streaming_tool_call": "minted tool-call id differs: fc_0 (complete) vs tool_call_0 (stream)",
-}
+_KNOWN_GAPS: dict[str, str] = {}
 
 
 def _parity_params() -> list:

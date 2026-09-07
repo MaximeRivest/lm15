@@ -50,13 +50,28 @@ def _encode(text: str) -> str:
     return urllib.parse.quote(text, safe=_SAFE)
 
 
+def _remove_dot_segments(path: str) -> str:
+    """RFC 3986 §5.2.4 as the AWS SDKs apply it to non-S3 paths: drop `.`
+    and empty segments, pop on `..`, keep a leading and a trailing slash.
+    Pinned by the AWS test-suite vectors get-relative*, get-slash*,
+    get-slashes and get-slash-pointless-dot (auth/sigv4-vectors.json)."""
+    kept: list[str] = []
+    for segment in path.split("/"):
+        if segment == "..":
+            if kept:
+                kept.pop()
+        elif segment and segment != ".":
+            kept.append(segment)
+    first = "/" if path.startswith("/") else ""
+    last = "/" if path.endswith("/") and kept else ""
+    return first + "/".join(kept) + last
+
+
 def _canonical_path(path: str) -> str:
-    # The current vectors cover raw paths, not percent-encoded paths or
-    # dot-segment normalization. Extend the shared vectors before relying
-    # on this signer for arbitrary non-S3 request paths.
     if not path:
         return "/"
-    return "/".join(_encode(urllib.parse.unquote(seg)) for seg in path.split("/"))
+    normalized = _remove_dot_segments(path) or "/"
+    return "/".join(_encode(urllib.parse.unquote(seg)) for seg in normalized.split("/"))
 
 
 def _canonical_query(query: str) -> str:

@@ -82,7 +82,9 @@ def test_sigv4_vectors(case):
     fixed = SIGV4["fixed"]
     req = case["request"]
     headers = {k: (v if isinstance(v, str) else ",".join(v)) for k, v in req["headers"].items() if k.lower() not in ("host", "x-amz-date")}
-    token = headers.pop("X-Amz-Security-Token", None)
+    # The vector's token is a header (post-sts-header-*) or case-level
+    # (get-vanilla-with-session-token), as harness/check.py reads it.
+    token = headers.pop("X-Amz-Security-Token", None) or case.get("session_token")
     got = sigv4.sign(
         method=req["method"], url="https://example.amazonaws.com" + req["target"], headers=headers, payload=req["body"].encode(),
         credentials=AwsCredentials(fixed["access_key_id"], fixed["secret_access_key"], session_token=token),

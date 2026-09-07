@@ -847,7 +847,9 @@ class GeminiLM(BaseProviderLM):
                         ),
                     )
                 parts.append(ToolCallPart(
-                    id=str(fc.get("id") or f"fc_{len(parts)}"),
+                    # MAP-9: a missing call id is the lm15 correlator tool_call_<index>,
+                    # the same one the stream assembler mints (INV-051 parity).
+                    id=str(fc.get("id") or f"tool_call_{len(parts)}"),
                     name=str(fc.get("name") or "tool"),
                     input=fc.get("args") if isinstance(fc.get("args"), dict) else {},
                     continuation=continuation,
