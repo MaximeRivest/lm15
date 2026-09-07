@@ -103,7 +103,7 @@ def test_response_to_events_and_materialize_preserve_continuation_state() -> Non
                 ),
             ),
             continuation=(
-                ContinuationState(provider="openai", kind="response_id", data={"id": "resp_1"}),
+                ContinuationState(provider="openai", kind="conversation_state", data={"id": "conv_1"}),
             ),
         ),
         finish_reason="stop",

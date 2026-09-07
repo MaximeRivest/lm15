@@ -189,14 +189,18 @@ A refreshed credential that is already expired raises `AuthError`. CLI bearer
 tokens without expiry metadata are resolved again on the next request, rather
 than cached forever. No cloud credential cache is written to disk.
 
-Cloud credential providers are synchronous. A refresh can block an async
-adapter's event loop. Use a pre-refreshed credential provider when that latency
-is unacceptable.
+Cloud credential providers are synchronous. The async adapters call a
+credential provider through `asyncio.to_thread`, so a chain refresh does not
+block the event loop (ratified 2026-09-06). A static credential is read
+inline; no thread is used.
 
 The stdlib RSA signer uses variable-time Python integer arithmetic, without
-blinding. It is not hardened against timing attacks. Use an external credential
-provider when that threat matters. Encrypted-key support and a hardened crypto
-backend need a separate dependency decision.
+blinding. It is not hardened against timing attacks. For high-value keys, the
+mitigation is an external token provider: pass `api_key=lambda:
+BearerToken(token)` where the token comes from your own signer or from the
+cloud CLI (`gcloud auth print-access-token`, `az account get-access-token`),
+so the private key never enters this process. Encrypted-key support and a
+hardened crypto backend need a separate dependency decision.
 
 ## Per-door refusals
 

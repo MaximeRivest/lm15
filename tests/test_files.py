@@ -135,7 +135,25 @@ def test_openai_readiness_folds() -> None:
     assert lm._file_info({**OPENAI_FILE, "status": "uploaded"}).readiness == "pending"
     assert lm._file_info({**OPENAI_FILE, "status": "pending"}).readiness == "pending"  # Azure OpenAI v1
     assert lm._file_info({**OPENAI_FILE, "status": "error"}).readiness == "failed"
+    assert lm._file_info({**OPENAI_FILE, "status": "failed"}).readiness == "failed"
+    assert lm._file_info({**OPENAI_FILE, "status": "unknown-word"}).readiness == "ready"
     assert lm._file_info({k: v for k, v in OPENAI_FILE.items() if k != "status"}).readiness == "ready"
+
+
+def test_openai_shaped_readiness_fold_table() -> None:
+    # spec/vocabularies.md FileReadiness, ratified 2026-09-06 (D6): one
+    # table shared by every OpenAI-shaped file object (openai, azure, meta).
+    from lm15.providers.common import openai_file_readiness
+
+    assert openai_file_readiness("uploaded") == "pending"
+    assert openai_file_readiness("pending") == "pending"
+    assert openai_file_readiness("error") == "failed"
+    assert openai_file_readiness("failed") == "failed"
+    assert openai_file_readiness("processed") == "ready"
+    assert openai_file_readiness(None) == "ready"
+    assert openai_file_readiness("") == "ready"
+    assert openai_file_readiness("something-new") == "ready"
+    assert openai_file_readiness(7) == "ready"
 
 
 def test_openai_waits_through_azure_pending_state() -> None:

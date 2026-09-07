@@ -80,9 +80,9 @@ def test_config_without_cache_omits_key() -> None:
 # ── ContinuationState ────────────────────────────────────────────────
 
 def test_continuation_state_round_trip() -> None:
-    state = ContinuationState(provider="openai", kind="response_id", data={"id": "resp_123"})
+    state = ContinuationState(provider="openai", kind="reasoning_item", data={"id": "rs_123"})
     d = continuation_to_dict(state)
-    assert d == {"provider": "openai", "kind": "response_id", "data": {"id": "resp_123"}}
+    assert d == {"provider": "openai", "kind": "reasoning_item", "data": {"id": "rs_123"}}
     assert continuation_from_dict(d) == state
 
 

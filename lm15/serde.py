@@ -169,8 +169,6 @@ def part_to_dict(part: Part) -> dict[str, Any]:
 
     elif isinstance(part, ThinkingPart):
         d["text"] = part.text
-        if part.redacted:
-            d["redacted"] = part.redacted
 
     elif isinstance(part, RefusalPart):
         d["text"] = part.text
@@ -226,7 +224,7 @@ def part_from_dict(d: dict[str, Any]) -> Part:
         return TextPart(text=d.get("text", ""), continuation=continuation)
 
     if t == "thinking":
-        return ThinkingPart(text=d.get("text", ""), redacted=d.get("redacted", False), continuation=continuation)
+        return ThinkingPart(text=d.get("text", ""), continuation=continuation)
 
     if t == "refusal":
         return RefusalPart(text=d.get("text", ""), continuation=continuation)

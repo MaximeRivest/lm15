@@ -902,20 +902,13 @@ class GeminiLM(BaseProviderLM):
             parts = [TextPart(text="")]
         usage = _gemini_usage(data.get("usageMetadata"), output_keys=("candidatesTokenCount", "responseTokenCount"))
         has_tool = any(isinstance(part, ToolCallPart) for part in parts)
-        message_continuation: tuple[ContinuationState, ...] = ()
-        if data.get("responseId"):
-            message_continuation = (
-                ContinuationState(
-                    provider="gemini",
-                    kind="response_id",
-                    data={"id": str(data.get("responseId"))},
-                ),
-            )
+        # D8 (2026-09-06): Response.id carries responseId; no message-level
+        # continuation state is minted for it.
         logprob_seq = _gemini_token_logprobs(candidate.get("logprobsResult"))
         return Response(
             id=str(data.get("responseId")) if data.get("responseId") else None,
             model=request.model,
-            message=Message(role="assistant", parts=tuple(parts), continuation=message_continuation),
+            message=Message(role="assistant", parts=tuple(parts)),
             finish_reason=_finish_reason(candidate.get("finishReason"), has_tool_call=has_tool),
             usage=usage,
             logprobs=logprob_seq or None,
@@ -1011,15 +1004,6 @@ class GeminiLM(BaseProviderLM):
                         yield StreamDeltaEvent(delta=ImageDelta(data=data, part_index=idx, media_type=mime))
             finish = candidate.get("finishReason")
 
-        if payload.get("responseId") is not None:
-            yield StreamDeltaEvent(
-                delta=ContinuationDelta(
-                    provider="gemini",
-                    kind="response_id",
-                    data={"id": str(payload.get("responseId"))},
-                    part_index=None,
-                )
-            )
         if finish:
             yield StreamEndEvent(finish_reason=_finish_reason(finish, has_tool_call=saw_tool), usage=self._usage_from_payload(payload), provider_data=payload)
         elif not yielded_delta and "usageMetadata" in payload:

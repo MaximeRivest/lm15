@@ -798,11 +798,12 @@ class AnthropicLM(BaseProviderLM):
                 parts.append(
                     ThinkingPart(
                         text=str(block.get("thinking") or block.get("text") or ""),
-                        redacted=False,
                         continuation=continuation,
                     )
                 )
             elif block_type == "redacted_thinking":
+                # MAP-7 rule 11: hidden thinking is empty text plus replay
+                # state; the blob goes back verbatim as redacted_thinking.
                 continuation = ()
                 redacted_payload = block.get("data")
                 if redacted_payload is not None:
@@ -813,7 +814,7 @@ class AnthropicLM(BaseProviderLM):
                             data={"data": redacted_payload},
                         ),
                     )
-                parts.append(ThinkingPart(text="[redacted]", redacted=True, continuation=continuation))
+                parts.append(ThinkingPart(text="", continuation=continuation))
             elif block_type in ANTHROPIC_PROVIDER_EXECUTED_BLOCKS:
                 continue
             else:
@@ -833,19 +834,12 @@ class AnthropicLM(BaseProviderLM):
             reasoning_tokens=_reasoning_tokens(usage_payload),
         )
         has_tool = any(isinstance(part, ToolCallPart) for part in parts)
-        message_continuation: tuple[ContinuationState, ...] = ()
-        if data.get("id"):
-            message_continuation = (
-                ContinuationState(
-                    provider="anthropic",
-                    kind="message_id",
-                    data={"id": str(data.get("id"))},
-                ),
-            )
+        # D8 (2026-09-06): Response.id carries the message id; no
+        # message-level continuation state is minted for it.
         return Response(
             id=str(data.get("id")) if data.get("id") else None,
             model=str(data.get("model") or request.model),
-            message=Message(role="assistant", parts=tuple(parts), continuation=message_continuation),
+            message=Message(role="assistant", parts=tuple(parts)),
             finish_reason=_finish_reason(data.get("stop_reason"), has_tool_call=has_tool),
             usage=usage,
             provider_data=_attach_unmapped(data, unmapped),
@@ -862,15 +856,6 @@ class AnthropicLM(BaseProviderLM):
                 id=str(msg.get("id")) if msg.get("id") else None,
                 model=str(msg.get("model") or request.model),
             )
-            if msg.get("id"):
-                yield StreamDeltaEvent(
-                    delta=ContinuationDelta(
-                        provider="anthropic",
-                        kind="message_id",
-                        data={"id": str(msg.get("id"))},
-                        part_index=None,
-                    )
-                )
             return
         if et == "content_block_start":
             block = payload.get("content_block", {}) if isinstance(payload.get("content_block"), dict) else {}
@@ -892,8 +877,13 @@ class AnthropicLM(BaseProviderLM):
                 )
                 return
             if block.get("type") == "redacted_thinking" and block.get("data") is not None:
+                # MAP-7 rule 11: an empty thinking delta opens the hidden
+                # block; its replay state is the block's only content.  The
+                # block has no interior frames, so the state is emitted here
+                # (the adapter is stateless per frame) and the trace reads the
+                # same as an emission at content_block_stop.
                 idx = int(payload.get("index", 0) or 0)
-                yield StreamDeltaEvent(delta=ThinkingDelta(text="[redacted]", part_index=idx))
+                yield StreamDeltaEvent(delta=ThinkingDelta(text="", part_index=idx))
                 yield StreamDeltaEvent(
                     delta=ContinuationDelta(
                         provider="anthropic",
@@ -947,9 +937,13 @@ class AnthropicLM(BaseProviderLM):
                 )
             stop_reason = delta.get("stop_reason")
             if stop_reason is not None or usage is not None:
+                # MAP-3 (D9, 2026-09-06): this frame supplied usage (and the
+                # stop reason), so it is the end event's provider_data,
+                # verbatim; the bare message_stop contributes nothing.
                 yield StreamEndEvent(
                     finish_reason=_finish_reason(stop_reason) if stop_reason is not None else None,
                     usage=usage,
+                    provider_data=payload,
                 )
             return
         if et == "message_stop":

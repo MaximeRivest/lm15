@@ -241,9 +241,13 @@ does not estimate.
   `thinking_budget=512` we observed runs with and without `thinking`
   deltas, while `usage.reasoning_tokens` was nonzero either way.
   Anthropic streams its trace consistently.
-- **Redacted thinking.** Anthropic may return encrypted traces;
-  these surface as `ThinkingPart(redacted=True)` with the signature
-  preserved in `continuation` so multi-turn requests replay them intact.
+- **Hidden thinking.** Anthropic may return encrypted traces
+  (`redacted_thinking`); these surface as a `ThinkingPart` with empty
+  `text` and the blob preserved in `continuation`
+  (`anthropic:redacted_thinking`) so multi-turn requests replay them
+  intact. There is no flag and no placeholder text: hidden thinking is
+  empty text plus replay state, the same shape as an OpenAI reasoning
+  item with no summary (MAP-7 rules 9 and 11).
 
 ## See also
 

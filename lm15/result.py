@@ -537,6 +537,28 @@ def response_to_events(response: Response) -> Iterator[StreamEvent]:
     )
 
 
+class _EndProviderData:
+    """MAP-3 / D9: which adapter end event's ``provider_data`` the merged
+    end carries.  Rank 2: a frame that supplied usage.  Rank 1: a frame that
+    supplied finish_reason.  Rank 0: anything else that carried data.  A
+    later frame replaces an earlier one only at the same or a higher rank,
+    so the usage frame wins over a finish-only frame in either order."""
+
+    __slots__ = ("value", "rank")
+
+    def __init__(self) -> None:
+        self.value: dict[str, Any] | None = None
+        self.rank = -1
+
+    def absorb(self, event: StreamEndEvent) -> None:
+        if event.provider_data is None:
+            return
+        rank = 2 if event.usage is not None else 1 if event.finish_reason is not None else 0
+        if rank >= self.rank:
+            self.value = event.provider_data
+            self.rank = rank
+
+
 def coalesce_stream(
     events: Iterator[StreamEvent], *, model: str | None = None
 ) -> Iterator[StreamEvent]:
@@ -549,7 +571,11 @@ def coalesce_stream(
     a later non-None field replaces the accumulated value, a None field never
     erases one — and emits the single merged end event once the underlying
     iterator is exhausted.  If no end event was seen (e.g. the stream errored
-    or was truncated), no end event is fabricated.
+    or was truncated), no end event is fabricated.  ``provider_data`` follows
+    D9 (2026-09-06): the merged end carries the frame that supplied usage,
+    else the frame that supplied finish_reason; a later usage-bearing frame
+    replaces an earlier one, a finish-only frame never displaces a usage
+    frame.
 
     Dialects without a start frame (chat completions, gemini SSE) get a
     synthesized ``StreamStartEvent`` before the first delta or end event, so
@@ -563,7 +589,7 @@ def coalesce_stream(
     saw_end = False
     finish_reason = None
     usage: Usage | None = None
-    provider_data = None
+    end_data = _EndProviderData()
     for event in events:
         if event.type == "start":
             if started:
@@ -577,8 +603,7 @@ def coalesce_stream(
                 finish_reason = event.finish_reason
             if event.usage is not None:
                 usage = event.usage
-            if event.provider_data is not None:
-                provider_data = event.provider_data
+            end_data.absorb(event)
             continue
         if not started and event.type == "delta":
             started = True
@@ -590,7 +615,7 @@ def coalesce_stream(
         yield StreamEndEvent(
             finish_reason=finish_reason,
             usage=usage,
-            provider_data=provider_data,
+            provider_data=end_data.value,
         )
 
 
@@ -610,7 +635,7 @@ async def acoalesce_stream(
     saw_end = False
     finish_reason = None
     usage: Usage | None = None
-    provider_data = None
+    end_data = _EndProviderData()
     async for event in events:
         if event.type == "start":
             if started:
@@ -624,8 +649,7 @@ async def acoalesce_stream(
                 finish_reason = event.finish_reason
             if event.usage is not None:
                 usage = event.usage
-            if event.provider_data is not None:
-                provider_data = event.provider_data
+            end_data.absorb(event)
             continue
         if not started and event.type == "delta":
             started = True
@@ -637,7 +661,7 @@ async def acoalesce_stream(
         yield StreamEndEvent(
             finish_reason=finish_reason,
             usage=usage,
-            provider_data=provider_data,
+            provider_data=end_data.value,
         )
 
 

@@ -6,6 +6,24 @@
 The shared contract still contains draft amendments and draft canonical
 expectations. `CONTRACT_PIN` must move only after that review is complete.
 
+**Ratified 2026-09-06** (`lm15-contract/verify/DECISIONS-2026-09-06.md`, `changes/2026-09-06-ratification.md`). The paragraphs below implement the decisions by number.
+
+**D1 — AUTH-2 scheme selection.** `select_scheme` implements the ratified table: an `ApiKey` takes the policy's first header-carrying scheme in policy order (`bearer`, `x-api-key`, `api-key`, `query-key`); a `BearerToken` takes `bearer` if the policy lists it, else `x-api-key` if it lists it; `AwsCredentials` take `sigv4` only. Anything else raises `NotConfiguredError`, and the message now names the schemes the credential kind accepts next to the schemes the door offers. Cost, stated: a token handed to first-party `anthropic` goes in `x-api-key` and gets the provider's 401, not a local error.
+
+**D5 — hidden thinking. BREAKING: `ThinkingPart.redacted` is removed**, and `thinking(content, *, continuation=None)` loses the `redacted` keyword; serde neither reads nor writes the key. Hidden thinking is a `ThinkingPart` with empty `text` and its replay state in `continuation` (MAP-7 rule 11): Anthropic `redacted_thinking` becomes `ThinkingPart(text="", continuation=[anthropic:redacted_thinking {"data": blob}])`; in a stream, `ThinkingDelta(text="")` opens the block and the `ContinuationDelta` carries the blob. The `[redacted]` placeholder text is gone everywhere. Replay is unchanged: the blob goes back as `redacted_thinking`.
+
+**D6 — FileReadiness fold.** One table for every OpenAI-shaped file object (`openai`, `azure`, `meta`), in `lm15.providers.common.openai_file_readiness`: `uploaded | pending → pending`, `error | failed → failed`, `processed | absent | unknown → ready`. `failed` is new; the rest is unchanged.
+
+**D7 — continuation namespace.** Verified: every adapter names the dialect (`openai`, `anthropic`, `gemini`) as `ContinuationState.provider`, never the door; a Meta, Azure or Moonshot reasoning item is `openai:reasoning_item`. Pinned by tests; no code change.
+
+**D8 — message-level id continuation. BREAKING:** no dialect emits `openai:response_id`, `gemini:response_id` or `anthropic:message_id` continuation state on the assistant message, on either the complete or the stream path. `Response.id` and `StreamStartEvent.id` carry the id, as before. Nothing in lm15 consumed those states. INV-051 (stream/complete parity) is pinned by a test over every contract stream body: the Response materialized from the stream equals the complete parse of the body the frames fold into, except the fields the wire withholds on one path — the chat dialect's per-chunk `id` and served `model` snapshot, and Gemini's per-chunk `responseId` (no start frame, MAP-4/MAP-9.6). One known gap is recorded as a strict xfail, not repaired: on `gemini.streaming_tool_call` the complete path mints `fc_0` for the id-less call and the assembler mints `tool_call_0` (MAP-9).
+
+**D9 — `StreamEndEvent.provider_data`.** Every dialect's end event carries, verbatim, the wire frame that supplied `usage`, else the frame that supplied `finish_reason`; bare terminators (`[DONE]`, `message_stop`) contribute nothing. New on the chat dialect and its bound providers (the usage chunk, else the finish chunk), on xAI, and on the Anthropic dialect (the `message_delta` frame); unchanged on Responses (`response.completed`'s `response` object) and Gemini (the last chunk). The MAP-3 coalescer now ranks adapter end events so the usage frame's `provider_data` wins over a finish-only frame in either order. It is an escape hatch, not a canonical fact: the harness compares it by presence and type.
+
+**D10 — no delimiter parsing.** Verified: no adapter parses `<think>` / `<reasoning>` tags out of provider text; such text stays literal on every dialect, pinned by tests. Where a server knob separates reasoning (Groq `reasoning_format: parsed`), the preset sends the knob.
+
+**D16 — reference-only.** Async adapters run a credential provider callable through `asyncio.to_thread`, so a cloud-chain refresh does not block the event loop; a static credential is read inline with no thread. `docs/cloud-hosts.md` names the mitigation for the stdlib RSA signer's timing limit: an external token provider (`BearerToken` from your own signer or the cloud CLI) for high-value keys. The reasoning cookbook describes hidden thinking in the D5 shape.
+
 - Preserve old `AccessPolicy` and compatibility-policy constructor calls.
   New options are keyword-only. An explicit legacy `auth_header` overrides
   `auth_scheme`, including in `dataclasses.replace`.

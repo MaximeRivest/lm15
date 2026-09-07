@@ -110,6 +110,7 @@ from .common import (
     iso_utc,
     model_infos_from_entries,
     multipart_form_body,
+    openai_file_readiness,
     openai_token_logprobs,
     parse_json_object,
     part_to_openai_input,
@@ -1083,19 +1084,12 @@ class OpenAILM(BaseProviderLM):
         )
 
         has_tool = any(isinstance(part, ToolCallPart) for part in parts)
-        message_continuation: tuple[ContinuationState, ...] = ()
-        if data.get("id"):
-            message_continuation = (
-                ContinuationState(
-                    provider="openai",
-                    kind="response_id",
-                    data={"id": str(data.get("id"))},
-                ),
-            )
+        # D8 (2026-09-06): Response.id carries the response id; no
+        # message-level continuation state is minted for it.
         return Response(
             id=str(data.get("id")) if data.get("id") else None,
             model=str(data.get("model") or request.model),
-            message=Message(role="assistant", parts=tuple(parts), continuation=message_continuation),
+            message=Message(role="assistant", parts=tuple(parts)),
             finish_reason=_finish_from_status(data, has_tool_call=has_tool),
             usage=usage,
             logprobs=tuple(logprob_seq) if logprob_seq else None,
@@ -1675,16 +1669,7 @@ class OpenAILM(BaseProviderLM):
         file_id = data.get("id")
         if not isinstance(file_id, str) or not file_id:
             raise ProviderError("openai: file object carries no id", provider=self.provider)
-        status = str(data.get("status") or "")
-        if status == "error":
-            readiness = "failed"
-        elif status in ("uploaded", "pending"):
-            # Azure OpenAI v1 says `pending` after a 201 upload and returns
-            # 204 from /content until processing completes (live 2026-09-04).
-            # api.openai.com says `uploaded` for the same state.
-            readiness = "pending"
-        else:  # "processed", absent (the field is deprecated), or unknown
-            readiness = "ready"
+        readiness = openai_file_readiness(data.get("status"))  # D6 fold table
         filename = data.get("filename")
         return FileInfo(
             id=file_id,

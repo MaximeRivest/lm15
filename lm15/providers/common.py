@@ -17,6 +17,7 @@ from ..types import (
     Part,
     TextPart,
     ThinkingPart,
+    FileReadiness,
     TokenLogprob,
     ToolResultPart,
     TopLogprob,
@@ -24,6 +25,29 @@ from ..types import (
 )
 
 JsonPayload = dict[str, Any] | list[Any]
+
+
+# The FileReadiness fold for every OpenAI-shaped file object (api.openai.com,
+# Azure OpenAI v1, Meta): spec/vocabularies.md FileReadiness, ratified
+# 2026-09-06 (verify/DECISIONS-2026-09-06.md D6).  Azure says `pending` after
+# a 201 upload where api.openai.com says `uploaded` (live 2026-09-04); the
+# `status` field is deprecated upstream, so absent and unknown words read as
+# ready.
+_OPENAI_FILE_READINESS: dict[str, FileReadiness] = {
+    "uploaded": "pending",
+    "pending": "pending",
+    "error": "failed",
+    "failed": "failed",
+    "processed": "ready",
+}
+
+
+def openai_file_readiness(status: object) -> FileReadiness:
+    """``uploaded | pending -> pending``, ``error | failed -> failed``,
+    ``processed | absent | unknown -> ready``."""
+    if not isinstance(status, str):
+        return "ready"
+    return _OPENAI_FILE_READINESS.get(status, "ready")
 
 
 def parts_to_text(parts: tuple[Part, ...]) -> str:

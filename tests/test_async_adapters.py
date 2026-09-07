@@ -94,6 +94,37 @@ def test_constructor_field_parity(provider, sync_cls, async_cls):
     )
 
 
+# ─── D16 (2026-09-06): a credential provider runs off the event loop ──
+
+def test_credential_provider_runs_in_worker_thread():
+    body = _latest_body("openai.basic_text")
+    seen: list[int] = []
+
+    def provider():
+        seen.append(threading.get_ident())
+        return "sk-from-provider"
+
+    lm = AsyncOpenAILM(api_key=provider, transport=FakeAsyncTransport(body))
+    loop_thread = threading.get_ident()
+
+    asyncio.run(lm.complete(_REQ))
+
+    assert len(seen) == 1
+    assert seen[0] != loop_thread, "the provider blocked the event loop thread"
+    assert dict(lm.transport.requests[0].headers)["Authorization"] == "Bearer sk-from-provider"
+
+
+def test_static_credential_builds_inline():
+    body = _latest_body("openai.basic_text")
+    lm = AsyncOpenAILM(api_key="sk-static", transport=FakeAsyncTransport(body))
+    before = threading.active_count()
+
+    asyncio.run(lm.complete(_REQ))
+
+    assert threading.active_count() == before
+    assert dict(lm.transport.requests[0].headers)["Authorization"] == "Bearer sk-static"
+
+
 # ─── (b) complete()/stream(): async result == sync parse of same bytes ───
 
 @pytest.mark.parametrize(("provider", "sync_cls", "async_cls"), PAIRS)
