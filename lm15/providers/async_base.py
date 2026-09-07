@@ -15,11 +15,11 @@ if it is ever used: the inner adapter must never touch the network.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
-
 import os
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Callable, ClassVar, Mapping, Protocol
+from typing import Any, AsyncIterator, Callable, ClassVar, Mapping, Protocol, TypeVar
 
 from ..errors import (
     ProviderError,
@@ -58,6 +58,8 @@ from .openai_codex import (
     OpenAICodexLM,
 )
 from .xai import DEFAULT_XAI_BASE_URL, XaiLM
+
+_T = TypeVar("_T")
 
 
 class AsyncTransport(Protocol):
@@ -130,8 +132,20 @@ class AsyncBaseProviderLM:
         self.api_key = self._inner.api_key
         self.base_url = self._inner.base_url
 
+    async def _build(self, build: "Callable[..., _T]", *args: Any, **kwargs: Any) -> "_T":
+        """Run one of the inner adapter's request builders.
+
+        A builder invokes the credential provider (AUTH-2) inside ``_emit``.
+        A cloud-chain provider may refresh over the network, synchronously;
+        run it in a worker thread so that refresh does not block the event
+        loop (D16, 2026-09-06).  A static credential needs no thread.
+        """
+        if callable(self._inner.api_key):
+            return await asyncio.to_thread(build, *args, **kwargs)
+        return build(*args, **kwargs)
+
     async def complete(self, request: Request) -> Response:
-        req = self._inner.build_request(request, stream=False)
+        req = await self._build(self._inner.build_request, request, stream=False)
         resp = await self._send(req)
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
@@ -146,7 +160,7 @@ class AsyncBaseProviderLM:
         return acoalesce_stream(self._stream_raw(request), model=request.model)
 
     async def _stream_raw(self, request: Request) -> AsyncIterator[StreamEvent]:
-        req = self._inner.build_request(request, stream=True)
+        req = await self._build(self._inner.build_request, request, stream=True)
         try:
             async with self.transport.stream(req) as resp:
                 if resp.status >= 400:
@@ -180,7 +194,7 @@ class AsyncBaseProviderLM:
 
     async def list_models(self):
         """Async mirror of BaseProviderLM.list_models (canonical ModelInfo)."""
-        resp = await self._send(self._inner._models_request())
+        resp = await self._send(await self._build(self._inner._models_request))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._models_from_body(resp.text())
@@ -189,19 +203,19 @@ class AsyncBaseProviderLM:
 
     async def batch_submit(self, request: "BatchRequest"):
         upload_body = None
-        upload_req = self._inner._batch_upload_request(request)
+        upload_req = await self._build(self._inner._batch_upload_request, request)
         if upload_req is not None:
             resp = await self._send(upload_req)
             if resp.status >= 400:
                 raise self._inner.normalize_error(resp.status, resp.text())
             upload_body = resp.json()
-        resp = await self._send(self._inner._batch_submit_request(request, upload_body))
+        resp = await self._send(await self._build(self._inner._batch_submit_request, request, upload_body))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._batch_job_from_body(resp.text())
 
     async def batch_status(self, batch_id: str):
-        resp = await self._send(self._inner._batch_status_request(batch_id))
+        resp = await self._send(await self._build(self._inner._batch_status_request, batch_id))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._batch_job_from_body(resp.text())
@@ -209,7 +223,7 @@ class AsyncBaseProviderLM:
     async def batch_results(self, batch_id: str):
         from ..types import BATCH_TERMINAL_STATUSES
 
-        resp = await self._send(self._inner._batch_status_request(batch_id))
+        resp = await self._send(await self._build(self._inner._batch_status_request, batch_id))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         job = self._inner._batch_job_from_body(resp.text())
@@ -220,7 +234,7 @@ class AsyncBaseProviderLM:
             )
         status_body = resp.json()
         texts = []
-        for fetch in self._inner._batch_result_fetches(status_body):
+        for fetch in await self._build(self._inner._batch_result_fetches, status_body):
             fetched = await self._send(fetch)
             if fetched.status >= 400:
                 raise self._inner.normalize_error(fetched.status, fetched.text())
@@ -228,13 +242,13 @@ class AsyncBaseProviderLM:
         return self._inner._batch_entries(status_body, tuple(texts))
 
     async def batch_cancel(self, batch_id: str):
-        resp = await self._send(self._inner._batch_cancel_request(batch_id))
+        resp = await self._send(await self._build(self._inner._batch_cancel_request, batch_id))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._batch_job_from_body(resp.text())
 
     async def batch_list(self, limit: int = 20):
-        resp = await self._send(self._inner._batch_list_request(limit))
+        resp = await self._send(await self._build(self._inner._batch_list_request, limit))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._batch_jobs_from_list_body(resp.text())
@@ -264,32 +278,32 @@ class AsyncBaseProviderLM:
 
     async def cache_create(self, prefix: Request, *, ttl_seconds: int | None = None, label: str | None = None):
         self._inner._check_cache_prefix(prefix, ttl_seconds)
-        resp = await self._send(self._inner._cache_create_request(prefix, ttl_seconds, label))
+        resp = await self._send(await self._build(self._inner._cache_create_request, prefix, ttl_seconds, label))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._cache_info_from_body(resp.text())
 
     async def cache_get(self, cache_id: str):
-        resp = await self._send(self._inner._cache_get_request(cache_id))
+        resp = await self._send(await self._build(self._inner._cache_get_request, cache_id))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._cache_info_from_body(resp.text())
 
     async def cache_list(self, limit: int = 20, cursor: str | None = None):
-        resp = await self._send(self._inner._cache_list_request(limit, cursor))
+        resp = await self._send(await self._build(self._inner._cache_list_request, limit, cursor))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._cache_page_from_list_body(resp.text())
 
     async def cache_delete(self, cache_id: str) -> None:
-        resp = await self._send(self._inner._cache_delete_request(cache_id))
+        resp = await self._send(await self._build(self._inner._cache_delete_request, cache_id))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
 
     async def cache_update(self, cache_id: str, *, ttl_seconds: int):
         if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be a positive int")
-        resp = await self._send(self._inner._cache_update_request(cache_id, ttl_seconds))
+        resp = await self._send(await self._build(self._inner._cache_update_request, cache_id, ttl_seconds))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._cache_info_from_body(resp.text())
@@ -305,30 +319,30 @@ class AsyncBaseProviderLM:
     # ── Files: async drivers over the sync adapter's pure hooks ──────
 
     async def file_upload(self, request: "FileUploadRequest"):
-        resp = await self._send(self._inner._file_upload_request(request))
+        resp = await self._send(await self._build(self._inner._file_upload_request, request))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._file_info_from_body(resp.text())
 
     async def file_get(self, file_id: str):
-        resp = await self._send(self._inner._file_get_request(file_id))
+        resp = await self._send(await self._build(self._inner._file_get_request, file_id))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._file_info_from_body(resp.text())
 
     async def file_list(self, limit: int = 20, cursor: str | None = None):
-        resp = await self._send(self._inner._file_list_request(limit, cursor))
+        resp = await self._send(await self._build(self._inner._file_list_request, limit, cursor))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._file_page_from_list_body(resp.text())
 
     async def file_delete(self, file_id: str) -> None:
-        resp = await self._send(self._inner._file_delete_request(file_id))
+        resp = await self._send(await self._build(self._inner._file_delete_request, file_id))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
 
     async def file_download(self, file_id: str) -> bytes:
-        resp = await self._send(self._inner._file_download_request(file_id))
+        resp = await self._send(await self._build(self._inner._file_download_request, file_id))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return resp.body
@@ -372,13 +386,13 @@ class AsyncBaseProviderLM:
     # ── Video generation: async drivers over the sync adapter's pure hooks ──
 
     async def video_submit(self, request: "VideoGenerationRequest"):
-        resp = await self._send(self._inner._video_submit_request(request))
+        resp = await self._send(await self._build(self._inner._video_submit_request, request))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._video_job_from_body(resp.text())
 
     async def video_status(self, video_id: str):
-        resp = await self._send(self._inner._video_status_request(video_id))
+        resp = await self._send(await self._build(self._inner._video_status_request, video_id))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._video_job_from_body(resp.text(), video_id)
@@ -386,7 +400,7 @@ class AsyncBaseProviderLM:
     async def video_result(self, video_id: str):
         from ..types import VIDEO_TERMINAL_STATUSES
 
-        resp = await self._send(self._inner._video_status_request(video_id))
+        resp = await self._send(await self._build(self._inner._video_status_request, video_id))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         job = self._inner._video_job_from_body(resp.text(), video_id)
@@ -396,7 +410,7 @@ class AsyncBaseProviderLM:
                 f"wait() or poll video_status() until done"
             )
         status_body = resp.json()
-        fetch = self._inner._video_result_fetch(status_body)
+        fetch = await self._build(self._inner._video_result_fetch, status_body)
         fetched = None
         if fetch is not None:
             fetched = await self._send(fetch)
@@ -405,7 +419,7 @@ class AsyncBaseProviderLM:
         return self._inner._video_part(status_body, fetched)
 
     async def video_list(self, limit: int = 20, model: str | None = None):
-        resp = await self._send(self._inner._video_list_request(limit, model))
+        resp = await self._send(await self._build(self._inner._video_list_request, limit, model))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._video_jobs_from_list_body(resp.text())
@@ -428,13 +442,13 @@ class AsyncBaseProviderLM:
     # ── Media generation: async drivers over the sync adapter's pure hooks ──
 
     async def image_generate(self, request: ImageGenerationRequest):
-        resp = await self._send(self._inner._image_generate_request(request))
+        resp = await self._send(await self._build(self._inner._image_generate_request, request))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._image_generation_from_response(request, resp)
 
     async def speech_generate(self, request: SpeechGenerationRequest):
-        resp = await self._send(self._inner._speech_generate_request(request))
+        resp = await self._send(await self._build(self._inner._speech_generate_request, request))
         if resp.status >= 400:
             raise self._inner.normalize_error(resp.status, resp.text())
         return self._inner._speech_generation_from_response(request, resp)

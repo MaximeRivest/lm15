@@ -649,30 +649,41 @@ def has_stored_credential(policy: AccessPolicy) -> bool:
     return bool(probe()) if probe is not None else False
 
 
+# AUTH-2 (ratified 2026-09-06, verify/DECISIONS-2026-09-06.md D1): the
+# schemes each credential kind may travel under.  An ApiKey takes the
+# policy's first header-carrying scheme in POLICY order; a BearerToken takes
+# `bearer` if listed, else `x-api-key` if listed — the TOKEN's order, not the
+# policy's, so an Entra token on azure-anthropic (x-api-key, bearer) still
+# goes as bearer while a Bedrock short-term key on bedrock-anthropic
+# (sigv4, x-api-key) goes in the key header; AwsCredentials sign (sigv4) only.
+_ACCEPTED_SCHEMES: dict[str, tuple[AuthScheme, ...]] = {
+    "api_key": ("bearer", "x-api-key", "api-key", "query-key"),
+    "bearer_token": ("bearer", "x-api-key"),
+    "aws": ("sigv4",),
+}
+
+
 def select_scheme(policy: AccessPolicy, credential: CredentialValue) -> AuthScheme:
-    """The scheme this credential kind travels under (AUTH-10): the first
-    scheme in the policy's preference order that can carry it."""
-    if isinstance(credential, AwsCredentials):
-        wanted = ("sigv4",)
-    elif isinstance(credential, BearerToken):
-        # A token travels under Authorization wherever the door offers it.
-        # Two doors carry their short-term bearer keys in the key header
-        # instead (bedrock-mantle and Claude Platform on AWS:
-        # anthropic-on-bedrock.md:68, :322), so the token's own preference
-        # decides here, not the policy order: an Entra token on
-        # azure-anthropic (api-key, x-api-key, bearer) must still go as bearer.
-        for scheme in ("bearer", "x-api-key"):
+    """The scheme this credential kind travels under (AUTH-2, AUTH-10).
+
+    ``ApiKey``: the first scheme in the policy's order that carries a key.
+    ``BearerToken``: ``bearer`` if the policy lists it, else ``x-api-key`` if
+    the policy lists it.  ``AwsCredentials``: ``sigv4`` only.  Anything else
+    raises ``NotConfiguredError`` naming the schemes the kind accepts and the
+    schemes the door offers.
+    """
+    accepted = _ACCEPTED_SCHEMES[credential.kind]
+    if isinstance(credential, BearerToken):
+        for scheme in accepted:
             if scheme in policy.auth_scheme:
                 return scheme
-        wanted = ()
     else:
-        wanted = ("bearer", "x-api-key", "api-key", "query-key")
-    for scheme in policy.auth_scheme:
-        if scheme in wanted:
-            return scheme
+        for scheme in policy.auth_scheme:
+            if scheme in accepted:
+                return scheme
     raise NotConfiguredError(
         f"{policy.provider}: a {credential.kind} credential cannot travel under "
-        f"{'/'.join(policy.auth_scheme)}",
+        f"{'/'.join(policy.auth_scheme)}; it accepts {'/'.join(accepted)}",
         provider=policy.provider,
         env_keys=policy.env_keys,
     )

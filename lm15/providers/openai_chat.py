@@ -715,13 +715,18 @@ class OpenAIChatLM(BaseProviderLM):
                 )
             )
 
+        # MAP-3 (D9, 2026-09-06): the end event's provider_data is the frame
+        # that supplied usage, verbatim, else the frame that supplied
+        # finish_reason; [DONE] contributes nothing.  The coalescer keeps the
+        # usage frame's when both arrive.
         finish_raw = choice.get("finish_reason")
         usage_data = payload.get("usage")
         if finish_raw:
             yield StreamEndEvent(
                 finish_reason=_FINISH_REASON_MAP.get(str(finish_raw), "stop"),
                 usage=_usage_from_chat(usage_data) if isinstance(usage_data, dict) else None,
+                provider_data=payload,
             )
         elif isinstance(usage_data, dict):
             # Final usage-only chunk (stream_options.include_usage).
-            yield StreamEndEvent(usage=_usage_from_chat(usage_data))
+            yield StreamEndEvent(usage=_usage_from_chat(usage_data), provider_data=payload)

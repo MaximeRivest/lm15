@@ -5,6 +5,7 @@ import pytest
 from dataclasses import dataclass
 from typing import Iterator
 
+from lm15 import serde
 from lm15.providers import AnthropicLM, GeminiLM, OpenAILM
 from lm15.errors import UnsupportedFeatureError
 from lm15.transports import StdlibTransport
@@ -401,6 +402,8 @@ def test_provider_stream_splits_arbitrary_sse_chunks() -> None:
 
 
 def test_anthropic_stream_redacted_thinking_emits_content_and_continuation() -> None:
+    # MAP-7 rule 11 (D5, 2026-09-06): hidden thinking is an empty thinking
+    # delta plus replay state; no placeholder text anywhere.
     lm = AnthropicLM(api_key="sk-ant", transport=_FakeTransport())
     request = Request(model="claude-test", messages=(Message.user("Hi"),))
     raw = type("Raw", (), {})()
@@ -416,7 +419,7 @@ def test_anthropic_stream_redacted_thinking_emits_content_and_continuation() -> 
 
     assert len(parsed) == 2
     assert isinstance(parsed[0], StreamDeltaEvent)
-    assert parsed[0].delta == ThinkingDelta(text="[redacted]", part_index=0)
+    assert parsed[0].delta == ThinkingDelta(text="", part_index=0)
     assert isinstance(parsed[1], StreamDeltaEvent)
     assert parsed[1].delta == ContinuationDelta(
         provider="anthropic",
@@ -424,6 +427,38 @@ def test_anthropic_stream_redacted_thinking_emits_content_and_continuation() -> 
         data={"data": "opaque"},
         part_index=0,
     )
+
+
+def test_anthropic_redacted_thinking_block_is_empty_thinking_with_state() -> None:
+    # D5: ThinkingPart(text="", continuation=[anthropic:redacted_thinking]).
+    lm = AnthropicLM(api_key="sk-ant", transport=_FakeTransport())
+    request = Request(model="claude-test", messages=(Message.user("Hi"),))
+    body = json.dumps(
+        {
+            "id": "msg_1",
+            "model": "claude-test",
+            "content": [
+                {"type": "redacted_thinking", "data": "opaque"},
+                {"type": "text", "text": "Hi"},
+            ],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 1, "output_tokens": 2},
+        }
+    ).encode()
+    from lm15.providers.base import HttpResponse
+
+    response = lm.parse_response(request, HttpResponse(status=200, reason="OK", headers=[], body=body))
+
+    assert response.message.parts[0] == ThinkingPart(
+        text="",
+        continuation=(ContinuationState(provider="anthropic", kind="redacted_thinking", data={"data": "opaque"}),),
+    )
+    assert not hasattr(response.message.parts[0], "redacted")
+    assert "[redacted]" not in json.dumps(serde.response_to_dict(response))
+    # Replay is unchanged: the blob goes back as redacted_thinking.
+    replay = Request(model="claude-test", messages=(Message.user("Hi"), response.message, Message.user("More")))
+    payload = json.loads(lm.build_request(replay, stream=False).body)
+    assert payload["messages"][1]["content"][0] == {"type": "redacted_thinking", "data": "opaque"}
 
 
 def test_anthropic_replays_unsigned_thinking_as_text() -> None:

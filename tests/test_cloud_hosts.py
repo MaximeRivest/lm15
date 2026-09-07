@@ -441,3 +441,59 @@ class TestBearerTokenInKeyHeader:
         cred = resolve(access.BEDROCK_ANTHROPIC, ctx)
         assert isinstance(cred, BearerToken)
         AnthropicLM(api_key=cred, access=access.BEDROCK_ANTHROPIC, settings={"region": "us-east-1"})
+
+
+class TestSchemeSelectionD1:
+    """AUTH-2 as ratified 2026-09-06 (verify/DECISIONS-2026-09-06.md D1):
+    ApiKey takes the policy's first header scheme in policy order; a
+    BearerToken takes bearer, else x-api-key; AwsCredentials sigv4 only;
+    anything else is a NotConfiguredError naming the accepted schemes."""
+
+    @pytest.mark.parametrize("policy,expected", [
+        (access.ANTHROPIC_API, "x-api-key"),
+        (access.OPENAI_API, "bearer"),
+        (access.AZURE, "api-key"),
+        (access.AZURE_ANTHROPIC, "x-api-key"),
+        (access.VERTEX_EXPRESS, "query-key"),
+        (access.BEDROCK_ANTHROPIC, "x-api-key"),
+    ])
+    def test_api_key_takes_first_header_scheme_in_policy_order(self, policy, expected):
+        assert access.select_scheme(policy, ApiKey("k")) == expected
+
+    @pytest.mark.parametrize("policy,expected", [
+        (access.OPENAI_API, "bearer"),
+        (access.AZURE, "bearer"),
+        (access.AZURE_ANTHROPIC, "bearer"),
+        (access.BEDROCK_CHAT, "bearer"),
+        (access.BEDROCK_ANTHROPIC, "x-api-key"),
+        (access.AWS_ANTHROPIC, "x-api-key"),
+        (access.ANTHROPIC_API, "x-api-key"),
+    ])
+    def test_bearer_token_prefers_bearer_then_x_api_key(self, policy, expected):
+        assert access.select_scheme(policy, BearerToken("t")) == expected
+
+    def test_bearer_token_on_door_without_bearer_or_x_api_key_names_accepted_schemes(self):
+        from dataclasses import replace
+
+        api_key_only = replace(access.AZURE, auth_scheme=("api-key",))
+        with pytest.raises(NotConfiguredError, match=r"cannot travel under api-key; it accepts bearer/x-api-key"):
+            access.select_scheme(api_key_only, BearerToken("t"))
+        with pytest.raises(NotConfiguredError, match=r"cannot travel under query-key; it accepts bearer/x-api-key"):
+            access.select_scheme(access.VERTEX_EXPRESS, BearerToken("t"))
+
+    @pytest.mark.parametrize("policy", [access.BEDROCK_CHAT, access.BEDROCK_ANTHROPIC, access.BEDROCK_MANTLE_CHAT])
+    def test_aws_credentials_take_sigv4(self, policy):
+        assert access.select_scheme(policy, AWS) == "sigv4"
+
+    @pytest.mark.parametrize("policy", [access.OPENAI_API, access.ANTHROPIC_API, access.AZURE_ANTHROPIC, access.VERTEX_EXPRESS])
+    def test_aws_credentials_on_non_sigv4_door_raise(self, policy):
+        with pytest.raises(NotConfiguredError, match=r"it accepts sigv4"):
+            access.select_scheme(policy, AWS)
+
+    def test_bearer_token_on_first_party_anthropic_goes_in_x_api_key(self):
+        # D1 cost, stated: the door does not take tokens; the provider's
+        # 401 answers, not a local error.
+        lm = AnthropicLM(api_key=BearerToken("tok"), access=access.ANTHROPIC_API)
+        headers = dict(lm.build_request(_req("claude-x"), stream=False).headers)
+        assert headers["x-api-key"] == "tok"
+        assert "authorization" not in {k.lower() for k in headers}

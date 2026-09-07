@@ -652,16 +652,20 @@ class ToolResultPart:
 
 @dataclass(frozen=True, slots=True)
 class ThinkingPart:
-    """Model reasoning trace — may be redacted by the provider."""
+    """Model reasoning trace.
+
+    Hidden thinking (Anthropic ``redacted_thinking``, an OpenAI reasoning
+    item with no summary) is a ThinkingPart with empty ``text`` and its
+    replay state in ``continuation``.  There is no flag and no placeholder
+    text (MAP-7 rule 11, ratified 2026-09-06).
+    """
 
     text: str
-    redacted: bool = False
     continuation: tuple[ContinuationState, ...] = ()
     type: Literal["thinking"] = field(default="thinking", init=False)
 
     def __post_init__(self) -> None:
         _validate_text(self.text, field_name="ThinkingPart.text")
-        _validate_bool(self.redacted, field_name="ThinkingPart.redacted")
         _validate_continuation_field(self)
 
 
@@ -810,10 +814,9 @@ def text(content: str, *, continuation: Sequence[ContinuationState] | Continuati
 def thinking(
     content: str,
     *,
-    redacted: bool = False,
     continuation: Sequence[ContinuationState] | ContinuationState | None = None,
 ) -> ThinkingPart:
-    return ThinkingPart(text=content, redacted=redacted, continuation=_normalize_continuation(continuation))
+    return ThinkingPart(text=content, continuation=_normalize_continuation(continuation))
 
 
 def refusal(content: str, *, continuation: Sequence[ContinuationState] | ContinuationState | None = None) -> RefusalPart:
