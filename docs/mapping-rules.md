@@ -450,5 +450,5 @@ maintainer chose it over the guess
 On 2026-09-06 the ratification session added the MAP-3 `provider_data`
 rule, MAP-7 rules 11–12 and the MAP-7.8 dialect sentence, and the
 MAP-9.6 withheld-field list with INV-051
-(`lm15-contract/verify/DECISIONS-2026-09-06.md`,
+(`lm15-contract/changes/2026-09-06-decisions.md`,
 `lm15-contract/changes/2026-09-06-ratification.md`).
