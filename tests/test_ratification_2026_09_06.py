@@ -1,4 +1,4 @@
-"""Rules ratified 2026-09-06 (lm15-contract verify/DECISIONS-2026-09-06.md).
+"""Rules ratified 2026-09-06 (lm15-contract lm15-contract/changes/2026-09-06-decisions.md).
 
 D7  — a continuation's ``provider`` is the dialect, never the door.
 D8  — no message-level id continuation; INV-051 stream/complete parity.

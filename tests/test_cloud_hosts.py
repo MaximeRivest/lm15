@@ -444,7 +444,7 @@ class TestBearerTokenInKeyHeader:
 
 
 class TestSchemeSelectionD1:
-    """AUTH-2 as ratified 2026-09-06 (verify/DECISIONS-2026-09-06.md D1):
+    """AUTH-2 as ratified 2026-09-06 (lm15-contract/changes/2026-09-06-decisions.md D1):
     ApiKey takes the policy's first header scheme in policy order; a
     BearerToken takes bearer, else x-api-key; AwsCredentials sigv4 only;
     anything else is a NotConfiguredError naming the accepted schemes."""

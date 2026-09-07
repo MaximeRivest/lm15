@@ -6,7 +6,7 @@
 The shared contract still contains draft amendments and draft canonical
 expectations. `CONTRACT_PIN` must move only after that review is complete.
 
-**Ratified 2026-09-06** (`lm15-contract/verify/DECISIONS-2026-09-06.md`, `changes/2026-09-06-ratification.md`). The paragraphs below implement the decisions by number.
+**Ratified 2026-09-06** (`lm15-contract/lm15-contract/changes/2026-09-06-decisions.md`, `changes/2026-09-06-ratification.md`). The paragraphs below implement the decisions by number.
 
 **D1 — AUTH-2 scheme selection.** `select_scheme` implements the ratified table: an `ApiKey` takes the policy's first header-carrying scheme in policy order (`bearer`, `x-api-key`, `api-key`, `query-key`); a `BearerToken` takes `bearer` if the policy lists it, else `x-api-key` if it lists it; `AwsCredentials` take `sigv4` only. Anything else raises `NotConfiguredError`, and the message now names the schemes the credential kind accepts next to the schemes the door offers. Cost, stated: a token handed to first-party `anthropic` goes in `x-api-key` and gets the provider's 401, not a local error.
 

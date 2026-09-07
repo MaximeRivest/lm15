@@ -649,7 +649,7 @@ def has_stored_credential(policy: AccessPolicy) -> bool:
     return bool(probe()) if probe is not None else False
 
 
-# AUTH-2 (ratified 2026-09-06, verify/DECISIONS-2026-09-06.md D1): the
+# AUTH-2 (ratified 2026-09-06, lm15-contract/changes/2026-09-06-decisions.md D1): the
 # schemes each credential kind may travel under.  An ApiKey takes the
 # policy's first header-carrying scheme in POLICY order; a BearerToken takes
 # `bearer` if listed, else `x-api-key` if listed — the TOKEN's order, not the

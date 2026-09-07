@@ -29,7 +29,7 @@ JsonPayload = dict[str, Any] | list[Any]
 
 # The FileReadiness fold for every OpenAI-shaped file object (api.openai.com,
 # Azure OpenAI v1, Meta): spec/vocabularies.md FileReadiness, ratified
-# 2026-09-06 (verify/DECISIONS-2026-09-06.md D6).  Azure says `pending` after
+# 2026-09-06 (lm15-contract/changes/2026-09-06-decisions.md D6).  Azure says `pending` after
 # a 201 upload where api.openai.com says `uploaded` (live 2026-09-04); the
 # `status` field is deprecated upstream, so absent and unknown words read as
 # ready.
