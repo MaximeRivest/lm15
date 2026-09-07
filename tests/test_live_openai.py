@@ -11,9 +11,8 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
-from lm15 import LiveConfig
+from lm15 import LiveConfig, access
+from lm15.credentials import BearerToken
 from lm15.providers import OpenAILM
 from lm15.testing import FakeTransport
 from lm15.types import AudioFormat, FunctionTool
@@ -33,6 +32,15 @@ def test_no_beta_header() -> None:
     # Live 2026-09-01: the beta header closes the socket with 4000
     # beta_api_shape_disabled before any frame is exchanged.
     assert "OpenAI-Beta" not in lm()._live_headers()
+
+
+def test_azure_live_uses_the_access_policy_auth_scheme() -> None:
+    by_key = OpenAILM(api_key="k", access=access.AZURE, settings={"resource": "lab"})
+    assert by_key._live_headers() == {"api-key": "k"}
+    assert by_key._live_url("dep") == "wss://lab.openai.azure.com/openai/v1/realtime?model=dep"
+
+    by_entra = OpenAILM(api_key=BearerToken("t"), access=access.AZURE, settings={"resource": "lab"})
+    assert by_entra._live_headers() == {"Authorization": "Bearer t"}
 
 
 def test_session_update_ga_shape() -> None:

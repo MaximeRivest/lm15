@@ -39,6 +39,12 @@ detail: the list of providers, the shortcuts, and the metadata.
 | DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | — (see note) |
 | DeepSeek, Anthropic wire | `deepseek-anthropic` | `DEEPSEEK_API_KEY` | — (see note) |
 | Z.AI (GLM) | `zai` | `ZAI_API_KEY` | — (see note) |
+| Moonshot AI (Kimi) | `moonshotai` | `MOONSHOTAI_API_KEY`, then `MOONSHOT_API_KEY` | — (see note) |
+| Moonshot AI, Responses wire | `moonshotai-responses` | same key | web search built-in (see note) |
+| Moonshot AI, Anthropic wire | `moonshotai-anthropic` | same key | — (see note) |
+| Meta (Muse Spark, Muse Image) | `meta` | `META_API_KEY` | files, images (see note) |
+| Meta, Chat Completions wire | `meta-chat` | `META_API_KEY` | — (see note) |
+| Meta, Anthropic wire | `meta-anthropic` | `META_API_KEY` | — (see note) |
 | ollama (local) | `ollama` | none | — |
 | vLLM (local) | `vllm` | none | — |
 | SGLang (local) | `sglang` | none | — |
@@ -82,6 +88,76 @@ is on [Authentication](authentication.md).
     6–128 characters. A drained balance is a `BillingError` (Z.AI reports
     it on HTTP 429). Data is processed in Singapore; the GLM Coding Plan is
     a separate product with its own endpoint that lm15 does not name.
+
+!!! note "Moonshot AI (Kimi): two reasoning families, one dial"
+    `moonshotai` is the Chat Completions wire of the Kimi API Platform
+    (`https://api.moonshot.ai/v1`). `kimi-k3` always reasons and takes
+    `Reasoning(effort=...)` as `low`, `high`, or `max` (default `max` —
+    "Say ok." cost 134 reasoning tokens in the pinned capture; pass `low`
+    for cheap calls). Other effort words raise `UnsupportedFeatureError`
+    before the wire: the server accepts *any* word without validating it
+    (`medium` and `bogus` both answered 200, verified live 2026-09-03), so
+    a downgrade would be silent. `effort="off"` sends `thinking:
+    {type: disabled}` — the documented switch for `kimi-k2.6`, and one
+    `kimi-k3` honours too although its docs say it cannot. Stated
+    trade-off: `kimi-k2.6` and `kimi-k2.7-code` have no effort levels and
+    the server ignores an effort word on them silently (verified live);
+    lm15 does not sniff model names, so do not set an effort word on K2.x.
+    `reasoning_content` is replayed natively on every assistant turn
+    (the docs require it in tool loops). `temperature` is fixed per model
+    and any other value is a loud 400; `tool_choice` `required` is a 400
+    on K2.x with thinking on. `Config.user_id` rides `safety_identifier`;
+    `Config.max_tokens` rides `max_completion_tokens`. Caching is
+    automatic (`cache_read_tokens` from `prompt_tokens_details`); a
+    drained balance is a `BillingError` on HTTP 429. Files (content
+    extraction, vision input), batches, the Responses wire (`kimi-k3`
+    only) and the Anthropic wire (`/anthropic`) exist on the service and
+    are not registered. The counterparty is Moonshot AI PTE. LTD.,
+    Singapore; data is stored in Singapore. The terms let Moonshot use
+    API content to improve its services unless an enterprise agreement
+    says otherwise — read them before sending private data. The API
+    platform key is distinct from a Kimi Code subscription.
+
+    The same key opens two more wires. `moonshotai-responses` is the
+    Responses wire (`kimi-k3` documented; `kimi-k2.6` also answers): it is
+    stateless — `store` is always false — so lm15 replays the reasoning
+    item with its summary text; the `web_search` built-in runs server-side
+    (`BuiltinTool(name="web_search")`, ~4.6K input tokens for one search in
+    the pinned capture); this wire validates strictly and answers a loud
+    400 to `effort="off"`, `tool_choice` beyond `auto`, `json_object`,
+    `temperature`, and `CacheConfig(retention="long")`. `moonshotai-anthropic`
+    is the Anthropic Messages wire at `/anthropic` (bearer token, what
+    Claude Code's `ANTHROPIC_AUTH_TOKEN` sends): the dial is
+    `output_config.effort` alone, `effort="off"` is honoured, thinking
+    blocks come back **unsigned** and lm15 replays them as `thinking`
+    blocks anyway (the server accepts them), and lm15 raises before the
+    wire for `temperature`/`top_p`/`top_k`, `parallel=False`, and effort
+    words outside `low|high|max` because that wire swallows them silently.
+    No model listing there (`/anthropic/v1/models` is 404); use `moonshotai`.
+
+!!! note "Meta: one key, three wires, and the model always reasons"
+    Meta Model API (dev.meta.ai) serves Muse Spark over three request
+    formats with one key. `meta` is the Responses wire — Meta's
+    recommended default and the only one that carries reasoning across
+    turns; it also owns the account surfaces: Files (`file_upload` …),
+    image generation and editing with `muse-image-1.0`
+    (`image_generate`, $0.01 per image), and model listing. `meta-chat`
+    (Chat Completions) and `meta-anthropic` (Anthropic Messages) are the
+    same model for code that already speaks those wires. Muse Spark always
+    reasons: `effort="off"` is refused by the server with a clear 400 on
+    every wire, and the default effort spent 597 hidden reasoning tokens
+    on "Say ok." in the first pinned capture — set
+    `Config(reasoning=Reasoning(effort="low"))` for cheap calls and give
+    `max_tokens` room for the reasoning. `tool_choice` beyond `auto`,
+    `logprobs`, `stop`, and `n > 1` are refused by the server (loud, so
+    lm15 sends them as asked). Prompt caching is automatic; `cache.key`
+    and `retention="long"` are forwarded. Meta's own docs name the env
+    variable `MODEL_API_KEY`; lm15 reads only `META_API_KEY`, because a
+    vendor-less name could be another tool's secret.
+    Standard-tier models (`muse-spark-1.3`) are never trained on; the
+    `-contributor` models are cheaper because they are. Speech-to-text
+    (`muse-voice-transcribe-1.0`) is on Meta's own WebSocket wire, which
+    lm15 does not have a surface for yet.
 
 !!! note "You may also see `openai-chat`"
     OpenAI has two wire dialects: its current **Responses API** (what

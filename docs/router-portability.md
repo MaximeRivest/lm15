@@ -35,8 +35,9 @@ language-neutrally so each port can implement it idiomatically.
    (hyphenated is canonical; the underscore spelling is a permanent
    alias accepted at every rung and in the per-provider key map) —
    plus the Chat Completions **preset routes**: `groq`, `openrouter`,
-   `deepseek`, `zai`, `ollama`, `vllm`, `sglang` — and, on the Anthropic
-   dialect, `deepseek-anthropic`. A preset route is pure data
+   `deepseek`, `zai`, `moonshotai`, `meta-chat`, `ollama`, `vllm`, `sglang` — on the Anthropic
+   dialect, `deepseek-anthropic`, `meta-anthropic`, `moonshotai-anthropic` — and on the Responses
+   dialect, `meta` and `moonshotai-responses`. A preset route is pure data
    (provider string doubling as the compat preset name, that server's
    `env_keys` convention, an optional `default_key` placeholder for
    keyless local servers) and routes to the implementation's Chat

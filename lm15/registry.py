@@ -41,7 +41,14 @@ from types import MappingProxyType
 from typing import Literal, Mapping
 
 from . import access as _access
-from .compat import ANTHROPIC_PRESET_BASE_URLS, OPENAI_CHAT_PRESET_BASE_URLS, AnthropicCompat, OpenAIChatCompat
+from .compat import (
+    ANTHROPIC_PRESET_BASE_URLS,
+    OPENAI_CHAT_PRESET_BASE_URLS,
+    OPENAI_RESPONSES_PRESET_BASE_URLS,
+    AnthropicCompat,
+    OpenAIChatCompat,
+    OpenAIResponsesCompat,
+)
 from .features import AccessPolicy, CredentialPolicy, EndpointSupport
 from .providers import (
     AnthropicLM,
@@ -76,6 +83,7 @@ Dialect = Literal["openai-responses", "openai-chat", "anthropic", "gemini"]
 # Per dialect: the compat preset constructor and the preset → base URL table
 # a bound entry is validated against.  A dialect absent here cannot bind.
 _COMPAT_TABLES: dict[str, tuple] = {
+    "openai-responses": (OpenAIResponsesCompat.preset, OPENAI_RESPONSES_PRESET_BASE_URLS),
     "openai-chat": (OpenAIChatCompat.preset, OPENAI_CHAT_PRESET_BASE_URLS),
     "anthropic": (AnthropicCompat.preset, ANTHROPIC_PRESET_BASE_URLS),
 }
@@ -122,6 +130,15 @@ class ProviderDefinition:
             raise ValueError(f"{self.id}: access policy names provider {self.access.provider!r}")
         if self.placeholder_key is not None and self.access.env_keys:
             raise ValueError(f"{self.id}: a keyless local server declares no env_keys")
+        if self.hosted:
+            # A cloud door (AUTH-10 host): the base URL is a template rendered
+            # over the host settings at construction, so the compat-table URL
+            # rule does not apply; a compat preset is optional and, when
+            # named, must exist for the dialect.
+            if self.compat is not None:
+                presets, _ = _COMPAT_TABLES[self.dialect]
+                presets(self.compat)
+            return
         if self.bound:
             if self.compat is None:
                 raise ValueError(f"{self.id}: a bound entry names its compat preset")
@@ -133,6 +150,11 @@ class ProviderDefinition:
                     f"{self.id}: access.base_url {self.access.base_url!r} != "
                     f"compat table {expected!r} for preset {self.compat!r}"
                 )
+
+    @property
+    def hosted(self) -> bool:
+        """True when the access policy names a cloud host (AUTH-10)."""
+        return self.access.host is not None
 
     @property
     def bound(self) -> bool:
@@ -177,9 +199,29 @@ def _adapter_owned(
     )
 
 
+def _responses_bound(
+    access: AccessPolicy,
+    *,
+    compat: str,
+    console_url: str | None = None,
+    note: str = "",
+) -> ProviderDefinition:
+    return ProviderDefinition(
+        id=access.provider,
+        dialect="openai-responses",
+        adapter=OpenAILM,
+        async_adapter=AsyncOpenAILM,
+        access=access,
+        compat=compat,
+        console_url=console_url,
+        note=note,
+    )
+
+
 def _chat_bound(
     access: AccessPolicy,
     *,
+    compat: str | None = None,
     placeholder_key: str | None = None,
     console_url: str | None = None,
     note: str = "",
@@ -190,7 +232,7 @@ def _chat_bound(
         adapter=OpenAIChatLM,
         async_adapter=AsyncOpenAIChatLM,
         access=access,
-        compat=access.provider,
+        compat=compat or access.provider,
         placeholder_key=placeholder_key,
         console_url=console_url,
         note=note,
@@ -209,6 +251,30 @@ def _anthropic_bound(
         dialect="anthropic",
         adapter=AnthropicLM,
         async_adapter=AsyncAnthropicLM,
+        access=access,
+        compat=compat,
+        console_url=console_url,
+        note=note,
+    )
+
+
+def _hosted(
+    access: AccessPolicy,
+    dialect: Dialect,
+    adapter: type,
+    async_adapter: type,
+    *,
+    compat: str | None = None,
+    console_url: str | None = None,
+    note: str = "",
+) -> ProviderDefinition:
+    """A cloud door: an existing dialect behind a host (changes/2026-09-03-cloud-hosts.md).
+    Declared from documentation until its live receipt lands."""
+    return ProviderDefinition(
+        id=access.provider,
+        dialect=dialect,
+        adapter=adapter,
+        async_adapter=async_adapter,
         access=access,
         compat=compat,
         console_url=console_url,
@@ -278,6 +344,93 @@ _DEFINITIONS: tuple[ProviderDefinition, ...] = (
         _access.ZAI,
         console_url="https://z.ai/manage-apikey/apikey-list",
         note="Z.AI GLM (Chat Completions dialect; general endpoint, not the Coding Plan)",
+    ),
+    _chat_bound(
+        _access.MOONSHOTAI,
+        console_url="https://platform.kimi.ai/console/api-keys",
+        note="Moonshot AI Kimi (Chat Completions dialect; kimi-k3 takes reasoning effort low|high|max, kimi-k2.6 takes effort off; "
+             "Moonshot's docs call the key MOONSHOT_API_KEY — read after MOONSHOTAI_API_KEY)",
+    ),
+    _responses_bound(
+        _access.MOONSHOTAI_RESPONSES,
+        compat="moonshotai",
+        console_url="https://platform.kimi.ai/console/api-keys",
+        note="Moonshot AI Kimi over the Responses wire (same key as `moonshotai`; kimi-k3 only; stateless — reasoning replays as summary text; web_search built-in)",
+    ),
+    _anthropic_bound(
+        _access.MOONSHOTAI_ANTHROPIC,
+        compat="moonshotai",
+        console_url="https://platform.kimi.ai/console/api-keys",
+        note="Moonshot AI Kimi over the Anthropic Messages wire (same key as `moonshotai`, bearer token; kimi-k3 only)",
+    ),
+    _responses_bound(
+        _access.META,
+        compat="meta",
+        console_url="https://dev.meta.ai/",
+        note="Meta Model API — Muse Spark over the Responses wire (reasoning replay, web_search), plus Files, Images (muse-image-1.0) and Models; Meta's docs call the key MODEL_API_KEY — export it as META_API_KEY",
+    ),
+    _chat_bound(
+        _access.META_CHAT,
+        compat="meta",
+        console_url="https://dev.meta.ai/",
+        note="Meta Model API over the Chat Completions wire (same key as `meta`; no cross-turn reasoning)",
+    ),
+    _anthropic_bound(
+        _access.META_ANTHROPIC,
+        compat="meta",
+        console_url="https://dev.meta.ai/",
+        note="Meta Model API over the Anthropic Messages wire (same key as `meta`; bearer token)",
+    ),
+    # ─── Cloud hosts (documentation-evidenced; changes/2026-09-03-cloud-hosts.md) ───
+    _hosted(
+        _access.AZURE, "openai-responses", OpenAILM, AsyncOpenAILM,
+        console_url="https://portal.azure.com/",
+        note="Azure OpenAI v1 Responses wire ({resource}.openai.azure.com; model = deployment name; api-key or Entra token)",
+    ),
+    _hosted(
+        _access.AZURE_CHAT, "openai-chat", OpenAIChatLM, AsyncOpenAIChatLM, compat="openai",
+        console_url="https://portal.azure.com/",
+        note="Azure OpenAI v1 Chat Completions wire (same resource; also Foundry-sold models such as DeepSeek and Grok)",
+    ),
+    _hosted(
+        _access.AZURE_ANTHROPIC, "anthropic", AnthropicLM, AsyncAnthropicLM,
+        console_url="https://ai.azure.com/",
+        note="Claude in Microsoft Foundry ({resource}.services.ai.azure.com/anthropic; api-key, x-api-key or Entra token)",
+    ),
+    _hosted(
+        _access.AWS_ANTHROPIC, "anthropic", AnthropicLM, AsyncAnthropicLM,
+        console_url="https://console.aws.amazon.com/",
+        note="Claude Platform on AWS (Anthropic-operated; SigV4 or ANTHROPIC_AWS_API_KEY; needs AWS_REGION and ANTHROPIC_AWS_WORKSPACE_ID)",
+    ),
+    _hosted(
+        _access.BEDROCK_ANTHROPIC, "anthropic", AnthropicLM, AsyncAnthropicLM,
+        console_url="https://console.aws.amazon.com/bedrock/",
+        note="Claude in Amazon Bedrock (bedrock-mantle, Opus 4.7 and later; SigV4 or AWS_BEARER_TOKEN_BEDROCK; needs AWS_REGION)",
+    ),
+    _hosted(
+        _access.BEDROCK_CHAT, "openai-chat", OpenAIChatLM, AsyncOpenAIChatLM, compat="bedrock",
+        console_url="https://console.aws.amazon.com/bedrock/",
+        note="Amazon Bedrock over the OpenAI Chat Completions wire (bedrock-runtime /openai/v1; SigV4 or AWS_BEARER_TOKEN_BEDROCK)",
+    ),
+    _hosted(
+        _access.BEDROCK_MANTLE_CHAT, "openai-chat", OpenAIChatLM, AsyncOpenAIChatLM, compat="bedrock-mantle",
+        console_url="https://console.aws.amazon.com/bedrock/",
+        note="Amazon Bedrock Chat Completions on bedrock-mantle (un-versioned ids, GET /v1/models; SigV4 or AWS_BEARER_TOKEN_BEDROCK)",
+    ),
+    _hosted(
+        _access.VERTEX, "gemini", GeminiLM, AsyncGeminiLM,
+        console_url="https://console.cloud.google.com/vertex-ai",
+        note="Gemini on Google Cloud (Agent Platform); ADC chain; needs GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION defaults to global",
+    ),
+    _hosted(
+        _access.VERTEX_EXPRESS, "gemini", GeminiLM, AsyncGeminiLM,
+        console_url="https://console.cloud.google.com/vertex-ai/studio",
+        note="Agent Platform express mode: GOOGLE_API_KEY as ?key=, no project or location",
+    ),
+    _hosted(
+        _access.VERTEX_ANTHROPIC, "anthropic", AnthropicLM, AsyncAnthropicLM,
+        console_url="https://console.cloud.google.com/vertex-ai/model-garden",
+        note="Claude on Google Cloud (rawPredict; model in the path, anthropic_version in the body)",
     ),
     _chat_bound(_access.OLLAMA, placeholder_key="ollama", note="local ollama server (keyless)"),
     _chat_bound(_access.VLLM, placeholder_key="EMPTY", note="local vLLM server (keyless)"),

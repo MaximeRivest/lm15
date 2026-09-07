@@ -42,7 +42,6 @@ from ..features import ProviderManifest
 from ..transports import TransportRequest
 from ..types import ImageGenerationRequest, ImageGenerationResponse, ImagePart, Request, Usage, VideoGenerationRequest, VideoJobInfo, VideoPart
 from .base import Credential, HttpResponse, SyncTransport, default_transport
-from .common import make_json_request
 from .openai_chat import OpenAIChatLM
 
 
@@ -136,14 +135,14 @@ class XaiLM(OpenAIChatLM):
                 provider=self.provider,
             )
         if not request.images:
-            return make_json_request(method="POST", url=f"{base}/images/generations", headers=self._headers(), payload=payload, read_timeout=300.0)
+            return self._emit(method="POST", url=f"{base}/images/generations", headers=self._headers(), payload=payload, read_timeout=300.0)
         if len(request.images) > 1:
             raise UnsupportedFeatureError(
                 "xai: image edits take exactly one input image; the wire has no slot for more",
                 provider=self.provider,
             )
         payload["image"] = _xai_image_input(request.images[0], self.provider)
-        return make_json_request(method="POST", url=f"{base}/images/edits", headers=self._headers(), payload=payload, read_timeout=300.0)
+        return self._emit(method="POST", url=f"{base}/images/edits", headers=self._headers(), payload=payload, read_timeout=300.0)
 
     def _image_generation_from_response(self, request: ImageGenerationRequest, resp: HttpResponse) -> ImageGenerationResponse:
         data = resp.json()
@@ -193,7 +192,7 @@ class XaiLM(OpenAIChatLM):
                 provider=self.provider,
             )
         payload: dict[str, Any] = {"model": request.model, "prompt": request.prompt, **(request.extensions or {})}
-        return make_json_request(
+        return self._emit(
             method="POST", url=f"{self.base_url.rstrip('/')}/videos/generations",
             headers=self._headers(), payload=payload, read_timeout=120.0,
         )
@@ -209,7 +208,7 @@ class XaiLM(OpenAIChatLM):
         return self._video_status_info(video_id, data)
 
     def _video_status_request(self, video_id: str) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="GET", url=f"{self.base_url.rstrip('/')}/videos/{video_id}",
             headers=self._headers(), read_timeout=60.0,
         )

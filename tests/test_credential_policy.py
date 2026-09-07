@@ -51,8 +51,14 @@ class TestManifestPolicies:
                 assert cls.manifest.env_keys == (), provider
 
     def test_presets_are_key_providers(self):
+        from lm15.registry import PROVIDERS
+
         for provider in CHAT_PRESET_ROUTES:
-            assert _credential_policy(provider) == "key"
+            if PROVIDERS[provider].hosted:
+                # Cloud doors declare their cloud's chain (AUTH-1, 2026-09-03).
+                assert _credential_policy(provider) in ("key", "aws-chain", "azure-chain", "gcp-chain")
+            else:
+                assert _credential_policy(provider) == "key"
 
     def test_resolution_describe_names_the_xai_chain(self):
         described = LMRouter(RouterConfig(env={})).resolve("xai:grok-4").describe()

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import base64
 import json
 import os
 import re
 import urllib.parse
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Iterator
+from typing import Any, Callable, ClassVar, Iterator, Mapping
 
 from ..errors import (
     AuthError,
@@ -25,6 +27,7 @@ from ..errors import (
 )
 from ..access import OPENAI_API, auth_header
 from ..auth import extract_chatgpt_account_id
+from ..compat import OPENAI_RESPONSES_PRESET_BASE_URLS, OpenAIResponsesCompat, _preset_key
 from ..features import ProviderManifest
 from ..result import materialize_response
 from ..live import WebSocketLiveSession, require_websocket_sync_connect
@@ -46,6 +49,7 @@ from ..types import (
     BatchRequest,
     BuiltinTool,
     CitationDelta,
+    ContinuationDelta,
     ContinuationState,
     CitationPart,
     ErrorDetail,
@@ -100,11 +104,10 @@ from .base import (
     batch_entry_http,
     batch_entry_request,
     default_transport,
-    resolve_credential,
+    resolve_credential_value,
 )
 from .common import (
     iso_utc,
-    make_json_request,
     model_infos_from_entries,
     multipart_form_body,
     openai_token_logprobs,
@@ -120,6 +123,20 @@ _OPENAI_BUILTIN_MAP: dict[str, str] = {
     "file_search": "file_search",
     "computer_use": "computer_use_preview",
 }
+
+# Per compat `builtin_tools` value: canonical name → server tool type.  A
+# name absent from the table goes out verbatim and the server answers for
+# itself (Meta and Moonshot: HTTP 400, live 2026-09-03 — loud, so no
+# pre-wire refusal).  "verbatim" is the empty table: the canonical name is
+# the wire type (`web_search` on both servers' schemas).
+_BUILTIN_MAPS: dict[str, dict[str, str]] = {
+    "openai": _OPENAI_BUILTIN_MAP,
+    "verbatim": {},
+}
+
+
+def _builtin_type(tool: BuiltinTool, compat: "ResolvedOpenAIResponsesCompat") -> str:
+    return _BUILTIN_MAPS[compat.builtin_tools].get(tool.name, tool.name)
 
 OPENAI_PROVIDER_EXECUTED_ITEMS = {
     "web_search_call",
@@ -198,9 +215,29 @@ def _cache_stable_prefix(request: Request, cache_control: str) -> bool:
 
 
 def _cache_common_payload(request: Request, payload: dict, cache_control: str, provider: str) -> None:
-    """Shared MAP-6 fields for both OpenAI dialects: off switch, key, retention."""
+    """Shared MAP-6 fields for both OpenAI dialects: off switch, key, retention.
+
+    ``cache_control="openai_implicit"`` forwards the key and the retention
+    hint and nothing else: no off switch (the server has none; MAP-6 A2
+    treats an explicit CacheConfig on an implicit-only server as accepted,
+    not an error) and no breakpoint mark (an undocumented field the server
+    swallows silently — Meta, live 2026-09-03).
+    """
     cache_cfg = request.config.cache
-    if cache_cfg is None or cache_control != "openai":
+    if cache_cfg is None or cache_control not in ("openai", "openai_implicit"):
+        return
+    if cache_control == "openai_implicit":
+        if cache_cfg.mode != "off":
+            if cache_cfg.key:
+                payload["prompt_cache_key"] = cache_cfg.key
+            if cache_cfg.retention == "long":
+                payload["prompt_cache_retention"] = "24h"
+        if cache_cfg.resource is not None:
+            raise UnsupportedFeatureError(
+                f"{provider}: cache.resource is not supported — this provider has no stored-cache "
+                "tier; it caches every prompt prefix automatically",
+                provider=provider,
+            )
         return
     if cache_cfg.mode == "off":
         # Option 2 (ratified 2026-09-01): the real off switch where the
@@ -248,8 +285,8 @@ def _record_unmapped(unmapped: list[dict[str, str]], path: str, typ: Any) -> Non
     unmapped.append({"path": path, "type": str(typ or "<missing>")})
 
 
-def _builtin_to_openai(tool: BuiltinTool) -> dict[str, Any]:
-    out: dict[str, Any] = {"type": _OPENAI_BUILTIN_MAP.get(tool.name, tool.name)}
+def _builtin_to_openai(tool: BuiltinTool, compat: "ResolvedOpenAIResponsesCompat") -> dict[str, Any]:
+    out: dict[str, Any] = {"type": _builtin_type(tool, compat)}
     if tool.config:
         out.update(tool.config)
     return out
@@ -398,15 +435,33 @@ class OpenAILM(BaseProviderLM):
     transport: SyncTransport = field(default_factory=default_transport)
     base_url: str = _DEFAULT_BASE_URL
     profile: ProviderProfile | None = None
+    # An OpenAIResponsesCompat, a preset name (``"openai"``, ``"meta"``,
+    # ``"openrouter"``, …) or None.  Same contract as the chat and
+    # Anthropic dialects: a preset name also supplies that server's default
+    # base_url; an explicit non-default base_url argument always wins.  A
+    # profile and request extensions still layer on top (lm15.profiles).
+    compat: OpenAIResponsesCompat | str | None = field(default=None, kw_only=True)
     access: ProviderManifest | None = field(default=None, repr=False)
     credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
+    settings: "Mapping[str, str] | None" = field(default=None, kw_only=True)
+    clock: "Callable[[], datetime] | None" = field(default=None, repr=False, kw_only=True)
     account_id: str | None = None
 
     provider: str = field(default="openai", init=False)
     manifest: ClassVar[ProviderManifest] = OPENAI_API
+    _compat_base: OpenAIResponsesCompat | None = field(init=False, repr=False, default=None)
 
     def __post_init__(self) -> None:
-        self._bind_access(self.access, credentials_path=self.credentials_path, default_base_url=_DEFAULT_BASE_URL)
+        self._bind_access(self.access, credentials_path=self.credentials_path, default_base_url=_DEFAULT_BASE_URL, settings=self.settings)
+        compat = self.compat if self.compat is not None else self._registry_compat()
+        if isinstance(compat, str):
+            self._compat_base = OpenAIResponsesCompat.preset(compat)
+            if self.base_url == _DEFAULT_BASE_URL:
+                self.base_url = OPENAI_RESPONSES_PRESET_BASE_URLS.get(_preset_key(compat), _DEFAULT_BASE_URL)
+        elif isinstance(compat, OpenAIResponsesCompat):
+            self._compat_base = compat
+        elif compat is not None:
+            raise TypeError("OpenAILM.compat must be an OpenAIResponsesCompat, a preset name, or None")
         if self.access.backend == CODEX_BACKEND:
             if not self.account_id and isinstance(self.api_key, str):
                 self.account_id = extract_chatgpt_account_id(self.api_key)
@@ -443,10 +498,15 @@ class OpenAILM(BaseProviderLM):
         "model_not_found": UnsupportedModelError,
         "model_not_available": UnsupportedModelError,
         "unsupported_model": UnsupportedModelError,
+        # Azure OpenAI: the model string IS the deployment name, so an unknown
+        # deployment is an unknown model (HTTP 404, "The API deployment for
+        # this resource does not exist"; live 2026-09-04,
+        # lm15-contract/errors/cases/azure.json).
+        "DeploymentNotFound": UnsupportedModelError,
     }
 
     _model_error_codes: ClassVar[frozenset[str]] = frozenset(
-        {"model_not_found", "model_not_available", "unsupported_model"}
+        {"model_not_found", "model_not_available", "unsupported_model", "DeploymentNotFound"}
     )
 
     _stream_error_code_map: ClassVar[dict[str, type[ProviderError]]] = {
@@ -455,6 +515,7 @@ class OpenAILM(BaseProviderLM):
         "invalid_api_key": AuthError,
         "insufficient_quota": BillingError,
         "1113": BillingError,  # Z.AI insufficient balance (docs.z.ai api-code.md)
+        "exceeded_current_quota_error": BillingError,  # Moonshot: balance/quota, rides HTTP 429 (platform.kimi.ai errors.md)
         "authentication_error": AuthError,
         "rate_limit_error": RateLimitError,
     }
@@ -477,8 +538,8 @@ class OpenAILM(BaseProviderLM):
         )
 
     def _headers(self, content_type: str = "application/json") -> dict[str, str]:
-        name, value = auth_header(self.access, resolve_credential(self.api_key))
-        headers = {name: value, "Content-Type": content_type}
+        headers: dict[str, str] = {}  # auth is applied once, in _emit (AUTH-2)
+        headers["Content-Type"] = content_type
         if self._codex and self.account_id:
             headers["chatgpt-account-id"] = self.account_id
         for key, static in self.access.headers:
@@ -552,8 +613,12 @@ class OpenAILM(BaseProviderLM):
             # Billing before rate-limit: both can ride HTTP 429, and only one
             # is retryable.  "insufficient_quota" is OpenAI's spelling; "1113"
             # is Z.AI's ("Insufficient balance or no resource package",
-            # docs.z.ai api-code.md; observed live 2026-09-03 as 429).
-            if code in {"insufficient_quota", "1113"} or err_type == "insufficient_quota":
+            # docs.z.ai api-code.md; observed live 2026-09-03 as 429);
+            # "exceeded_current_quota_error" is Moonshot's type for an
+            # insufficient balance or a disabled account, also HTTP 429
+            # (platform.kimi.ai errors.md — documentation-evidenced: a funded
+            # account cannot trigger it on purpose).
+            if code in {"insufficient_quota", "1113"} or err_type in {"insufficient_quota", "exceeded_current_quota_error"}:
                 return self._provider_error(
                     BillingError,
                     msg,
@@ -610,6 +675,7 @@ class OpenAILM(BaseProviderLM):
             model=request.model,
             profile=self.profile,
             request_extensions=request.config.extensions,
+            base=self._compat_base,
         )
 
     def _build_input(
@@ -683,7 +749,18 @@ class OpenAILM(BaseProviderLM):
                 role = msg.role
                 if role == "developer":
                     role = compat.developer_role
-                items.append({"role": role, "content": content_parts})
+                item = {"role": role, "content": content_parts}
+                if (
+                    compat.commentary_phase == "tag"
+                    and msg.role == "assistant"
+                    and any(isinstance(p, ToolCallPart) for p in msg.parts)
+                ):
+                    # Assistant text that precedes a function_call in the same
+                    # turn is "commentary" on this server (Meta,
+                    # protocols--responses.md § Message phase); the server
+                    # stamped it on the way out and asks for it back.
+                    item["phase"] = "commentary"
+                items.append(item)
 
             for part in msg.parts:
                 if isinstance(part, ToolCallPart):
@@ -697,7 +774,7 @@ class OpenAILM(BaseProviderLM):
                     )
         return items
 
-    def _tool_choice_payload(self, request: Request) -> Any:
+    def _tool_choice_payload(self, request: Request, compat: "ResolvedOpenAIResponsesCompat") -> Any:
         tc = request.config.tool_choice
         if tc is None:
             return None
@@ -713,7 +790,7 @@ class OpenAILM(BaseProviderLM):
             if len(entries) == 1 and tc.mode == "required":
                 tool = entries[0]
                 if isinstance(tool, BuiltinTool):
-                    return {"type": _OPENAI_BUILTIN_MAP.get(tool.name, tool.name)}
+                    return {"type": _builtin_type(tool, compat)}
                 return {"type": "function", "name": tool.name}
             # mode="auto" restriction or multi-tool subset: allowed_tools
             # keeps auto semantics honest — the old single-name mapping
@@ -721,7 +798,7 @@ class OpenAILM(BaseProviderLM):
             wire_tools: list[dict[str, Any]] = []
             for tool in entries:
                 if isinstance(tool, BuiltinTool):
-                    wire_tools.append({"type": _OPENAI_BUILTIN_MAP.get(tool.name, tool.name)})
+                    wire_tools.append({"type": _builtin_type(tool, compat)})
                 else:
                     wire_tools.append({"type": "function", "name": tool.name})
             return {"type": "allowed_tools", "mode": tc.mode, "tools": wire_tools}
@@ -779,9 +856,9 @@ class OpenAILM(BaseProviderLM):
                         tool_payload["strict"] = False
                     tools_wire.append(tool_payload)
                 elif isinstance(tool, BuiltinTool):
-                    tools_wire.append(_builtin_to_openai(tool))
+                    tools_wire.append(_builtin_to_openai(tool, compat))
             payload["tools"] = tools_wire
-        tool_choice = self._tool_choice_payload(request)
+        tool_choice = self._tool_choice_payload(request, compat)
         if tool_choice is not None:
             payload["tool_choice"] = tool_choice
         if request.config.tool_choice and request.config.tool_choice.parallel is not None:
@@ -893,9 +970,12 @@ class OpenAILM(BaseProviderLM):
         return payload
 
     def build_request(self, request: Request, stream: bool) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="POST",
             url=f"{self.base_url.rstrip('/')}/responses",
+            endpoint="responses",
+            stream=stream,
+            model=request.model,
             headers=self._headers(),
             payload=self._payload(request, stream=stream),
             read_timeout=120.0 if stream else 60.0,
@@ -1023,11 +1103,28 @@ class OpenAILM(BaseProviderLM):
         )
 
     def parse_stream_events(self, request: Request, raw_event: SSEEvent) -> Iterator[StreamEvent]:
-        event = self._parse_single_stream_event(request, raw_event)
+        payload = json.loads(raw_event.data) if raw_event.data and raw_event.data != "[DONE]" else None
+        if isinstance(payload, dict) and payload.get("type") in {"response.output_item.added", "response.output_item.done"}:
+            item = payload.get("item")
+            if isinstance(item, dict) and item.get("type") == "reasoning":
+                index = int(payload.get("output_index", 0) or 0)
+                if payload["type"] == "response.output_item.added":
+                    # MAP-7.9: even an item with no visible summary is thinking.
+                    yield StreamDeltaEvent(delta=ThinkingDelta(text="", part_index=index))
+                else:
+                    # Final replay state can arrive after all summary fragments.
+                    # Do not repeat those fragments from the completed snapshot.
+                    state = {key: item[key] for key in ("id", "encrypted_content") if item.get(key)}
+                    if state:
+                        yield StreamDeltaEvent(delta=ContinuationDelta(
+                            provider="openai", kind="reasoning_item", data=state, part_index=index,
+                        ))
+                return
+        event = self._parse_single_stream_event(request, raw_event, payload=payload)
         if event is not None:
             yield event
 
-    def _parse_single_stream_event(self, request: Request, raw_event: SSEEvent) -> StreamEvent | None:
+    def _parse_single_stream_event(self, request: Request, raw_event: SSEEvent, *, payload: JsonObject | None = None) -> StreamEvent | None:
         if not raw_event.data:
             return None
         if raw_event.data == "[DONE]":
@@ -1035,7 +1132,8 @@ class OpenAILM(BaseProviderLM):
             # response.completed already said how the turn ended; claiming
             # "stop" here would overwrite "tool_call" in the coalesced end.
             return StreamEndEvent()
-        payload = json.loads(raw_event.data)
+        if payload is None:
+            payload = json.loads(raw_event.data)
         et = str(payload.get("type") or "")
 
         if et == "response.created":
@@ -1307,6 +1405,7 @@ class OpenAILM(BaseProviderLM):
     # ─── Live sessions ──────────────────────────────────────────────
 
     def live(self, config: LiveConfig):
+        self._require("live")
         ws = self._live_connect(self._live_url(config.model), self._live_headers())
         for frame in self._live_setup_frames(config):
             ws.send(json.dumps(frame))
@@ -1340,8 +1439,15 @@ class OpenAILM(BaseProviderLM):
 
     def _live_headers(self) -> dict[str, str]:
         # GA Realtime: the beta header now HARD-CLOSES the socket (4000
-        # `beta_api_shape_disabled`, observed live 2026-09-01).
-        return {"Authorization": f"Bearer {resolve_credential(self.api_key)}"}
+        # `beta_api_shape_disabled`, observed live 2026-09-01). Use the
+        # access policy as ordinary HTTP does: Azure API keys travel under
+        # `api-key`; OpenAI and Entra tokens use Authorization.
+        value = resolve_credential_value(self.api_key)
+        pair = auth_header(self.access, value, api_key_header=self._api_key_header)
+        headers = dict(self.access.headers)
+        if pair is not None:
+            headers[pair[0]] = pair[1]
+        return headers
 
     @staticmethod
     def _live_audio_format(fmt: AudioFormat) -> dict[str, Any]:
@@ -1511,7 +1617,7 @@ class OpenAILM(BaseProviderLM):
             # The Codex backend's /models requires a client_version query
             # parameter (a Codex CLI release); the policy carries it.
             params = {"client_version": self.access.backend_options.get("client_version", "")}
-        return make_json_request(
+        return self._emit(
             method="GET",
             url=f"{self.base_url.rstrip('/')}/models",
             params=params,
@@ -1554,7 +1660,7 @@ class OpenAILM(BaseProviderLM):
             fields=fields,
             files=[("file", request.filename, request.media_type, request.bytes)],
         )
-        return TransportRequest(
+        return self._emit(
             method="POST",
             url=f"{self.base_url.rstrip('/')}/files",
             headers=list(self._headers(content_type=content_type).items()),
@@ -1572,7 +1678,10 @@ class OpenAILM(BaseProviderLM):
         status = str(data.get("status") or "")
         if status == "error":
             readiness = "failed"
-        elif status == "uploaded":
+        elif status in ("uploaded", "pending"):
+            # Azure OpenAI v1 says `pending` after a 201 upload and returns
+            # 204 from /content until processing completes (live 2026-09-04).
+            # api.openai.com says `uploaded` for the same state.
             readiness = "pending"
         else:  # "processed", absent (the field is deprecated), or unknown
             readiness = "ready"
@@ -1590,7 +1699,7 @@ class OpenAILM(BaseProviderLM):
         )
 
     def _file_get_request(self, file_id: str) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="GET", url=f"{self.base_url.rstrip('/')}/files/{file_id}",
             headers=self._headers(), read_timeout=60.0,
         )
@@ -1599,7 +1708,7 @@ class OpenAILM(BaseProviderLM):
         params: dict[str, Any] = {"limit": limit}
         if cursor is not None:
             params["after"] = cursor
-        return make_json_request(
+        return self._emit(
             method="GET", url=f"{self.base_url.rstrip('/')}/files",
             params=params, headers=self._headers(), read_timeout=60.0,
         )
@@ -1612,13 +1721,13 @@ class OpenAILM(BaseProviderLM):
         return FilePage(items=items, next_cursor=cursor if isinstance(cursor, str) and cursor else None)
 
     def _file_delete_request(self, file_id: str) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="DELETE", url=f"{self.base_url.rstrip('/')}/files/{file_id}",
             headers=self._headers(), read_timeout=60.0,
         )
 
     def _file_download_request(self, file_id: str) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="GET", url=f"{self.base_url.rstrip('/')}/files/{file_id}/content",
             headers=self._headers(), read_timeout=300.0,
         )
@@ -1645,7 +1754,7 @@ class OpenAILM(BaseProviderLM):
             fields=[("purpose", "batch")],
             files=[("file", "lm15-batch.jsonl", "application/jsonl", data)],
         )
-        return TransportRequest(
+        return self._emit(
             method="POST",
             url=f"{self.base_url.rstrip('/')}/files",
             headers=list(self._headers(content_type=content_type).items()),
@@ -1666,7 +1775,7 @@ class OpenAILM(BaseProviderLM):
         if request.label is not None:
             payload["metadata"] = {"label": request.label}
         payload.update(extensions)
-        return make_json_request(
+        return self._emit(
             method="POST",
             url=f"{self.base_url.rstrip('/')}/batches",
             headers=self._headers(),
@@ -1692,13 +1801,13 @@ class OpenAILM(BaseProviderLM):
         )
 
     def _batch_status_request(self, batch_id: str) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="GET", url=f"{self.base_url.rstrip('/')}/batches/{batch_id}",
             headers=self._headers(), read_timeout=60.0,
         )
 
     def _batch_cancel_request(self, batch_id: str) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="POST", url=f"{self.base_url.rstrip('/')}/batches/{batch_id}/cancel",
             headers=self._headers(), read_timeout=60.0,
         )
@@ -1708,7 +1817,7 @@ class OpenAILM(BaseProviderLM):
         for key in ("output_file_id", "error_file_id"):
             file_id = status_body.get(key)
             if isinstance(file_id, str) and file_id:
-                fetches.append(make_json_request(
+                fetches.append(self._emit(
                     method="GET", url=f"{self.base_url.rstrip('/')}/files/{file_id}/content",
                     headers=self._headers(), read_timeout=300.0,
                 ))
@@ -1766,7 +1875,7 @@ class OpenAILM(BaseProviderLM):
         return tuple(entries)
 
     def _batch_list_request(self, limit: int) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="GET", url=f"{self.base_url.rstrip('/')}/batches",
             params={"limit": int(limit)}, headers=self._headers(), read_timeout=60.0,
         )
@@ -1804,7 +1913,7 @@ class OpenAILM(BaseProviderLM):
         payload: dict[str, Any] = {"model": request.model, "prompt": request.prompt, **(request.extensions or {})}
         if request.seconds is not None:
             payload["seconds"] = str(request.seconds)  # the wire wants a string enum
-        return make_json_request(method="POST", url=f"{self.base_url.rstrip('/')}/videos", headers=self._headers(), payload=payload, read_timeout=120.0)
+        return self._emit(method="POST", url=f"{self.base_url.rstrip('/')}/videos", headers=self._headers(), payload=payload, read_timeout=120.0)
 
     def _video_job_from_body(self, body: str, video_id: "str | None" = None) -> VideoJobInfo:
         return self._video_job_info(json.loads(body))
@@ -1828,10 +1937,10 @@ class OpenAILM(BaseProviderLM):
         )
 
     def _video_status_request(self, video_id: str) -> TransportRequest:
-        return make_json_request(method="GET", url=f"{self.base_url.rstrip('/')}/videos/{video_id}", headers=self._headers(), read_timeout=60.0)
+        return self._emit(method="GET", url=f"{self.base_url.rstrip('/')}/videos/{video_id}", headers=self._headers(), read_timeout=60.0)
 
     def _video_result_fetch(self, status_body: dict[str, Any]) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="GET",
             url=f"{self.base_url.rstrip('/')}/videos/{status_body.get('id')}/content",
             headers=self._headers(),
@@ -1847,7 +1956,7 @@ class OpenAILM(BaseProviderLM):
         return VideoPart(media_type=content_type, data=base64.b64encode(fetched.body).decode("ascii"))
 
     def _video_list_request(self, limit: int, model: str | None) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="GET", url=f"{self.base_url.rstrip('/')}/videos",
             params={"limit": int(limit)}, headers=self._headers(), read_timeout=60.0,
         )
@@ -1869,10 +1978,14 @@ class OpenAILM(BaseProviderLM):
 
     def _image_generate_request(self, request: ImageGenerationRequest) -> TransportRequest:
         base = self.base_url.rstrip("/")
+        compat = resolve_openai_responses_compat(
+            base_url=self.base_url, model=request.model, profile=self.profile,
+            request_extensions=None, base=self._compat_base,
+        )
         if not request.images:
             payload = {"model": request.model, "prompt": request.prompt, "size": request.size, **(request.extensions or {})}
             payload = {k: v for k, v in payload.items() if v is not None}
-            return make_json_request(method="POST", url=f"{base}/images/generations", headers=self._headers(), payload=payload, read_timeout=300.0)
+            return self._emit(method="POST", url=f"{base}/images/generations", headers=self._headers(), payload=payload, read_timeout=300.0)
         # Edits are multipart: the wire takes uploaded bytes only.
         for part in request.images:
             if part.data is None and part.path is None:
@@ -1885,12 +1998,14 @@ class OpenAILM(BaseProviderLM):
         if request.size is not None:
             fields.append(("size", request.size))
         fields += [(k, str(v)) for k, v in (request.extensions or {}).items()]
+        # The multipart key is the server's: OpenAI takes `image[]`; Meta
+        # takes `image[0]`, `image[1]`, … (compat edit_image_field).
         files = [
-            ("image[]", f"image-{i}", part.media_type, part.bytes)
+            (f"image[{i}]" if compat.edit_image_field == "indexed" else "image[]", f"image-{i}", part.media_type, part.bytes)
             for i, part in enumerate(request.images)
         ]
         content_type, body = multipart_form_body(fields=fields, files=files)
-        return TransportRequest(
+        return self._emit(
             method="POST",
             url=f"{base}/images/edits",
             headers=list(self._headers(content_type=content_type).items()),
@@ -1925,7 +2040,7 @@ class OpenAILM(BaseProviderLM):
             payload["voice"] = request.voice
         if request.format is not None:
             payload["response_format"] = request.format
-        return make_json_request(method="POST", url=f"{self.base_url.rstrip('/')}/audio/speech", headers=self._headers(), payload=payload, read_timeout=300.0)
+        return self._emit(method="POST", url=f"{self.base_url.rstrip('/')}/audio/speech", headers=self._headers(), payload=payload, read_timeout=300.0)
 
     def _speech_generation_from_response(self, request: SpeechGenerationRequest, resp: HttpResponse) -> SpeechGenerationResponse:
         content_type = (resp.header("content-type") or "").split(";", 1)[0].strip()

@@ -362,6 +362,11 @@ class RouterConfig:
     rules: tuple[RouteRule, ...] = DEFAULT_RULES
     env: Mapping[str, str] | None = None
     api_keys: Mapping[str, Credential] | None = field(default=None, repr=False)
+    # Cloud-host settings per provider (AUTH-10): {"bedrock-anthropic":
+    # {"region": "us-east-1"}}.  A setting not given here is read from its
+    # env variables in order, then its default; region and resource have
+    # none and raise.
+    settings: Mapping[str, Mapping[str, str]] | None = field(default=None, kw_only=True)
     transport: object | None = None  # SyncTransport for LMRouter, AsyncTransport
                                      # for AsyncLMRouter; passed to every LM the
                                      # router constructs (tests, custom pooling)
@@ -600,6 +605,41 @@ def _build_lm(resolution: Resolution, config: RouterConfig, adapters: Mapping[st
     if policy == "oauth":
         return cls(**extra)  # self-resolving local OAuth constructor
     api_key, _ = _api_keys_entry(config, resolution.provider)
+    if definition is not None and definition.hosted:
+        # A cloud door (AUTH-10): host settings from config, then env, then
+        # defaults; the credential from the explicit entry or, for a cloud
+        # chain policy, the chain's caching provider (AUTH-1/AUTH-2).
+        from .cloud.chains import ChainContext, credential_provider
+        from .cloud.hosts import resolve_settings
+
+        from .cloud.chains import profile_settings
+
+        env = config.env if config.env is not None else os.environ
+        given = (config.settings or {}).get(resolution.provider)
+        ctx = ChainContext.online(env)
+        settings = resolve_settings(definition.access.host, given, env, provider=resolution.provider,
+                                    profile=profile_settings(definition.access, ctx))
+        ctx.settings = settings
+        if api_key is None and definition.access.cloud_chain:
+            api_key = credential_provider(definition.access, ctx)
+        elif api_key is None:
+            for key in definition.access.env_keys:
+                value = env.get(key)
+                if value:
+                    api_key = value
+                    break
+        if api_key is None:
+            env_keys = definition.access.env_keys
+            raise MissingCredentialError(
+                f"no credential found for provider {resolution.provider!r}. "
+                f"Set {' or '.join(env_keys)} in the environment, or pass "
+                f"RouterConfig(api_keys={{{resolution.provider!r}: \"...\"}}).",
+                provider=resolution.provider,
+                env_keys=env_keys,
+            )
+        if definition.compat is not None:
+            extra["compat"] = definition.compat
+        return cls(api_key=api_key, access=definition.access, settings=settings, **extra)
     if api_key is None and policy == "oauth-unless-explicit" and cls.has_stored_credential():
         # A usable stored subscription login outranks ambient env keys:
         # it spends no money per token (AUTH-1, oauth-unless-explicit).

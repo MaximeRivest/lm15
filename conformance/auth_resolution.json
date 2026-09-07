@@ -2,9 +2,9 @@
   "provenance": {
     "source": "hand-authored",
     "date": "2026-08-31",
-    "evidence": "changes/2026-08-31-auth-contract-draft.md; spec/auth.md AUTH-1, AUTH-7 (ratified 2026-08-31); changes/2026-09-01-credential-policy.md (xai cases); changes/2026-09-01-subscription-first.md (xai oauth-unless-explicit reorder, superseding the same-day key-then-oauth cases before any port consumed them); changes/2026-09-03-provider-registry.md (deepseek plain-key case: AUTH-1 key chain, registry-declared env key DEEPSEEK_API_KEY); changes/2026-09-03-zai-live.md (zai plain-key case, env key ZAI_API_KEY); changes/2026-09-03-deepseek-anthropic-live.md (a second provider string on the same env key)"
+    "evidence": "changes/2026-08-31-auth-contract-draft.md; spec/auth.md AUTH-1, AUTH-7 (ratified 2026-08-31); changes/2026-09-01-credential-policy.md (xai cases); changes/2026-09-01-subscription-first.md (xai oauth-unless-explicit reorder, superseding the same-day key-then-oauth cases before any port consumed them); changes/2026-09-03-provider-registry.md (deepseek plain-key case: AUTH-1 key chain, registry-declared env key DEEPSEEK_API_KEY); changes/2026-09-03-zai-live.md (zai plain-key case, env key ZAI_API_KEY); changes/2026-09-03-deepseek-anthropic-live.md (a second provider string on the same env key); changes/2026-09-03-meta-live.md (meta / meta-chat / meta-anthropic: three provider strings on one env key META_API_KEY; Meta's own vendor-less MODEL_API_KEY is deliberately not read); changes/2026-09-03-moonshotai-live.md (moonshotai: two vendor-named env keys in declared order, MOONSHOTAI_API_KEY then MOONSHOT_API_KEY — the second is the name Moonshot's own docs use; the first shadows it when both are set); changes/2026-09-03-cloud-hosts.md (nine cloud-chain cases: AUTH-1 aws/azure/gcp chains in the SDK order pinned from research/cloud-hosts/10-facts-*.md, AUTH-7 `unprobed`, harness-materialized files under a sandbox HOME); changes/2026-09-03-moonshotai-wires.md (moonshotai-responses, moonshotai-anthropic: the same two env keys)"
   },
-  "description": "Credential-resolution chain fixtures (spec/auth.md AUTH-1) exercised through each implementation's explain_auth equivalent (AUTH-7). Language-neutral: 'steps' name source kinds, not display strings. 'borrowed_file' is the provider's local OAuth credential file in its AUTH-8 wire format: a borrowed CLI store (claude-code, openai-codex) or the lm15-owned store (xai, oauth-unless-explicit policy). The sentinel below is planted as every secret value; no rendered report may contain it (AUTH-5).",
+  "description": "Credential-resolution chain fixtures (spec/auth.md AUTH-1) exercised through each implementation's explain_auth equivalent (AUTH-7). Language-neutral: 'steps' name source kinds, not display strings. 'borrowed_file' is the provider's local OAuth credential file in its AUTH-8 wire format: a borrowed CLI store (claude-code, openai-codex) or the lm15-owned store (xai, oauth-unless-explicit policy). The sentinel below is planted as every secret value; no rendered report may contain it (AUTH-5). Cloud-chain cases (2026-09-03) carry 'files' (materialized by the harness under a sandbox HOME, '~/' relative) and optional 'settings'; 'unprobed' marks a configured network/subprocess rung the offline doctor did not contact, and 'configured' is true when a rung is selected OR unprobed.",
   "sentinel": "SECRET-SENTINEL-DO-NOT-PRINT",
   "cases": [
     {
@@ -128,6 +128,69 @@
           },
           {
             "kind": "env:DEEPSEEK_API_KEY",
+            "state": "selected"
+          }
+        ]
+      }
+    },
+    {
+      "id": "meta-env-selected",
+      "provider": "meta",
+      "env": {
+        "META_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT"
+      },
+      "api_keys_providers": [],
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:META_API_KEY",
+            "state": "selected"
+          }
+        ]
+      }
+    },
+    {
+      "id": "meta-chat-env-selected",
+      "provider": "meta-chat",
+      "env": {
+        "META_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT"
+      },
+      "api_keys_providers": [],
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:META_API_KEY",
+            "state": "selected"
+          }
+        ]
+      }
+    },
+    {
+      "id": "meta-anthropic-env-selected",
+      "provider": "meta-anthropic",
+      "env": {
+        "META_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT"
+      },
+      "api_keys_providers": [],
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:META_API_KEY",
             "state": "selected"
           }
         ]
@@ -366,6 +429,753 @@
           },
           {
             "kind": "env:XAI_API_KEY",
+            "state": "absent"
+          }
+        ]
+      }
+    },
+    {
+      "id": "moonshotai-env-selected",
+      "provider": "moonshotai",
+      "api_keys_providers": [],
+      "env": {
+        "MOONSHOTAI_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT"
+      },
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:MOONSHOTAI_API_KEY",
+            "state": "selected"
+          },
+          {
+            "kind": "env:MOONSHOT_API_KEY",
+            "state": "absent"
+          }
+        ]
+      }
+    },
+    {
+      "id": "moonshotai-vendor-env-selected",
+      "provider": "moonshotai",
+      "api_keys_providers": [],
+      "env": {
+        "MOONSHOT_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT"
+      },
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:MOONSHOTAI_API_KEY",
+            "state": "absent"
+          },
+          {
+            "kind": "env:MOONSHOT_API_KEY",
+            "state": "selected"
+          }
+        ]
+      }
+    },
+    {
+      "id": "moonshotai-first-env-shadows-vendor-env",
+      "provider": "moonshotai",
+      "api_keys_providers": [],
+      "env": {
+        "MOONSHOTAI_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT",
+        "MOONSHOT_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT"
+      },
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:MOONSHOTAI_API_KEY",
+            "state": "selected"
+          },
+          {
+            "kind": "env:MOONSHOT_API_KEY",
+            "state": "shadowed"
+          }
+        ]
+      }
+    },
+    {
+      "id": "bedrock-anthropic-env-keys",
+      "provider": "bedrock-anthropic",
+      "env": {
+        "AWS_ACCESS_KEY_ID": "AKIDEXAMPLE",
+        "AWS_SECRET_ACCESS_KEY": "SECRET-SENTINEL-DO-NOT-PRINT",
+        "AWS_REGION": "us-east-1",
+        "AWS_EC2_METADATA_DISABLED": "true"
+      },
+      "api_keys_providers": [],
+      "files": {},
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:AWS_BEARER_TOKEN_BEDROCK",
+            "state": "absent"
+          },
+          {
+            "kind": "env:AWS_ACCESS_KEY_ID",
+            "state": "selected"
+          },
+          {
+            "kind": "assume-role",
+            "state": "absent"
+          },
+          {
+            "kind": "web-identity",
+            "state": "absent"
+          },
+          {
+            "kind": "sso",
+            "state": "absent"
+          },
+          {
+            "kind": "shared-credentials-file",
+            "state": "absent"
+          },
+          {
+            "kind": "login",
+            "state": "absent"
+          },
+          {
+            "kind": "credential_process",
+            "state": "absent"
+          },
+          {
+            "kind": "config-file",
+            "state": "absent"
+          },
+          {
+            "kind": "container",
+            "state": "absent"
+          },
+          {
+            "kind": "imds",
+            "state": "absent"
+          }
+        ]
+      }
+    },
+    {
+      "id": "bedrock-chat-bearer-beats-keys",
+      "provider": "bedrock-chat",
+      "env": {
+        "AWS_BEARER_TOKEN_BEDROCK": "SECRET-SENTINEL-DO-NOT-PRINT",
+        "AWS_ACCESS_KEY_ID": "AKIDEXAMPLE",
+        "AWS_SECRET_ACCESS_KEY": "SECRET-SENTINEL-DO-NOT-PRINT",
+        "AWS_REGION": "us-east-1"
+      },
+      "api_keys_providers": [],
+      "files": {},
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:AWS_BEARER_TOKEN_BEDROCK",
+            "state": "selected"
+          },
+          {
+            "kind": "env:AWS_ACCESS_KEY_ID",
+            "state": "shadowed"
+          },
+          {
+            "kind": "assume-role",
+            "state": "absent"
+          },
+          {
+            "kind": "web-identity",
+            "state": "absent"
+          },
+          {
+            "kind": "sso",
+            "state": "absent"
+          },
+          {
+            "kind": "shared-credentials-file",
+            "state": "absent"
+          },
+          {
+            "kind": "login",
+            "state": "absent"
+          },
+          {
+            "kind": "credential_process",
+            "state": "absent"
+          },
+          {
+            "kind": "config-file",
+            "state": "absent"
+          },
+          {
+            "kind": "container",
+            "state": "absent"
+          },
+          {
+            "kind": "imds",
+            "state": "shadowed"
+          }
+        ]
+      }
+    },
+    {
+      "id": "aws-anthropic-shared-credentials-file",
+      "provider": "aws-anthropic",
+      "env": {
+        "AWS_REGION": "us-west-2",
+        "ANTHROPIC_AWS_WORKSPACE_ID": "wrkspc_01"
+      },
+      "api_keys_providers": [],
+      "files": {
+        "~/.aws/credentials": "[default]\naws_access_key_id = AKIDEXAMPLE\naws_secret_access_key = SECRET-SENTINEL-DO-NOT-PRINT\n"
+      },
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:ANTHROPIC_AWS_API_KEY",
+            "state": "absent"
+          },
+          {
+            "kind": "env:AWS_ACCESS_KEY_ID",
+            "state": "absent"
+          },
+          {
+            "kind": "assume-role",
+            "state": "absent"
+          },
+          {
+            "kind": "web-identity",
+            "state": "absent"
+          },
+          {
+            "kind": "sso",
+            "state": "absent"
+          },
+          {
+            "kind": "shared-credentials-file",
+            "state": "selected"
+          },
+          {
+            "kind": "login",
+            "state": "absent"
+          },
+          {
+            "kind": "credential_process",
+            "state": "absent"
+          },
+          {
+            "kind": "config-file",
+            "state": "absent"
+          },
+          {
+            "kind": "container",
+            "state": "absent"
+          },
+          {
+            "kind": "imds",
+            "state": "shadowed"
+          }
+        ]
+      }
+    },
+    {
+      "id": "bedrock-anthropic-eks-irsa-unprobed",
+      "provider": "bedrock-anthropic",
+      "env": {
+        "AWS_WEB_IDENTITY_TOKEN_FILE": "/var/run/secrets/eks.amazonaws.com/serviceaccount/token",
+        "AWS_ROLE_ARN": "arn:aws:iam::111122223333:role/app",
+        "AWS_REGION": "eu-west-1"
+      },
+      "api_keys_providers": [],
+      "files": {},
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:AWS_BEARER_TOKEN_BEDROCK",
+            "state": "absent"
+          },
+          {
+            "kind": "env:AWS_ACCESS_KEY_ID",
+            "state": "absent"
+          },
+          {
+            "kind": "assume-role",
+            "state": "absent"
+          },
+          {
+            "kind": "web-identity",
+            "state": "unprobed"
+          },
+          {
+            "kind": "sso",
+            "state": "absent"
+          },
+          {
+            "kind": "shared-credentials-file",
+            "state": "absent"
+          },
+          {
+            "kind": "login",
+            "state": "absent"
+          },
+          {
+            "kind": "credential_process",
+            "state": "absent"
+          },
+          {
+            "kind": "config-file",
+            "state": "absent"
+          },
+          {
+            "kind": "container",
+            "state": "absent"
+          },
+          {
+            "kind": "imds",
+            "state": "unprobed"
+          }
+        ]
+      }
+    },
+    {
+      "id": "bedrock-anthropic-sso-profile-unprobed",
+      "provider": "bedrock-anthropic",
+      "env": {
+        "AWS_PROFILE": "work",
+        "AWS_EC2_METADATA_DISABLED": "true",
+        "AWS_REGION": "us-east-1"
+      },
+      "api_keys_providers": [],
+      "files": {
+        "~/.aws/config": "[profile work]\nsso_session = corp\nsso_account_id = 111122223333\nsso_role_name = Dev\nregion = us-east-1\n\n[sso-session corp]\nsso_start_url = https://corp.awsapps.com/start\nsso_region = us-east-1\n"
+      },
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:AWS_BEARER_TOKEN_BEDROCK",
+            "state": "absent"
+          },
+          {
+            "kind": "env:AWS_ACCESS_KEY_ID",
+            "state": "absent"
+          },
+          {
+            "kind": "assume-role",
+            "state": "absent"
+          },
+          {
+            "kind": "web-identity",
+            "state": "absent"
+          },
+          {
+            "kind": "sso",
+            "state": "unprobed"
+          },
+          {
+            "kind": "shared-credentials-file",
+            "state": "absent"
+          },
+          {
+            "kind": "login",
+            "state": "absent"
+          },
+          {
+            "kind": "credential_process",
+            "state": "absent"
+          },
+          {
+            "kind": "config-file",
+            "state": "absent"
+          },
+          {
+            "kind": "container",
+            "state": "absent"
+          },
+          {
+            "kind": "imds",
+            "state": "absent"
+          }
+        ]
+      }
+    },
+    {
+      "id": "azure-key-env-shadows-managed-identity",
+      "provider": "azure",
+      "env": {
+        "AZURE_OPENAI_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT",
+        "AZURE_OPENAI_RESOURCE": "acme",
+        "IDENTITY_ENDPOINT": "http://127.0.0.1:41/msi/token",
+        "IDENTITY_HEADER": "SECRET-SENTINEL-DO-NOT-PRINT"
+      },
+      "api_keys_providers": [],
+      "files": {},
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:AZURE_OPENAI_API_KEY",
+            "state": "selected"
+          },
+          {
+            "kind": "environment",
+            "state": "absent"
+          },
+          {
+            "kind": "workload-identity",
+            "state": "absent"
+          },
+          {
+            "kind": "managed-identity",
+            "state": "shadowed"
+          },
+          {
+            "kind": "az",
+            "state": "absent"
+          },
+          {
+            "kind": "pwsh",
+            "state": "absent"
+          },
+          {
+            "kind": "azd",
+            "state": "absent"
+          }
+        ]
+      }
+    },
+    {
+      "id": "azure-anthropic-certificate-prod-narrowed",
+      "provider": "azure-anthropic",
+      "env": {
+        "ANTHROPIC_FOUNDRY_RESOURCE": "acme",
+        "AZURE_TENANT_ID": "11111111-2222-3333-4444-555555555555",
+        "AZURE_CLIENT_ID": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "AZURE_CLIENT_CERTIFICATE_PATH": "/etc/app/cert.pem",
+        "AZURE_TOKEN_CREDENTIALS": "prod",
+        "PATH": "~/bin"
+      },
+      "api_keys_providers": [],
+      "files": {
+        "~/bin/az": "#!/bin/sh\nexit 1\n"
+      },
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:ANTHROPIC_FOUNDRY_API_KEY",
+            "state": "absent"
+          },
+          {
+            "kind": "environment",
+            "state": "unprobed"
+          },
+          {
+            "kind": "workload-identity",
+            "state": "absent"
+          },
+          {
+            "kind": "managed-identity",
+            "state": "unprobed"
+          },
+          {
+            "kind": "az",
+            "state": "absent"
+          },
+          {
+            "kind": "pwsh",
+            "state": "absent"
+          },
+          {
+            "kind": "azd",
+            "state": "absent"
+          }
+        ]
+      }
+    },
+    {
+      "id": "azure-explicit-entry-shadows-env",
+      "provider": "azure-chat",
+      "env": {
+        "AZURE_OPENAI_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT",
+        "AZURE_OPENAI_RESOURCE": "acme"
+      },
+      "api_keys_providers": [
+        "azure-chat"
+      ],
+      "files": {},
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "selected"
+          },
+          {
+            "kind": "env:AZURE_OPENAI_API_KEY",
+            "state": "shadowed"
+          },
+          {
+            "kind": "environment",
+            "state": "absent"
+          },
+          {
+            "kind": "workload-identity",
+            "state": "absent"
+          },
+          {
+            "kind": "managed-identity",
+            "state": "shadowed"
+          },
+          {
+            "kind": "az",
+            "state": "absent"
+          },
+          {
+            "kind": "pwsh",
+            "state": "absent"
+          },
+          {
+            "kind": "azd",
+            "state": "absent"
+          }
+        ]
+      }
+    },
+    {
+      "id": "vertex-adc-file-unprobed",
+      "provider": "vertex",
+      "env": {
+        "GOOGLE_CLOUD_PROJECT": "lm15-test-project",
+        "NO_GCE_CHECK": "1",
+        "PATH": "~/bin"
+      },
+      "api_keys_providers": [],
+      "files": {
+        "~/.config/gcloud/application_default_credentials.json": "{\"type\": \"authorized_user\", \"client_id\": \"c.apps.googleusercontent.com\", \"client_secret\": \"SECRET-SENTINEL-DO-NOT-PRINT\", \"refresh_token\": \"SECRET-SENTINEL-DO-NOT-PRINT\"}",
+        "~/bin/gcloud": "#!/bin/sh\nexit 1\n"
+      },
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "adc-env",
+            "state": "absent"
+          },
+          {
+            "kind": "adc-file",
+            "state": "unprobed"
+          },
+          {
+            "kind": "metadata",
+            "state": "absent"
+          },
+          {
+            "kind": "gcloud",
+            "state": "unprobed"
+          }
+        ]
+      }
+    },
+    {
+      "id": "vertex-nothing-configured",
+      "provider": "vertex-anthropic",
+      "env": {
+        "GOOGLE_CLOUD_PROJECT": "lm15-test-project",
+        "NO_GCE_CHECK": "1"
+      },
+      "api_keys_providers": [],
+      "files": {},
+      "expect": {
+        "configured": false,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "adc-env",
+            "state": "absent"
+          },
+          {
+            "kind": "adc-file",
+            "state": "absent"
+          },
+          {
+            "kind": "metadata",
+            "state": "absent"
+          },
+          {
+            "kind": "gcloud",
+            "state": "absent"
+          }
+        ]
+      }
+    },
+    {
+      "id": "vertex-express-env-selected",
+      "provider": "vertex-express",
+      "env": {
+        "GOOGLE_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT"
+      },
+      "api_keys_providers": [],
+      "files": {},
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:GOOGLE_API_KEY",
+            "state": "selected"
+          }
+        ]
+      }
+    },
+    {
+      "id": "azure-chat-az-cli-on-path-unprobed",
+      "provider": "azure-chat",
+      "env": {
+        "AZURE_OPENAI_RESOURCE": "acme",
+        "PATH": "~/bin"
+      },
+      "api_keys_providers": [],
+      "files": {
+        "~/bin/az": "#!/bin/sh\nexit 1\n"
+      },
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:AZURE_OPENAI_API_KEY",
+            "state": "absent"
+          },
+          {
+            "kind": "environment",
+            "state": "absent"
+          },
+          {
+            "kind": "workload-identity",
+            "state": "absent"
+          },
+          {
+            "kind": "managed-identity",
+            "state": "unprobed"
+          },
+          {
+            "kind": "az",
+            "state": "unprobed"
+          },
+          {
+            "kind": "pwsh",
+            "state": "absent"
+          },
+          {
+            "kind": "azd",
+            "state": "absent"
+          }
+        ]
+      }
+    },
+    {
+      "id": "moonshotai-responses-env-selected",
+      "provider": "moonshotai-responses",
+      "api_keys_providers": [],
+      "env": {
+        "MOONSHOTAI_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT"
+      },
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:MOONSHOTAI_API_KEY",
+            "state": "selected"
+          },
+          {
+            "kind": "env:MOONSHOT_API_KEY",
+            "state": "absent"
+          }
+        ]
+      }
+    },
+    {
+      "id": "moonshotai-anthropic-env-selected",
+      "provider": "moonshotai-anthropic",
+      "api_keys_providers": [],
+      "env": {
+        "MOONSHOTAI_API_KEY": "SECRET-SENTINEL-DO-NOT-PRINT"
+      },
+      "expect": {
+        "configured": true,
+        "steps": [
+          {
+            "kind": "api_keys",
+            "state": "absent"
+          },
+          {
+            "kind": "env:MOONSHOTAI_API_KEY",
+            "state": "selected"
+          },
+          {
+            "kind": "env:MOONSHOT_API_KEY",
             "state": "absent"
           }
         ]

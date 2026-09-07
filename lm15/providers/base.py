@@ -3,19 +3,23 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Iterator, Protocol, Sequence, Union
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Iterator, Mapping, Protocol, Sequence
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard for annotations
     from ..batch import BatchJob
+    from ..video_jobs import VideoJob
 
 from ..errors import (
     AuthError,
+    NotConfiguredError,
     ProviderError,
     TransportError as LM15TransportError,
     UnsupportedFeatureError,
     map_http_error,
     with_credential_hint,
 )
+from ..credentials import AwsCredentials, CredentialLike, CredentialValue, coerce_credential
 from ..features import EndpointSupport, ProviderManifest
 from ..models import ModelInfo
 from ..protocols import LiveSession
@@ -62,18 +66,30 @@ def default_transport() -> SyncTransport:
     return StdlibTransport()
 
 
-# A credential is a static key string or a zero-argument provider callable
-# returning one.  Providers are invoked at request-build time, once per
-# request, so rotating credentials (OAuth refresh, cloud token providers
-# such as azure.identity's get_bearer_token_provider) stay fresh in
-# long-lived clients.  Fetching and refreshing tokens is the caller's job;
-# lm15 only places the returned value on the wire.
-Credential = Union[str, Callable[[], str]]
+# A credential is a static key string, an AUTH-2 credential value (ApiKey,
+# BearerToken, AwsCredentials — lm15.credentials), or a zero-argument
+# provider callable returning either.  Providers are invoked at
+# request-build time, once per request, so rotating credentials (OAuth
+# refresh, cloud chains) stay fresh in long-lived clients.  Caching and
+# refreshing belongs to the provider callable (AUTH-2); the adapter never
+# caches what it returns.
+Credential = CredentialLike
+
+
+def resolve_credential_value(credential: Credential) -> CredentialValue:
+    """Invoke a provider callable if needed and coerce to a credential value."""
+    raw = credential() if callable(credential) else credential
+    return coerce_credential(raw)
 
 
 def resolve_credential(credential: Credential) -> str:
-    """Return the credential value, invoking a provider callable."""
-    return credential() if callable(credential) else credential
+    """The bearer/key STRING of a credential — the pre-2026-09-03 shape the
+    dialects' header code reads.  AWS credentials have no single string;
+    they travel as a SigV4 signature (``_emit``), never through here."""
+    value = resolve_credential_value(credential)
+    if isinstance(value, AwsCredentials):
+        raise NotConfiguredError("AWS credentials cannot be sent as a header value; the door must accept sigv4")
+    return value.value
 
 
 def _retry_after_seconds(value: str | None) -> float | None:
@@ -194,6 +210,14 @@ class BaseProviderLM:
     access: ProviderManifest
     account_id: str | None = None
     _credential_source: str = "explicit"
+    # Cloud-host state (AUTH-10): the resolved host settings and the clock
+    # every time-dependent byte (SigV4 date, JWT iat/exp) is read from.  The
+    # harness injects a fixed clock; users never touch it.
+    host_settings: "dict[str, str]"
+    clock: "Callable[[], datetime] | None"
+    # The header an ApiKey travels under when the policy says x-api-key
+    # (Anthropic ``x-api-key``, Gemini ``x-goog-api-key``).
+    _api_key_header: ClassVar[str] = "x-api-key"
 
     @property
     def supports(self) -> EndpointSupport:
@@ -214,16 +238,21 @@ class BaseProviderLM:
         *,
         credentials_path: "str | os.PathLike[str] | None" = None,
         default_base_url: str | None = None,
+        settings: "Mapping[str, str] | None" = None,
     ) -> None:
         """Bind the access policy and resolve the credential it calls for.
 
         Called from each dialect's ``__post_init__``. Sets ``access``,
         ``provider``, ``api_key`` (a callable for stored logins, re-read per
         request so rotations and refreshes are picked up), ``account_id``
-        when the credential carries one, and ``base_url`` when the policy
-        names its own and the caller left the dialect's default.
+        when the credential carries one, ``host_settings`` (explicit values
+        and defaults only — the router fills env fallbacks, like it does for
+        the key), and ``base_url``: the policy's own, or the host template
+        rendered over the settings, when the caller left the dialect's
+        default.
         """
         from ..access import load_credential
+        from ..cloud.hosts import render_base_url, resolve_settings
 
         policy = access if access is not None else type(self).manifest
         self.access = policy
@@ -233,8 +262,106 @@ class BaseProviderLM:
         self._credential_source = loaded.source
         if loaded.account_id is not None and self.account_id is None:
             self.account_id = loaded.account_id
-        if policy.base_url is not None and default_base_url is not None and self.base_url == default_base_url:
+        if loaded.credential is not None and not callable(loaded.credential):
+            # A static credential of the wrong kind for this door fails now,
+            # not on the first request (a provider callable is checked per call).
+            from ..access import select_scheme
+
+            select_scheme(policy, coerce_credential(loaded.credential))
+        self.host_settings = resolve_settings(policy.host, settings, None, provider=policy.provider)
+        if getattr(self, "clock", None) is None:
+            self.clock = None
+        if policy.host is not None:
+            if default_base_url is None or self.base_url == default_base_url:
+                self.base_url = render_base_url(policy.host, self.host_settings)
+        elif policy.base_url is not None and default_base_url is not None and self.base_url == default_base_url:
             self.base_url = policy.base_url
+
+    def _registry_compat(self) -> str | None:
+        """The compat preset the bound provider names in the registry, for a
+        dialect constructed directly with a bound access policy and no
+        ``compat=``: the policy names the provider; the provider names its
+        preset (found 2026-09-03 when a direct ``OpenAIChatLM(access=
+        BEDROCK_CHAT)`` skipped the bedrock per-model refusals)."""
+        if self.access is type(self).manifest:
+            return None
+        from ..registry import lookup
+
+        definition = lookup(self.access.provider)
+        return definition.compat if definition is not None else None
+
+    def _now(self) -> "datetime":
+        from ..cloud.hosts import utc_now
+
+        return self.clock() if self.clock is not None else utc_now()
+
+    def _emit(
+        self,
+        *,
+        method: str,
+        url: str,
+        headers: "dict[str, str] | list[tuple[str, str]] | None" = None,
+        params: "dict[str, Any] | None" = None,
+        payload: Any = None,
+        body: bytes | None = None,
+        endpoint: str | None = None,
+        stream: bool = False,
+        model: str | None = None,
+        connect_timeout: float | None = None,
+        read_timeout: float | None = None,
+        write_timeout: float | None = None,
+    ) -> TransportRequest:
+        """Finish a dialect-built request through the bound host (AUTH-10)
+        and sign it.  With no host this is ``make_json_request`` — every
+        dialect routes its wire requests through here so a host never needs
+        a dialect branch."""
+        from ..cloud.hosts import finish_request, sign_request
+        from .common import make_json_request
+
+        from ..access import auth_header
+
+        credential = resolve_credential_value(self.api_key) if self.api_key is not None else None
+        hdrs = dict(headers.items()) if isinstance(headers, dict) else dict(headers or [])
+        if credential is not None and not isinstance(credential, AwsCredentials):
+            pair = auth_header(self.access, credential, api_key_header=self._api_key_header)
+            if pair is not None and pair[0].lower() not in {k.lower() for k in hdrs}:
+                hdrs[pair[0]] = pair[1]
+        finished = finish_request(
+            self.access,
+            self.host_settings,
+            base_url=self.base_url,
+            url=url,
+            headers=hdrs,
+            payload=payload,
+            params=params,
+            endpoint=endpoint,
+            stream=stream,
+            model=model,
+            credential=credential,
+        )
+        req = make_json_request(
+            method=method,
+            url=finished.url,
+            headers=finished.headers,
+            params=finished.params or None,
+            payload=finished.payload,
+            body=body,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+            write_timeout=write_timeout,
+        )
+        if isinstance(credential, AwsCredentials):
+            req.headers = sign_request(
+                self.access,
+                self.host_settings,
+                method=req.method,
+                url=req.url,
+                headers=req.headers,
+                body=req.body,
+                credential=credential,
+                now=self._now(),
+            )
+        return req
 
     def _require(self, surface: str) -> None:
         """Raise unless the bound access path carries ``surface``.
@@ -856,8 +983,8 @@ class BaseProviderLM:
     def file_wait_ready(self, file_id: str, poll_every: float = 2.0, timeout: float | None = None) -> FileInfo:
         """Poll until the file leaves ``pending``; returns the terminal
         snapshot (``ready`` or ``failed``) — check ``readiness``, mirroring
-        BatchJob.wait's return-don't-raise convention.  Only Gemini uploads
-        (large media) are ever pending; the first poll usually returns."""
+        BatchJob.wait's return-don't-raise convention. Gemini uploads and
+        Azure OpenAI v1 uploads can be pending; the first poll usually returns."""
         self._require("files")
         import time as _time
 

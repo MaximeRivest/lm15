@@ -133,8 +133,20 @@ def test_openai_readiness_folds() -> None:
     lm = OpenAILM(api_key="k", transport=FakeTransport([]))
     assert lm._file_info({**OPENAI_FILE, "status": "processed"}).readiness == "ready"
     assert lm._file_info({**OPENAI_FILE, "status": "uploaded"}).readiness == "pending"
+    assert lm._file_info({**OPENAI_FILE, "status": "pending"}).readiness == "pending"  # Azure OpenAI v1
     assert lm._file_info({**OPENAI_FILE, "status": "error"}).readiness == "failed"
     assert lm._file_info({k: v for k, v in OPENAI_FILE.items() if k != "status"}).readiness == "ready"
+
+
+def test_openai_waits_through_azure_pending_state() -> None:
+    transport = FakeTransport([
+        wire({**OPENAI_FILE, "status": "pending"}),
+        wire({**OPENAI_FILE, "status": "processed"}),
+    ])
+    lm = OpenAILM(api_key="k", transport=transport)
+    info = lm.file_wait_ready(OPENAI_FILE["id"], poll_every=0, timeout=1)
+    assert info.readiness == "ready"
+    assert len(transport.requests) == 2
 
 
 def test_openai_expiring_file() -> None:

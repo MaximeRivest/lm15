@@ -55,7 +55,11 @@ class AuthStep:
 
     - ``"selected"`` — this rung supplies the credential;
     - ``"shadowed"`` — usable, but an earlier rung wins;
-    - ``"absent"`` — nothing here.
+    - ``"absent"`` — nothing here;
+    - ``"unprobed"`` — a network or subprocess rung of a cloud chain whose
+      configuration is present; the offline doctor did not contact it
+      (AUTH-7).  It runs before any later ``selected`` rung at request time
+      and may win.
 
     ``kind`` is the language-neutral source identifier from the contract
     fixtures (lm15-contract/auth/resolution.json): ``"api_keys"``,
@@ -71,7 +75,7 @@ class AuthStep:
     state: str
 
     def describe(self) -> str:
-        marker = {"selected": "=> ", "shadowed": " ~ ", "absent": " - "}[self.state]
+        marker = {"selected": "=> ", "shadowed": " ~ ", "absent": " - ", "unprobed": " ? "}[self.state]
         return f"{marker}{self.source}: {self.detail}"
 
 
@@ -80,6 +84,7 @@ class AuthReport:
     provider: str
     steps: tuple[AuthStep, ...]
     configured: bool
+    settings: tuple[tuple[str, str], ...] = ()  # resolved host settings (AUTH-7: printed by name and value)
 
     @property
     def selected(self) -> AuthStep | None:
@@ -91,10 +96,17 @@ class AuthReport:
     def describe(self) -> str:
         lines = [f"auth for provider {self.provider!r}:"]
         lines += [f"  {step.describe()}" for step in self.steps]
+        unprobed = [step for step in self.steps if step.state == "unprobed"]
         if self.configured and self.selected is not None:
             lines.append(f"  configured: yes — {self.selected.source}")
+            if unprobed:
+                lines.append(f"  note: {', '.join(s.source for s in unprobed)} run first at request time and may win")
+        elif self.configured:
+            lines.append(f"  configured: probably — {', '.join(s.source for s in unprobed)} (unprobed offline)")
         else:
             lines.append("  configured: no")
+        for name, value in self.settings:
+            lines.append(f"  setting {name}: {value}")
         return "\n".join(lines)
 
     def __str__(self) -> str:
@@ -161,6 +173,10 @@ def explain_auth(
     claude_credentials_path: str | None = None,
     codex_auth_path: str | None = None,
     xai_credentials_path: str | None = None,
+    files: Mapping[str, str] | None = None,
+    home: str | None = None,
+    settings: Mapping[str, str] | None = None,
+    config: RouterConfig | None = None,
 ) -> AuthReport:
     """Explain, rung by rung, how ``provider``'s credential resolves.
 
@@ -168,10 +184,23 @@ def explain_auth(
     report and ``lm()`` behavior is a bug. ``env`` defaults to
     ``os.environ`` (pass a mapping for hermetic tests). Never returns or
     prints secret values, and performs no network I/O.
+
+    ``config`` is the router's own ``RouterConfig`` (``router.config``): its
+    ``env``, ``api_keys`` and the provider's ``settings`` entry are read, so
+    the report describes the router that will send the request.  An
+    explicit ``env=``/``api_keys=``/``settings=`` argument wins over the
+    config's field.
     """
     import os
 
     canonical = _canonical_provider(provider)
+    if config is not None:
+        if env is None:
+            env = config.env
+        if api_keys is None:
+            api_keys = config.api_keys
+        if settings is None and config.settings is not None:
+            settings = config.settings.get(canonical) or config.settings.get(provider)
     if not _routable(canonical, ADAPTERS):
         from .registry import PROVIDERS
 
@@ -179,6 +208,10 @@ def explain_auth(
         raise ValueError(f"Unknown provider {provider!r}. Known providers: {', '.join(known)}")
 
     policy = _credential_policy(canonical)
+    if policy in ("aws-chain", "azure-chain", "gcp-chain") or (
+        _bound_definition(canonical) is not None and _bound_definition(canonical).hosted
+    ):
+        return _explain_cloud(canonical, env=env, api_keys=api_keys, files=files, home=home, settings=settings)
     if policy == "oauth":
         override = claude_credentials_path if canonical == "claude-code" else codex_auth_path
         step = _oauth_step(canonical, override)
@@ -246,3 +279,64 @@ def explain_auth(
         selected = True
 
     return AuthReport(provider=canonical, steps=tuple(steps), configured=selected)
+
+
+def _bound_definition(canonical: str):
+    from .registry import PROVIDERS
+
+    return PROVIDERS.get(canonical)
+
+
+def _explain_cloud(
+    canonical: str,
+    *,
+    env: Mapping[str, str] | None,
+    api_keys: Mapping[str, Credential] | None,
+    files: Mapping[str, str] | None,
+    home: str | None,
+    settings: Mapping[str, str] | None,
+) -> AuthReport:
+    """The cloud-chain walk (AUTH-1 aws/azure/gcp chains) through
+    ``lm15.cloud.chains.explain``: offline, files from ``files`` when the
+    harness materialized them, host settings resolved and printed."""
+    import os
+
+    from .cloud.chains import ChainContext, explain, profile_settings
+    from .cloud.hosts import resolve_settings
+
+    definition = _bound_definition(canonical)
+    policy = definition.access
+    environment = env if env is not None else os.environ
+    config = RouterConfig(env=env, api_keys=api_keys)
+    _value, has_entry = _api_keys_entry(config, canonical)
+    resolved: dict[str, str] = {}
+    setting_error: str | None = None
+    ctx = ChainContext(
+        env=environment,
+        home=Path(home).expanduser() if home else (Path(environment["HOME"]) if environment.get("HOME") else Path.home()),
+        files=files,
+    )
+    try:
+        resolved = resolve_settings(policy.host, settings, environment, provider=canonical, profile=profile_settings(policy, ctx))
+    except NotConfiguredError as exc:
+        setting_error = str(exc).splitlines()[0]
+    ctx.settings = resolved
+    if policy.cloud_chain:
+        steps, configured = explain(policy, ctx, explicit=has_entry)
+        out = [AuthStep(kind=s.kind, source=s.source, detail=s.detail, state=s.state) for s in steps]
+    else:
+        # A hosted door with the ordinary key chain (vertex-express).
+        out = [AuthStep("api_keys", "explicit api_keys entry",
+                        "provided (value never shown)" if has_entry else "not provided",
+                        "selected" if has_entry else "absent")]
+        configured = has_entry
+        for key in policy.env_keys:
+            if environment.get(key):
+                out.append(AuthStep(f"env:{key}", f"env ${key}", "set (value never shown)", "shadowed" if configured else "selected"))
+                configured = True
+            else:
+                out.append(AuthStep(f"env:{key}", f"env ${key}", "not set", "absent"))
+    shown = tuple(sorted(resolved.items()))
+    if setting_error:
+        shown = shown + (("error", setting_error),)
+    return AuthReport(provider=canonical, steps=tuple(out), configured=configured, settings=shown)

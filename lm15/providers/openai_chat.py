@@ -10,10 +10,12 @@ policy with that server's default base URL.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Iterator
+from typing import Any, Callable, ClassVar, Iterator, Mapping
 
 from ..compat import (
     OPENAI_CHAT_PRESET_BASE_URLS,
@@ -22,7 +24,7 @@ from ..compat import (
     resolve_openai_chat_compat,
 )
 from ..errors import ProviderError, UnsupportedFeatureError
-from ..access import OPENAI_CHAT_API, auth_header
+from ..access import OPENAI_CHAT_API
 from ..features import ProviderManifest
 from ..sse import SSEEvent
 from ..transports import TransportRequest
@@ -46,9 +48,8 @@ from ..types import (
     ToolResultPart,
     Usage,
 )
-from .base import BaseProviderLM, Credential, HttpResponse, SyncTransport, default_transport, resolve_credential
+from .base import BaseProviderLM, Credential, HttpResponse, SyncTransport, default_transport
 from .common import (
-    make_json_request,
     media_data_uri,
     model_infos_from_entries,
     openai_token_logprobs,
@@ -157,6 +158,8 @@ class OpenAIChatLM(BaseProviderLM):
     compat: OpenAIChatCompat | str | None = None
     access: ProviderManifest | None = field(default=None, repr=False)
     credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
+    settings: "Mapping[str, str] | None" = None
+    clock: "Callable[[], datetime] | None" = field(default=None, repr=False)
 
     provider: str = field(default="openai_chat", init=False)
     account_id: str | None = field(default=None, init=False, repr=False)
@@ -174,24 +177,26 @@ class OpenAIChatLM(BaseProviderLM):
     normalize_error = OpenAILM.normalize_error
 
     def __post_init__(self) -> None:
-        self._bind_access(self.access, credentials_path=self.credentials_path, default_base_url=_DEFAULT_BASE_URL)
-        compat = self.compat
+        self._bind_access(self.access, credentials_path=self.credentials_path, default_base_url=_DEFAULT_BASE_URL, settings=self.settings)
+        compat = self.compat if self.compat is not None else self._registry_compat()
         if isinstance(compat, str):
             preset_key = compat.lower().replace("-", "_").replace(" ", "_")
-            resolved = resolve_openai_chat_compat(OpenAIChatCompat.preset(compat))
+            partial = OpenAIChatCompat.preset(compat)
             if self.base_url == _DEFAULT_BASE_URL:
                 self.base_url = OPENAI_CHAT_PRESET_BASE_URLS.get(preset_key, _DEFAULT_BASE_URL)
         elif isinstance(compat, OpenAIChatCompat):
-            resolved = resolve_openai_chat_compat(compat)
+            partial = compat
         else:
-            resolved = resolve_openai_chat_compat(OpenAIChatCompat())
-        self._resolved_compat = resolved
+            partial = OpenAIChatCompat()
+        self._compat_partial = partial
+        self._resolved_compat = resolve_openai_chat_compat(partial)
 
     _resolved_compat: ResolvedOpenAIChatCompat = field(init=False, repr=False, default=ResolvedOpenAIChatCompat())
+    _compat_partial: OpenAIChatCompat | None = field(init=False, repr=False, default=None)
 
     def _headers(self) -> dict[str, str]:
-        name, value = auth_header(self.access, resolve_credential(self.api_key))
-        headers = {name: value, "Content-Type": "application/json"}
+        headers: dict[str, str] = {}  # auth is applied once, in _emit (AUTH-2)
+        headers["Content-Type"] = "application/json"
         for key, static in self.access.headers:
             headers[key] = static
         return headers
@@ -199,7 +204,7 @@ class OpenAIChatLM(BaseProviderLM):
     # ─── Live model listing (provisional endpoint) ──────────────────────
 
     def _models_request(self):
-        return make_json_request(
+        return self._emit(
             method="GET",
             url=f"{self.base_url.rstrip('/')}/models",
             headers=self._headers(),
@@ -361,8 +366,16 @@ class OpenAIChatLM(BaseProviderLM):
             return "required"
         return "auto"
 
+    def _compat_for(self, model: str) -> ResolvedOpenAIChatCompat:
+        """The resolved compat for this model: the preset's per-family
+        overrides applied (OpenAIChatCompat.model_overrides)."""
+        partial = self._compat_partial
+        if partial is None or not partial.model_overrides:
+            return self._resolved_compat
+        return resolve_openai_chat_compat(partial.for_model(model))
+
     def _payload(self, request: Request, stream: bool) -> dict[str, Any]:
-        compat = self._resolved_compat
+        compat = self._compat_for(request.model)
         payload: dict[str, Any] = {
             "model": request.model,
             "messages": self._build_messages(request, compat),
@@ -450,6 +463,15 @@ class OpenAIChatLM(BaseProviderLM):
                         provider=self.provider,
                     )
                 effort = reasoning.effort
+                if compat.reasoning_efforts is not None and effort not in compat.reasoning_efforts:
+                    # MAP-7 rule 2: a word with no native level raises here
+                    # when the server would not refuse it (Moonshot kimi-k3
+                    # answered 200 to `medium` and to `bogus`, live 2026-09-03).
+                    raise UnsupportedFeatureError(
+                        f"{self.provider}: reasoning.effort={effort!r} has no level on this server "
+                        f"(it accepts {', '.join(compat.reasoning_efforts)}) and would be accepted silently",
+                        provider=self.provider,
+                    )
                 if compat.builtin_tools == "groq" and reasoning.summary == "auto":
                     # Groq's visibility knob (MAP-7 rule 7): "parsed" returns
                     # the trace as message.reasoning.  Live 2026-09-02: Qwen
@@ -465,6 +487,16 @@ class OpenAIChatLM(BaseProviderLM):
                     payload["reasoning"] = {"effort": effort}
                 elif compat.thinking_format == "deepseek":
                     payload["thinking"] = {"type": "enabled"}
+                    payload["reasoning_effort"] = effort
+                elif compat.thinking_format == "kimi":
+                    # Moonshot: the effort word alone, the field kimi-k3
+                    # documents (guide--reasoning-effort.md).  A `thinking`
+                    # object beside it is accepted (live 2026-09-03) but the
+                    # docs say not to send it, and it would carry nothing.
+                    # Stated trade-off: kimi-k2.6 has no levels and ignores
+                    # the word silently (live 2026-09-03, still 44 reasoning
+                    # tokens at `low`); the adapter does not sniff model
+                    # names, so the docs say: do not set effort on K2.x.
                     payload["reasoning_effort"] = effort
                 elif compat.thinking_format == "qwen":
                     payload["enable_thinking"] = True
@@ -484,7 +516,11 @@ class OpenAIChatLM(BaseProviderLM):
                     payload["reasoning_effort"] = "none"
                 elif compat.thinking_format == "openrouter":
                     payload["reasoning"] = {"enabled": False}
-                elif compat.thinking_format == "deepseek":
+                elif compat.thinking_format in ("deepseek", "kimi"):
+                    # "kimi": the K2.x family's documented off switch; the
+                    # docs say kimi-k3 "always reasons", but live 2026-09-03
+                    # it honoured the object too (200, no reasoning_content,
+                    # no reasoning_tokens) — pinned as moonshotai.reasoning_off.
                     payload["thinking"] = {"type": "disabled"}
                 elif compat.thinking_format == "qwen":
                     payload["enable_thinking"] = False
@@ -499,8 +535,9 @@ class OpenAIChatLM(BaseProviderLM):
 
         # Promoted cross-provider knobs (changes/2026-09-01-extensions-burn-down):
         # Chat Completions spellings — user_id rides the dialect's `user`
-        # field (safety_identifier is Responses-only), or the server's own
-        # name when the compat says so (DeepSeek: `user_id`). Servers that
+        # field, or the server's own name when the compat says so (DeepSeek:
+        # `user_id`; Meta: `safety_identifier`, which supersedes `user` on
+        # that server — protocols--chat-completions.md). Servers that
         # do not implement a field reject it themselves; the dialect adapter
         # cannot know each compat server's support statically.
         if request.config.service_tier is not None:
@@ -523,9 +560,12 @@ class OpenAIChatLM(BaseProviderLM):
         return payload
 
     def build_request(self, request: Request, stream: bool) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="POST",
             url=f"{self.base_url.rstrip('/')}/chat/completions",
+            endpoint="chat/completions",
+            stream=stream,
+            model=request.model,
             headers=self._headers(),
             payload=self._payload(request, stream=stream),
             read_timeout=120.0 if stream else 60.0,

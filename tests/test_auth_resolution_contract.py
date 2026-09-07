@@ -62,6 +62,25 @@ def test_auth_resolution_contract_case(case: dict, tmp_path: Path) -> None:
         kwarg = "claude_credentials_path" if provider == "claude-code" else "xai_credentials_path"
         kwargs[kwarg] = path
 
+    if "files" in case:
+        # Cloud-chain cases: a sandbox HOME with the fixture's files, exactly
+        # as the contract harness materializes them.
+        home = tmp_path / "home"
+        home.mkdir()
+        env = {k: v.replace("~/", f"{home}/") for k, v in kwargs["env"].items()}
+        env["HOME"] = str(home)
+        files = {}
+        for rel, content in case["files"].items():
+            target = home / rel[2:] if rel.startswith("~/") else Path(rel)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            files[str(target)] = content
+        kwargs["env"] = env
+        kwargs["files"] = files
+        kwargs["home"] = str(home)
+    if "settings" in case:
+        kwargs["settings"] = case["settings"]
+
     report = explain_auth(case["provider"], **kwargs)
 
     expect = case["expect"]

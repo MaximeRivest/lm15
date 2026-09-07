@@ -16,6 +16,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Check out pinned contract
+        # Tests import the shared cloud vectors during collection.
+        run: |
+          PIN=$(tr -d '[:space:]' < CONTRACT_PIN)
+          [[ "$PIN" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid CONTRACT_PIN'; exit 1; }
+          git clone --no-checkout https://github.com/lm15-dev/lm15-contract.git ../lm15-contract
+          git -C ../lm15-contract checkout --detach "$PIN"
+          if [ ! -e ../lm15-python ]; then
+            ln -s "$GITHUB_WORKSPACE" ../lm15-python
+          fi
       - name: Install
         run: python -m pip install -e . pytest pytest-asyncio pyyaml
       - name: Tests
@@ -28,11 +38,7 @@ jobs:
         # CONTRIBUTING.md). The contract's shim registry expects the
         # reference at the sibling path ../lm15-python with a .venv.
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq jq
-          PIN=$(tr -d '[:space:]' < CONTRACT_PIN)
-          git clone --no-checkout https://github.com/lm15-dev/lm15-contract.git ../lm15-contract
-          git -C ../lm15-contract checkout --detach "$PIN"
-          ln -sfn "$GITHUB_WORKSPACE" ../lm15-python
+          test -z "$(git -C ../lm15-contract status --porcelain --untracked-files=all)"
           python -m venv .venv && .venv/bin/pip install -q -e .
           python ../lm15-contract/harness/check.py --shim python --direction all
       - name: Vet shim smoke test
@@ -45,3 +51,8 @@ jobs:
           else
             echo "tests/test_vet_shim.py not present; skipping"
           fi
+      - name: Contract checkout stays clean
+        if: always()
+        run: |
+          test -d ../lm15-contract/.git
+          test -z "$(git -C ../lm15-contract status --porcelain --untracked-files=all)"

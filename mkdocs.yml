@@ -57,6 +57,7 @@ nav:
   - Guides:
       - Providers & models: providers-and-models.md
       - Authentication: authentication.md
+      - Cloud hosts (AWS, Azure, Google Cloud): cloud-hosts.md
       - The router: using-the-router.md
       - The type system: using-the-type-system.md
       - Tools from functions: tools-from-functions.md

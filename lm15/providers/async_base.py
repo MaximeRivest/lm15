@@ -15,9 +15,11 @@ if it is ever used: the inner adapter must never touch the network.
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 import os
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, ClassVar, Protocol
+from typing import Any, AsyncIterator, Callable, ClassVar, Mapping, Protocol
 
 from ..errors import (
     ProviderError,
@@ -44,9 +46,8 @@ from ..types import (
     StreamEvent,
 )
 from .anthropic import AnthropicLM
-from .base import BaseProviderLM, Credential, HttpResponse, SyncTransport
+from .base import BaseProviderLM, Credential, HttpResponse
 from .claude_code import DEFAULT_CLAUDE_CODE_VERSION, ClaudeCodeLM
-from .common import make_json_request
 from .gemini import GeminiLM
 from .openai import OpenAILM
 from .openai_chat import OpenAIChatLM
@@ -469,11 +470,15 @@ class AsyncOpenAILM(AsyncBaseProviderLM):
     transport: AsyncTransport = field(default_factory=default_async_transport)
     base_url: str = "https://api.openai.com/v1"
     profile: Any | None = None
+    compat: Any | None = field(default=None, kw_only=True)
     access: ProviderManifest | None = field(default=None, repr=False)
     credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
+    settings: "Mapping[str, str] | None" = field(default=None, kw_only=True)
+    clock: "Callable[[], datetime] | None" = field(default=None, repr=False, kw_only=True)
     account_id: str | None = None
 
     async def live(self, config: LiveConfig):
+        self._inner._require("live")
         # Native async websocket (websockets.asyncio) — not a thread
         # wrapper: a blocked sync recv in a worker thread cannot be
         # cancelled from the event loop, and cancellation is the heart
@@ -504,11 +509,17 @@ class AsyncOpenAILM(AsyncBaseProviderLM):
             transport=_ForbiddenTransport(),
             base_url=self.base_url,
             profile=self.profile,
+            compat=self.compat,
             access=self.access,
             credentials_path=self.credentials_path,
+            settings=self.settings,
+            clock=self.clock,
             account_id=self.account_id,
         )
         self._mirror_binding()
+        # The sync sibling resolves a preset name (and may supply that
+        # server's default base_url); mirror the resolved values.
+        self.base_url = self._inner.base_url
 
 
 @dataclass(slots=True)
@@ -520,6 +531,8 @@ class AsyncAnthropicLM(AsyncBaseProviderLM):
     compat: Any | None = None
     access: ProviderManifest | None = field(default=None, repr=False)
     credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
+    settings: "Mapping[str, str] | None" = None
+    clock: "Callable[[], datetime] | None" = field(default=None, repr=False)
 
     provider: str = field(default="anthropic", init=False)
     manifest: ClassVar[ProviderManifest] = AnthropicLM.manifest
@@ -535,6 +548,8 @@ class AsyncAnthropicLM(AsyncBaseProviderLM):
             compat=self.compat,
             access=self.access,
             credentials_path=self.credentials_path,
+            settings=self.settings,
+            clock=self.clock,
         )
         self._mirror_binding()
         # The sync sibling resolves compat presets (and that server's default
@@ -551,6 +566,8 @@ class AsyncGeminiLM(AsyncBaseProviderLM):
     upload_base_url: str = "https://generativelanguage.googleapis.com/upload/v1beta"
     access: ProviderManifest | None = field(default=None, repr=False)
     credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
+    settings: "Mapping[str, str] | None" = None
+    clock: "Callable[[], datetime] | None" = field(default=None, repr=False)
 
     provider: str = field(default="gemini", init=False)
     manifest: ClassVar[ProviderManifest] = GeminiLM.manifest
@@ -565,10 +582,13 @@ class AsyncGeminiLM(AsyncBaseProviderLM):
             upload_base_url=self.upload_base_url,
             access=self.access,
             credentials_path=self.credentials_path,
+            settings=self.settings,
+            clock=self.clock,
         )
         self._mirror_binding()
 
     async def live(self, config: LiveConfig):
+        self._inner._require("live")
         # Native async twin of GeminiLM.live: same pure setup frame,
         # encoder, and setup-status classifier; only the socket awaits.
         import json as _json
@@ -597,6 +617,8 @@ class AsyncOpenAIChatLM(AsyncBaseProviderLM):
     compat: Any | None = None
     access: ProviderManifest | None = field(default=None, repr=False)
     credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
+    settings: "Mapping[str, str] | None" = None
+    clock: "Callable[[], datetime] | None" = field(default=None, repr=False)
 
     provider: str = field(default="openai_chat", init=False)
     manifest: ClassVar[ProviderManifest] = OpenAIChatLM.manifest
@@ -611,6 +633,8 @@ class AsyncOpenAIChatLM(AsyncBaseProviderLM):
             compat=self.compat,
             access=self.access,
             credentials_path=self.credentials_path,
+            settings=self.settings,
+            clock=self.clock,
         )
         self._mirror_binding()
         # The sync sibling's __post_init__ resolves compat presets (and may

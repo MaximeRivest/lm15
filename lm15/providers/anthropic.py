@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import json
 import os
-import uuid
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Iterator
+from typing import Any, Callable, ClassVar, Iterator, Mapping
 
 from ..errors import (
     AuthError,
@@ -20,7 +21,7 @@ from ..errors import (
     canonical_error_code,
     map_http_error,
 )
-from ..access import ANTHROPIC_API, auth_header
+from ..access import ANTHROPIC_API
 from ..compat import ANTHROPIC_PRESET_BASE_URLS, AnthropicCompat, ResolvedAnthropicCompat, resolve_anthropic_compat
 from ..features import ProviderManifest
 from ..sse import SSEEvent
@@ -67,9 +68,8 @@ from .base import (
     batch_entry_http,
     batch_entry_request,
     default_transport,
-    resolve_credential,
 )
-from .common import EFFORT_THINKING_BUDGETS, anthropic_source, iso_utc, make_json_request, model_infos_from_entries, multipart_form_body, parts_to_text
+from .common import EFFORT_THINKING_BUDGETS, anthropic_source, iso_utc, model_infos_from_entries, multipart_form_body, parts_to_text
 
 # Canonical builtin tool name → Anthropic tool format
 _ANTHROPIC_BUILTIN_MAP: dict[str, str] = {
@@ -246,6 +246,8 @@ class AnthropicLM(BaseProviderLM):
     compat: AnthropicCompat | str | None = None
     access: ProviderManifest | None = None
     credentials_path: "str | os.PathLike[str] | None" = field(default=None, repr=False)
+    settings: "Mapping[str, str] | None" = None
+    clock: "Callable[[], datetime] | None" = field(default=None, repr=False)
 
     provider: str = field(default="anthropic", init=False)
     account_id: str | None = field(default=None, init=False, repr=False)
@@ -253,8 +255,8 @@ class AnthropicLM(BaseProviderLM):
     _resolved_compat: ResolvedAnthropicCompat = field(init=False, repr=False, default=ResolvedAnthropicCompat())
 
     def __post_init__(self) -> None:
-        self._bind_access(self.access, credentials_path=self.credentials_path, default_base_url=_DEFAULT_BASE_URL)
-        compat = self.compat
+        self._bind_access(self.access, credentials_path=self.credentials_path, default_base_url=_DEFAULT_BASE_URL, settings=self.settings)
+        compat = self.compat if self.compat is not None else self._registry_compat()
         if isinstance(compat, str):
             # A preset name also supplies that server's default base_url; an
             # explicit non-default base_url argument always wins (same rule
@@ -275,6 +277,9 @@ class AnthropicLM(BaseProviderLM):
         "rate_limit_error": RateLimitError,
         "request_too_large": InvalidRequestError,
         "not_found_error": InvalidRequestError,
+        "resource_not_found_error": InvalidRequestError,  # Moonshot's Anthropic wire (errors.md)
+        "DeploymentNotFound": UnsupportedModelError,  # Azure Foundry: top-level code, model string = deployment
+        "invalid_authentication_error": AuthError,  # Moonshot's Anthropic wire (errors.md)
         "invalid_request_error": InvalidRequestError,
         "api_error": ServerError,
         "overloaded_error": ServerError,
@@ -323,9 +328,13 @@ class AnthropicLM(BaseProviderLM):
     def normalize_error(self, status: int, body: str) -> ProviderError:
         try:
             data = json.loads(body)
-            err = data.get("error", {}) if isinstance(data, dict) else {}
+            inner = data.get("error") if isinstance(data, dict) else None
+            # Anthropic's envelope nests under `error`; Azure Foundry's
+            # gateway uses top-level {code, message} before a deployment is
+            # reached (live 2026-09-04).  Keep both shapes on one wire.
+            err = inner if isinstance(inner, (dict, str)) else data if isinstance(data, dict) else {}
             msg = err.get("message", "") if isinstance(err, dict) else str(err)
-            err_type = str(err.get("type") or "") if isinstance(err, dict) else ""
+            err_type = str(err.get("type") or err.get("code") or "") if isinstance(err, dict) else ""
             request_id = str(data.get("request_id") or "") if isinstance(data, dict) else ""
 
             if self._is_context_length_message(msg):
@@ -336,7 +345,12 @@ class AnthropicLM(BaseProviderLM):
                     provider_code=err_type or None,
                     request_id=request_id or None,
                 )
-            if err_type == "not_found_error" and self._is_model_error(msg):
+            # `resource_not_found_error` is Moonshot's spelling of the same
+            # 404 on its Anthropic wire ("Not found the model …", live
+            # 2026-09-03); the message rule decides, as on the chat wire.
+            if err_type == "DeploymentNotFound" or (
+                err_type in ("not_found_error", "resource_not_found_error") and self._is_model_error(msg)
+            ):
                 return self._provider_error(
                     UnsupportedModelError,
                     msg,
@@ -370,12 +384,11 @@ class AnthropicLM(BaseProviderLM):
         ))
 
     def _headers(self, request: Request | None = None) -> dict[str, str]:
-        name, value = auth_header(self.access, resolve_credential(self.api_key), api_key_header="x-api-key")
-        headers = {
-            name: value,
-            "anthropic-version": self.api_version,
-            "content-type": "application/json",
-        }
+        # The auth header is the policy's business: _emit applies it once per
+        # request for every scheme (AUTH-2, AUTH-10).
+        headers: dict[str, str] = {}
+        headers["anthropic-version"] = self.api_version
+        headers["content-type"] = "application/json"
         betas: list[str] = []
         for key, static in self.access.headers:
             if key.lower() == "anthropic-beta":
@@ -426,6 +439,11 @@ class AnthropicLM(BaseProviderLM):
                     "thinking": part.text,
                     "signature": signature["signature"],
                 }
+            if self._resolved_compat.thinking_replay == "unsigned" and part.text:
+                # The server signs nothing (`signature: ""`) and takes the
+                # block back unsigned (Moonshot, live 2026-09-03); a text
+                # replay would turn the reasoning into a spoken turn.
+                return {"type": "thinking", "thinking": part.text}
             return {"type": "text", "text": part.text}
         return {"type": "text", "text": getattr(part, "text", "") or ""}
 
@@ -543,11 +561,26 @@ class AnthropicLM(BaseProviderLM):
 
         reasoning = request.config.reasoning
         deepseek_thinking = compat.thinking_format == "deepseek"
+        # "adaptive": every model on this server is the adaptive class (Meta
+        # Model API, protocols--messages.md § Reasoning) — no model-name table.
+        always_adaptive = compat.thinking_format == "adaptive"
+        # "effort": no `thinking` object exists on this server; the dial is
+        # output_config.effort alone (Moonshot messages--create.md).
+        effort_only = compat.thinking_format == "effort"
         adaptive = (
             reasoning is not None and not reasoning.is_off
-            and (deepseek_thinking or anthropic_adaptive_class(request.model))
+            and (deepseek_thinking or always_adaptive or effort_only or anthropic_adaptive_class(request.model))
         )
         if reasoning is not None and not reasoning.is_off:
+            if compat.reasoning_efforts is not None and reasoning.effort not in compat.reasoning_efforts:
+                # MAP-7 rule 2: a word with no native level raises here when
+                # the server would not refuse it (Moonshot's Anthropic wire
+                # answered 200 to `medium` and to `bogus`, live 2026-09-03).
+                raise UnsupportedFeatureError(
+                    f"{self.provider}: reasoning.effort={reasoning.effort!r} has no level on this server "
+                    f"(it accepts {', '.join(compat.reasoning_efforts)}) and would be accepted silently",
+                    provider=self.provider,
+                )
             if reasoning.summary in ("concise", "detailed"):
                 raise UnsupportedFeatureError(
                     f"anthropic: reasoning.summary={reasoning.summary!r} is an OpenAI detail level; "
@@ -560,11 +593,16 @@ class AnthropicLM(BaseProviderLM):
                         f"{self.provider}: reasoning.thinking_budget is not supported on {request.model} — "
                         + ("this server ignores budget_tokens (a silent no-op); effort is the dial"
                            if deepseek_thinking else
+                           "this server accepts budget_tokens without translating it (a silent no-op); "
+                           "effort is the dial (protocols--messages.md)"
+                           if always_adaptive else
                            "this model class takes thinking.type 'adaptive' with output_config.effort; "
                            "budget_tokens is rejected by the API (live 2026-09-02)"),
                         provider=self.provider,
                     )
-                if reasoning.effort == "minimal" and not deepseek_thinking:
+                # MAP-7: the word goes verbatim on the always-adaptive server;
+                # it answers an unsupported level with a 400 of its own.
+                if reasoning.effort == "minimal" and not (deepseek_thinking or always_adaptive or effort_only):
                     raise UnsupportedFeatureError(
                         "anthropic: reasoning.effort='minimal' has no level on this model class "
                         "(output_config.effort is low|medium|high|xhigh|max); 'low' is the floor",
@@ -587,6 +625,17 @@ class AnthropicLM(BaseProviderLM):
                 payload["system"] = [{"type": "text", "text": system_text, "cache_control": cache_marker}]
             else:
                 payload["system"] = system_text
+        if compat.sampling_params == "reject":
+            for name in ("temperature", "top_p", "top_k"):
+                if getattr(request.config, name) is not None:
+                    # The server documents none of these and swallows them
+                    # silently (Moonshot, live 2026-09-03: temperature 0.5 is
+                    # HTTP 200 here, "only 1 is allowed" on its chat wire).
+                    raise UnsupportedFeatureError(
+                        f"{self.provider}: config.{name} is silently ignored by this server "
+                        "(the model's sampling is fixed); omit it",
+                        provider=self.provider,
+                    )
         if request.config.temperature is not None:
             payload["temperature"] = request.config.temperature
         if request.config.top_p is not None:
@@ -625,6 +674,21 @@ class AnthropicLM(BaseProviderLM):
             elif reasoning is not None:
                 payload["thinking"] = {"type": "enabled"}
                 payload["output_config"] = {"effort": reasoning.effort}
+        elif effort_only:
+            # Moonshot over the Anthropic wire (messages--create.md): no
+            # thinking object is documented; output_config.effort alone.
+            # Off goes out as thinking.type=disabled, which the server
+            # honours (live 2026-09-03: no thinking block, no thinking_tokens).
+            if reasoning is not None and reasoning.is_off:
+                payload["thinking"] = {"type": "disabled"}
+            elif reasoning is not None:
+                payload["output_config"] = {"effort": reasoning.effort}
+        elif always_adaptive and reasoning is not None and reasoning.is_off:
+            # The server reasons by default and cannot stop (Meta: Muse Spark
+            # "always reasons").  Explicit off must reach the wire so the
+            # server refuses it loudly (HTTP 400) instead of spending hidden
+            # reasoning tokens the caller asked to disable.
+            payload["thinking"] = {"type": "disabled"}
         elif adaptive:
             # MAP-7 rule 2 on the adaptive class (live 2026-09-02, Sonnet 5):
             # the model decides when to think; effort steers depth.
@@ -685,11 +749,14 @@ class AnthropicLM(BaseProviderLM):
         return payload
 
     def build_request(self, request: Request, stream: bool) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="POST",
             url=f"{self.base_url.rstrip('/')}/messages",
             headers=self._headers(request),
             payload=self._payload(request, stream=stream),
+            endpoint="messages",
+            stream=stream,
+            model=request.model,
             read_timeout=120.0 if stream else 60.0,
         )
 
@@ -905,7 +972,7 @@ class AnthropicLM(BaseProviderLM):
     def _models_request(self):
         # limit=1000 is the endpoint maximum; the catalog fits in one page
         # today (has_more=false observed live 2026-08-31).
-        return make_json_request(
+        return self._emit(
             method="GET",
             url=f"{self.base_url.rstrip('/')}/models",
             params={"limit": 1000},
@@ -938,7 +1005,7 @@ class AnthropicLM(BaseProviderLM):
         )
         headers = self._headers()
         headers["content-type"] = content_type
-        return TransportRequest(
+        return self._emit(
             method="POST",
             url=f"{self.base_url.rstrip('/')}/files",
             headers=list(headers.items()),
@@ -968,7 +1035,7 @@ class AnthropicLM(BaseProviderLM):
         )
 
     def _file_get_request(self, file_id: str) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="GET", url=f"{self.base_url.rstrip('/')}/files/{file_id}",
             headers=self._headers(), read_timeout=60.0,
         )
@@ -977,7 +1044,7 @@ class AnthropicLM(BaseProviderLM):
         params: dict[str, Any] = {"limit": limit}
         if cursor is not None:
             params["page"] = cursor
-        return make_json_request(
+        return self._emit(
             method="GET", url=f"{self.base_url.rstrip('/')}/files",
             params=params, headers=self._headers(), read_timeout=60.0,
         )
@@ -990,13 +1057,13 @@ class AnthropicLM(BaseProviderLM):
         return FilePage(items=items, next_cursor=cursor if isinstance(cursor, str) and cursor else None)
 
     def _file_delete_request(self, file_id: str) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="DELETE", url=f"{self.base_url.rstrip('/')}/files/{file_id}",
             headers=self._headers(), read_timeout=60.0,
         )
 
     def _file_download_request(self, file_id: str) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="GET", url=f"{self.base_url.rstrip('/')}/files/{file_id}/content",
             headers=self._headers(), read_timeout=300.0,
         )
@@ -1018,7 +1085,7 @@ class AnthropicLM(BaseProviderLM):
             ],
             **(request.extensions or {}),
         }
-        return make_json_request(
+        return self._emit(
             method="POST",
             url=f"{self.base_url.rstrip('/')}/messages/batches",
             headers=self._headers(),
@@ -1041,7 +1108,7 @@ class AnthropicLM(BaseProviderLM):
         )
 
     def _batch_status_request(self, batch_id: str) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="GET",
             url=f"{self.base_url.rstrip('/')}/messages/batches/{batch_id}",
             headers=self._headers(),
@@ -1049,7 +1116,7 @@ class AnthropicLM(BaseProviderLM):
         )
 
     def _batch_cancel_request(self, batch_id: str) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="POST",
             url=f"{self.base_url.rstrip('/')}/messages/batches/{batch_id}/cancel",
             headers=self._headers(),
@@ -1060,7 +1127,7 @@ class AnthropicLM(BaseProviderLM):
         url = status_body.get("results_url")
         if not isinstance(url, str) or not url:
             raise ProviderError("anthropic: ended batch carries no results_url", provider=self.provider)
-        return (make_json_request(method="GET", url=url, headers=self._headers(), read_timeout=300.0),)
+        return (self._emit(method="GET", url=url, headers=self._headers(), read_timeout=300.0),)
 
     def _batch_entries(self, status_body: dict[str, Any], fetched: tuple[str, ...]) -> tuple[BatchEntry, ...]:
         entries: list[BatchEntry] = []
@@ -1103,7 +1170,7 @@ class AnthropicLM(BaseProviderLM):
         return tuple(sorted(entries, key=lambda e: e.index))
 
     def _batch_list_request(self, limit: int) -> TransportRequest:
-        return make_json_request(
+        return self._emit(
             method="GET",
             url=f"{self.base_url.rstrip('/')}/messages/batches",
             params={"limit": int(limit)},

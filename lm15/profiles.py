@@ -171,6 +171,9 @@ def openai_responses_compat_from_extensions(extensions: JsonObject | None) -> Op
         "tool_result_name",
         "strict_tools",
         "cache_control",
+        "commentary_phase",
+        "edit_image_field",
+        "builtin_tools",
         "routing",
         "extensions",
     }
@@ -184,17 +187,18 @@ def resolve_openai_responses_compat(
     model: str,
     profile: ProviderProfile | None,
     request_extensions: JsonObject | None,
+    base: OpenAIResponsesCompat | None = None,
 ) -> ResolvedOpenAIResponsesCompat:
     """Resolve effective OpenAI Responses compatibility policy.
 
     Layering:
 
-        base URL default
+        bound compat (``OpenAILM(compat=...)``), else the base URL default
         < endpoint compat
         < model compat
         < request extension override
     """
-    partial = _default_openai_responses_compat_for_base_url(base_url)
+    partial = base if base is not None else _default_openai_responses_compat_for_base_url(base_url)
 
     endpoint = profile.endpoint("inference") if profile else None
     if isinstance(endpoint and endpoint.compat, OpenAIResponsesCompat):
@@ -217,6 +221,8 @@ def _default_openai_responses_compat_for_base_url(base_url: str) -> OpenAIRespon
         return OpenAIResponsesCompat.preset("openrouter")
     if "api.openai.com" in lower:
         return OpenAIResponsesCompat.preset("openai")
+    if "api.meta.ai" in lower:
+        return OpenAIResponsesCompat.preset("meta")
     # Preserve the current OpenAILM Responses serializer behavior for unknown
     # endpoints unless a profile/preset explicitly overrides it.
     return OpenAIResponsesCompat.preset("openai")

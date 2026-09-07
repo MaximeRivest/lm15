@@ -38,6 +38,8 @@ only in the router, explicitly and inspectably.
 | `openrouter` | `OPENROUTER_API_KEY` | openrouter.ai/keys |
 | `deepseek`, `deepseek-anthropic` | `DEEPSEEK_API_KEY` | platform.deepseek.com/api_keys |
 | `zai` | `ZAI_API_KEY` | z.ai/manage-apikey/apikey-list |
+| `moonshotai`, `moonshotai-responses`, `moonshotai-anthropic` | `MOONSHOTAI_API_KEY`, then `MOONSHOT_API_KEY` (the name Moonshot's docs use; both are read, the first wins) | platform.kimi.ai/console/api-keys |
+| `meta`, `meta-chat`, `meta-anthropic` | `META_API_KEY` (Meta's docs call it `MODEL_API_KEY`; lm15 reads only the vendor-named one) | dev.meta.ai |
 | `ollama`, `vllm`, `sglang` | — (keyless, placeholder sent) | — |
 | `claude-code`, `openai-codex` | — (local CLI credential) | — |
 
@@ -85,16 +87,32 @@ unchanged:
 
 ```python
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-from lm15 import OpenAIChatLM
+from lm15 import LMRouter, Request
+from lm15.credentials import BearerToken
+from lm15.router import RouterConfig
 
-lm = OpenAIChatLM(
-    api_key=get_bearer_token_provider(          # returns () -> str
-        DefaultAzureCredential(),
-        "https://cognitiveservices.azure.com/.default",
-    ),
-    base_url="https://YOUR-RESOURCE.openai.azure.com/openai/v1",
+provider = get_bearer_token_provider(          # returns () -> str, cached and refreshed inside
+    DefaultAzureCredential(),
+    "https://cognitiveservices.azure.com/.default",
 )
+router = LMRouter(RouterConfig(
+    api_keys={"azure": lambda: BearerToken(provider())},
+    settings={"azure": {"resource": "YOUR-RESOURCE"}},
+))
+router.complete(Request(model="azure:YOUR-DEPLOYMENT", messages=[...]))
 ```
+
+The `BearerToken(...)` wrap matters on Azure. A plain string means "API
+key", and the Azure doors put an API key in the `api-key` header — an
+Entra token there is a bare 401 from Azure. lm15 recognises a JWT handed
+over as a plain string and refuses before the wire, naming this wrap
+(live 2026-09-04). On doors where a key travels as a bearer anyway
+(OpenAI, DeepSeek, …) a string-returning provider is fine as is.
+
+You often do not need a provider at all on Azure: with no key set, the
+`azure` door walks `DefaultAzureCredential`'s chain itself — `az login`,
+managed identity, a service principal from `AZURE_*` variables — with no
+extra dependency. See [cloud hosts](cloud-hosts.md).
 
 Or your own logic — anything callable:
 

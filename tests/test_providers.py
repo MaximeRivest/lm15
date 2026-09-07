@@ -715,6 +715,7 @@ def test_deepseek_qwen_zai_reasoning_off_unchanged() -> None:
         "deepseek": ("thinking", {"type": "disabled"}),
         "qwen": ("enable_thinking", False),
         "zai": ("thinking", {"type": "disabled"}),  # docs.z.ai ChatThinking; the deepseek wire shape
+        "moonshotai": ("thinking", {"type": "disabled"}),  # platform.kimi.ai: the K2.x off switch, honoured by kimi-k3 too (live 2026-09-03)
     }
     for preset, (field, value) in expectations.items():
         lm = OpenAIChatLM(

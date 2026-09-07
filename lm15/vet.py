@@ -47,7 +47,39 @@ _PARSE_ONLY_KEY = "vet-parse-only"
 
 # ─── Adapters ────────────────────────────────────────────────────────
 
-def adapter_for_provider(provider: str, api_key: str, base_url: str | None = None) -> BaseProviderLM:
+def _credential_of(msg: JsonObject):
+    """PROTOCOL.md: ``credential`` (an AUTH-2 value) or the ``api_key`` shorthand."""
+    from .credentials import credential_from_dict
+
+    cred = msg.get("credential")
+    if isinstance(cred, dict):
+        return credential_from_dict(cred)
+    return str(msg["api_key"])
+
+
+def _clock_of(msg: JsonObject):
+    """The fixed clock the harness pins (``now``), or None for wall time."""
+    from .credentials import parse_rfc3339
+
+    now = msg.get("now")
+    if now is None:
+        return None
+    fixed = parse_rfc3339(str(now))
+    return lambda: fixed
+
+
+def _settings_of(msg: JsonObject) -> dict[str, str] | None:
+    settings = msg.get("settings")
+    return {str(k): str(v) for k, v in settings.items()} if isinstance(settings, dict) else None
+
+
+def _adapter(msg: JsonObject) -> BaseProviderLM:
+    return adapter_for_provider(str(msg["provider"]), _credential_of(msg), _base_url(msg),
+                                settings=_settings_of(msg), clock=_clock_of(msg))
+
+
+def adapter_for_provider(provider: str, api_key: Any, base_url: str | None = None, *,
+                         settings: dict[str, str] | None = None, clock: Any = None) -> BaseProviderLM:
     """The LM a contract case's ``provider`` string names, from the registry.
 
     A chat-bound provider (groq, deepseek, …) is the chat dialect with that
@@ -66,6 +98,10 @@ def adapter_for_provider(provider: str, api_key: str, base_url: str | None = Non
     if definition.bound:
         kwargs["compat"] = definition.compat
         kwargs["access"] = definition.access
+    if definition.hosted:
+        kwargs["settings"] = settings
+    if clock is not None:
+        kwargs["clock"] = clock
     if definition.id == "openai-codex":
         # PROTOCOL.md pins the harness account id: the ctor cannot derive one
         # from a non-JWT injected key, and the wire header must be exact.
@@ -77,6 +113,18 @@ def adapter_for_provider(provider: str, api_key: str, base_url: str | None = Non
 
 JsonToObj = Callable[[JsonObject], Any]
 ObjToJson = Callable[[Any], JsonObject]
+
+def _credential_from_dict(data: JsonObject):
+    from .credentials import credential_from_dict
+
+    return credential_from_dict(data)
+
+
+def _credential_to_dict(value: Any) -> JsonObject:
+    from .credentials import credential_to_dict
+
+    return credential_to_dict(value)
+
 
 KIND_SERDE: dict[str, tuple[JsonToObj, ObjToJson]] = {
     "part": (serde.part_from_dict, serde.part_to_dict),
@@ -94,6 +142,7 @@ KIND_SERDE: dict[str, tuple[JsonToObj, ObjToJson]] = {
     "error_detail": (serde.error_detail_from_dict, serde.error_detail_to_dict),
     "delta": (serde.delta_from_dict, serde.delta_to_dict),
     "usage": (serde.usage_from_dict, serde.usage_to_dict),
+    "credential": (_credential_from_dict, _credential_to_dict),
     "stream_event": (serde.stream_event_from_dict, serde.stream_event_to_dict),
     "request": (serde.request_from_dict, serde.request_to_dict),
     "response": (serde.response_from_dict, serde.response_to_dict),
@@ -208,14 +257,14 @@ def _base_url(msg: JsonObject) -> str | None:
 
 
 def op_build_request(msg: JsonObject) -> JsonObject:
-    lm = adapter_for_provider(str(msg["provider"]), str(msg["api_key"]), _base_url(msg))
+    lm = _adapter(msg)
     request = serde.request_from_dict(msg["canonical_request"])
     transport_req = lm.build_request(request, stream=bool(msg.get("stream", False)))
     return normalize_transport_request(transport_req)
 
 
 def op_parse_response(msg: JsonObject) -> JsonObject:
-    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg))
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg), settings=_settings_of(msg), clock=_clock_of(msg))
     request = serde.request_from_dict(msg["canonical_request"])
     body = base64.b64decode(msg["body_b64"])
     response = lm.parse_response(request, _http_response(int(msg["status"]), body))
@@ -223,7 +272,7 @@ def op_parse_response(msg: JsonObject) -> JsonObject:
 
 
 def op_replay_stream(msg: JsonObject) -> JsonObject:
-    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg))
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg), settings=_settings_of(msg), clock=_clock_of(msg))
     request = serde.request_from_dict(msg["canonical_request"])
     body = base64.b64decode(msg["body_b64"])
     events = _parse_stream_body(lm, request, body)
@@ -240,7 +289,7 @@ def op_replay_stream(msg: JsonObject) -> JsonObject:
 
 
 def op_normalize_error(msg: JsonObject) -> JsonObject:
-    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg))
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg), settings=_settings_of(msg), clock=_clock_of(msg))
     err = lm.normalize_error(int(msg["status"]), str(msg["body_text"]))
     return {
         "class": type(err).__name__,
@@ -262,12 +311,12 @@ def op_validate(msg: JsonObject) -> JsonObject:
 
 
 def op_build_models_request(msg: JsonObject) -> JsonObject:
-    lm = adapter_for_provider(str(msg["provider"]), str(msg["api_key"]), _base_url(msg))
+    lm = _adapter(msg)
     return normalize_transport_request(lm._models_request())
 
 
 def op_parse_models_response(msg: JsonObject) -> JsonObject:
-    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg))
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg), settings=_settings_of(msg), clock=_clock_of(msg))
     body = base64.b64decode(msg["body_b64"]).decode("utf-8")
     status = int(msg["status"])
     if status >= 400:
@@ -283,7 +332,7 @@ def _headers_list(msg: JsonObject) -> list:
 
 def op_generation_build(msg: JsonObject) -> JsonObject:
     """Wire request for image_generate / speech_generate (kind discriminates)."""
-    lm = adapter_for_provider(str(msg["provider"]), str(msg["api_key"]), _base_url(msg))
+    lm = _adapter(msg)
     kind = str(msg["kind"])
     if kind == "image":
         request = serde.image_generation_request_from_dict(msg["generation_request"])
@@ -297,7 +346,7 @@ def op_generation_build(msg: JsonObject) -> JsonObject:
 def op_generation_parse(msg: JsonObject) -> JsonObject:
     """Canonical generation response from a pinned wire body (+ headers:
     OpenAI speech is raw bytes typed only by content-type)."""
-    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg))
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg), settings=_settings_of(msg), clock=_clock_of(msg))
     kind = str(msg["kind"])
     status = int(msg["status"])
     body = base64.b64decode(msg["body_b64"])
@@ -315,7 +364,7 @@ def op_generation_parse(msg: JsonObject) -> JsonObject:
 
 def op_file_op_build(msg: JsonObject) -> JsonObject:
     """Wire request for one files-lifecycle operation (file_op discriminates)."""
-    lm = adapter_for_provider(str(msg["provider"]), str(msg["api_key"]), _base_url(msg))
+    lm = _adapter(msg)
     op = str(msg["file_op"])
     if op == "upload":
         request = serde.file_upload_request_from_dict(msg["upload_request"])
@@ -334,7 +383,7 @@ def op_file_op_build(msg: JsonObject) -> JsonObject:
 
 def op_file_op_parse(msg: JsonObject) -> JsonObject:
     """Canonical FileInfo / FilePage from a pinned wire body (kind discriminates)."""
-    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg))
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg), settings=_settings_of(msg), clock=_clock_of(msg))
     kind = str(msg["kind"])
     status = int(msg["status"])
     body = base64.b64decode(msg["body_b64"]).decode("utf-8")
@@ -349,7 +398,7 @@ def op_file_op_parse(msg: JsonObject) -> JsonObject:
 
 def op_cache_op_build(msg: JsonObject) -> JsonObject:
     """Wire request for one cache-resource operation (cache_op discriminates)."""
-    lm = adapter_for_provider(str(msg["provider"]), str(msg["api_key"]), _base_url(msg))
+    lm = _adapter(msg)
     op = str(msg["cache_op"])
     if op == "create":
         prefix = serde.request_from_dict(msg["prefix_request"])
@@ -368,7 +417,7 @@ def op_cache_op_build(msg: JsonObject) -> JsonObject:
 
 def op_cache_op_parse(msg: JsonObject) -> JsonObject:
     """Canonical CacheInfo / CachePage from a pinned wire body (kind discriminates)."""
-    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg))
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg), settings=_settings_of(msg), clock=_clock_of(msg))
     kind = str(msg["kind"])
     status = int(msg["status"])
     body = base64.b64decode(msg["body_b64"]).decode("utf-8")
@@ -388,7 +437,7 @@ def op_video_op_build(msg: JsonObject) -> JsonObject:
     (xAI's terminal body carries a public URL) or one (Sora content, Veo's
     key-bound file URI).
     """
-    lm = adapter_for_provider(str(msg["provider"]), str(msg["api_key"]), _base_url(msg))
+    lm = _adapter(msg)
     action = str(msg["action"])
     if action == "submit":
         request = serde.video_generation_request_from_dict(msg["video_request"])
@@ -405,7 +454,7 @@ def op_video_op_build(msg: JsonObject) -> JsonObject:
 
 def op_video_op_parse(msg: JsonObject) -> JsonObject:
     """Canonical video snapshots / parts from pinned wire bodies."""
-    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg))
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg), settings=_settings_of(msg), clock=_clock_of(msg))
     kind = str(msg["kind"])
     if kind == "job":
         status = int(msg["status"])
@@ -434,7 +483,7 @@ def op_batch_op_build(msg: JsonObject) -> JsonObject:
     (single-step providers), result_fetches may be several (OpenAI's
     output and error files).
     """
-    lm = adapter_for_provider(str(msg["provider"]), str(msg["api_key"]), _base_url(msg))
+    lm = _adapter(msg)
     action = str(msg["action"])
     if action == "upload":
         request = serde.batch_request_from_dict(msg["batch_request"])
@@ -458,7 +507,7 @@ def op_batch_op_build(msg: JsonObject) -> JsonObject:
 
 def op_batch_op_parse(msg: JsonObject) -> JsonObject:
     """Canonical batch snapshots from pinned wire bodies (kind discriminates)."""
-    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg))
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg), settings=_settings_of(msg), clock=_clock_of(msg))
     kind = str(msg["kind"])
     if kind == "job":
         status = int(msg["status"])
@@ -486,7 +535,7 @@ def op_replay_live(msg: JsonObject) -> JsonObject:
     The harness performs all comparison; session mechanics (locking,
     queues, iteration sugar) are per-language and stay out of scope.
     """
-    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg))
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg), settings=_settings_of(msg), clock=_clock_of(msg))
     config = serde.live_config_from_dict(msg["live_config"])
     encoder = lm._live_encoder(config)
     client_frames = [
@@ -521,6 +570,13 @@ def op_explain_auth(msg: JsonObject) -> JsonObject:
     providers = msg.get("api_keys_providers") or []
     if providers:
         kwargs["api_keys"] = {str(p): sentinel for p in providers}
+    files = msg.get("files")
+    if isinstance(files, dict):
+        kwargs["files"] = {str(k): str(v) for k, v in files.items()}
+    if kwargs["env"].get("HOME"):
+        kwargs["home"] = kwargs["env"]["HOME"]
+    if isinstance(msg.get("settings"), dict):
+        kwargs["settings"] = {str(k): str(v) for k, v in msg["settings"].items()}
     credentials_path = msg.get("credentials_path")
     if credentials_path is not None:
         if provider == "claude-code":
@@ -536,6 +592,65 @@ def op_explain_auth(msg: JsonObject) -> JsonObject:
         "steps": [{"kind": step.kind, "state": step.state} for step in report.steps],
         "report_text": "\n".join((report.describe(), repr(report), str(report))),
     }
+
+
+def op_token_exchange_build(msg: JsonObject) -> JsonObject:
+    """PROTOCOL.md token_exchange_build: the exact token-exchange request a
+    chain rung sends under the fixed clock (auth/token-vectors.json)."""
+    from .cloud.chains import ChainContext, token_exchange_build
+    from .credentials import parse_rfc3339
+    from .registry import lookup
+
+    definition = lookup(str(msg["provider"]))
+    if definition is None:
+        raise ValueError(f"unknown provider: {msg['provider']}")
+    inputs = dict(msg.get("input") or msg.get("credential") or {})
+    env = {str(k): str(v) for k, v in (inputs.get("env") or {}).items()}
+    files: dict[str, str] = {}
+    if inputs.get("certificate_pem") and env.get("AZURE_CLIENT_CERTIFICATE_PATH"):
+        # The harness gives the certificate and the key separately; the
+        # environment rung reads one PEM file carrying both.
+        files[env["AZURE_CLIENT_CERTIFICATE_PATH"]] = str(inputs["certificate_pem"]) + "\n" + str(inputs.get("private_key_pem") or "")
+    fixed = parse_rfc3339(str(msg["now"]))
+    ctx = ChainContext(env=env, files=files or None, now=lambda: fixed,
+                       settings={str(k): str(v) for k, v in (inputs.get("settings") or msg.get("settings") or {}).items()})
+    return token_exchange_build(definition.access, str(msg["rung"]), inputs, ctx)
+
+
+def op_token_exchange_parse(msg: JsonObject) -> JsonObject:
+    from .cloud.chains import ChainContext, token_exchange_parse
+    from .credentials import credential_to_dict, parse_rfc3339
+    from .registry import lookup
+
+    definition = lookup(str(msg["provider"]))
+    if definition is None:
+        raise ValueError(f"unknown provider: {msg['provider']}")
+    fixed = parse_rfc3339(str(msg["now"]))
+    body = msg.get("body")
+    if body is None and msg.get("body_b64") is not None:
+        body = json.loads(base64.b64decode(str(msg["body_b64"])))
+    ctx = ChainContext(env={}, now=lambda: fixed)
+    try:
+        credential = token_exchange_parse(definition.access, str(msg["rung"]), int(msg.get("status", 200)), dict(body or {}), ctx)
+    except LM15Error as exc:
+        return {"ok": False, "error": {"class": type(exc).__name__, "code": getattr(exc, "code", None)}}
+    return {"ok": True, "credential": credential_to_dict(credential)}
+
+
+def op_sigv4_sign(msg: JsonObject) -> JsonObject:
+    """PROTOCOL.md sigv4_sign: the AWS test-suite vectors (auth/sigv4-vectors.json)."""
+    from .cloud import sigv4
+    from .credentials import credential_from_dict, parse_rfc3339
+
+    credential = credential_from_dict(msg["credential"])
+    req = msg["request"]
+    headers = {str(k): (v if isinstance(v, str) else ",".join(v)) for k, v in dict(req.get("headers") or {}).items()
+               if str(k).lower() not in ("host", "x-amz-date", "x-amz-security-token")}
+    signature = sigv4.sign(method=str(req["method"]), url=str(req["url"]), headers=headers,
+                           payload=str(req.get("body") or "").encode("utf-8"), credentials=credential,
+                           region=str(msg["region"]), service=str(msg["service"]), now=parse_rfc3339(str(msg["now"])))
+    return {"canonical_request": signature.canonical_request, "string_to_sign": signature.string_to_sign,
+            "authorization": signature.authorization, "headers": signature.headers}
 
 
 def op_surface_dump(msg: JsonObject) -> JsonObject:
@@ -591,13 +706,19 @@ def _reflect_enums() -> JsonObject:
     hand-maintained list. Unordered collections are sorted; Literal aliases
     keep declaration order.
     """
+    from . import credentials as lm15_credentials
+    from . import features as lm15_features
+
     out: JsonObject = {}
-    for name in sorted(vars(lm15_types)):
-        if name.startswith("_"):
-            continue
-        vocabulary = _string_vocabulary(getattr(lm15_types, name))
-        if vocabulary:
-            out[name] = vocabulary
+    # lm15.types, plus the auth vocabularies (spec/vocabularies.md AuthScheme,
+    # CredentialKind, CredentialPolicy, StreamFraming, ModelPlacement; 2026-09-03).
+    for module in (lm15_types, lm15_features, lm15_credentials):
+        for name in sorted(vars(module)):
+            if name.startswith("_") or name in ("AuthHeader",):
+                continue
+            vocabulary = _string_vocabulary(getattr(module, name))
+            if vocabulary:
+                out[name] = vocabulary
     return out
 
 
@@ -634,6 +755,9 @@ HANDLERS: dict[str, Callable[[JsonObject], JsonObject]] = {
     "validate": op_validate,
     "surface_dump": op_surface_dump,
     "explain_auth": op_explain_auth,
+    "token_exchange_build": op_token_exchange_build,
+    "token_exchange_parse": op_token_exchange_parse,
+    "sigv4_sign": op_sigv4_sign,
     "build_models_request": op_build_models_request,
     "parse_models_response": op_parse_models_response,
     "replay_live": op_replay_live,

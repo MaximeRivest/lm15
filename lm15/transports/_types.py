@@ -14,9 +14,9 @@ from typing import AsyncIterator, Iterator
 @dataclass(slots=True)
 class TransportRequest:
     method: str
-    url: str
-    headers: list[tuple[str, str]] = field(default_factory=list)
-    body: bytes = b""
+    url: str = field(repr=False)
+    headers: list[tuple[str, str]] = field(default_factory=list, repr=False)
+    body: bytes = field(default=b"", repr=False)
     # Per-request timeout overrides (None = use transport default)
     connect_timeout: float | None = None
     read_timeout: float | None = None

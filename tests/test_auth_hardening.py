@@ -434,6 +434,32 @@ class TestExplainAuth:
         assert report.selected is not None and report.selected.source == "explicit api_keys entry"
         assert any(step.state == "shadowed" for step in report.steps)
 
+    def test_router_config_supplies_env_keys_and_settings(self) -> None:
+        # explain_auth(config=router.config) describes the router that will
+        # send: the provider's settings entry resolves the host, the api_keys
+        # entry is rung 0.  Without config the same call names the missing
+        # AZURE_OPENAI_RESOURCE instead.
+        from lm15.credentials import BearerToken
+        from lm15.router import RouterConfig
+
+        config = RouterConfig(
+            env={"HOME": "/nonexistent", "PATH": ""},
+            api_keys={"azure": lambda: BearerToken("t")},
+            settings={"azure": {"resource": "lab"}},
+        )
+        report = explain_auth("azure", config=config)
+        assert report.configured
+        assert report.selected is not None and report.selected.source == "explicit api_keys entry"
+        assert ("resource", "lab") in report.settings
+        assert not any(k == "error" for k, _ in report.settings)
+
+        bare = explain_auth("azure", env=config.env)
+        assert any(k == "error" and "AZURE_OPENAI_RESOURCE" in v for k, v in bare.settings)
+
+        # an explicit argument wins over the config's field
+        report = explain_auth("azure", config=config, settings={"resource": "other"})
+        assert ("resource", "other") in report.settings
+
     def test_unconfigured_provider_lists_every_absent_rung(self) -> None:
         report = explain_auth("groq", env={})
         assert not report.configured

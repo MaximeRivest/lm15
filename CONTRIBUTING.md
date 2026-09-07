@@ -252,6 +252,9 @@ reflected there first, then re-verified through the harness.
 ## Useful commands
 
 ```bash
+# First check out lm15-contract as a sibling at CONTRACT_PIN.
+# Tests read its cloud signing/token vectors during collection.
+
 # Unit and conformance tests through pytest
 pytest -q
 
