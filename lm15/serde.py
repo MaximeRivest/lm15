@@ -349,10 +349,19 @@ def tool_choice_to_dict(tc: ToolChoice) -> dict[str, Any]:
     })
 
 
+
+def _bare_or_list(value: Any) -> tuple:
+    """INV-020: a bare string coerces to a 1-tuple; a list becomes a tuple.
+    (A bare string used to be iterated into characters — 2026-09-07.)"""
+    if isinstance(value, str):
+        return (value,)
+    return tuple(value)
+
+
 def tool_choice_from_dict(d: dict[str, Any]) -> ToolChoice:
     return ToolChoice(
         mode=d.get("mode", "auto"),
-        allowed=tuple(d.get("allowed", [])),
+        allowed=_bare_or_list(d.get("allowed", [])),  # INV-020: a bare str is one element
         parallel=d.get("parallel"),
     )
 
@@ -512,7 +521,7 @@ def config_from_dict(d: dict[str, Any]) -> Config:
         temperature=d.get("temperature"),
         top_p=d.get("top_p"),
         top_k=d.get("top_k"),
-        stop=tuple(d.get("stop", [])),
+        stop=_bare_or_list(d.get("stop", [])),  # INV-020: a bare str is one element
         response_format=d.get("response_format"),
         tool_choice=tool_choice_from_dict(tool_choice) if tool_choice is not None else None,
         reasoning=reasoning_from_dict(reasoning) if reasoning is not None else None,
@@ -806,7 +815,7 @@ def response_from_dict(d: dict[str, Any]) -> Response:
         model=d["model"],
         message=message_from_dict(d["message"]),
         finish_reason=d["finish_reason"],
-        usage=usage_from_dict(d.get("usage", {})),
+        usage=usage_from_dict(d["usage"]) if isinstance(d.get("usage"), dict) else Usage(),
         logprobs=_logprobs_from_json(d.get("logprobs")),
         provider_data=d.get("provider_data"),
     )

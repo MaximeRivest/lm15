@@ -105,3 +105,18 @@ def test_kinds_registered_in_vet() -> None:
 
     assert "cache_config" in KIND_SERDE
     assert "continuation_state" in KIND_SERDE
+
+
+def test_inv020_bare_string_is_one_element_not_characters():
+    from lm15.serde import config_from_dict, tool_choice_from_dict
+
+    assert config_from_dict({"stop": "END"}).stop == ("END",)
+    assert tool_choice_from_dict({"allowed": "lookup"}).allowed == ("lookup",)
+
+
+def test_inv042_null_usage_reads_as_absent():
+    from lm15.serde import response_from_dict
+
+    response = response_from_dict({"model": "m", "finish_reason": "stop", "usage": None,
+                                   "message": {"role": "assistant", "parts": [{"type": "text", "text": "x"}]}})
+    assert response.usage.input_tokens is None

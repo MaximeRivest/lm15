@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+**Three defects found by the Rust port (2026-09-07).** `Config.stop` and `ToolChoice.allowed` given as a bare string were iterated into characters by `from_dict` (INV-020 says one element); `response.usage: null` crashed `response_from_dict` (INV-042 says a telemetry nest reads as absent); the vet shim could not build the Vertex adapter (it passed `compat=None` to the Gemini dialect). All three fixed; no fixture changed.
+
 **Baseline review (2026-09-06).** These changes are not a frozen release.
 The shared contract still contains draft amendments and draft canonical
 expectations. `CONTRACT_PIN` must move only after that review is complete.

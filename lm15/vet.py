@@ -96,8 +96,10 @@ def adapter_for_provider(provider: str, api_key: Any, base_url: str | None = Non
     if base_url is not None:
         kwargs["base_url"] = base_url
     if definition.bound:
-        kwargs["compat"] = definition.compat
         kwargs["access"] = definition.access
+        if definition.compat is not None:
+            # The Gemini dialect takes no compat (the router does the same).
+            kwargs["compat"] = definition.compat
     if definition.hosted:
         kwargs["settings"] = settings
     if clock is not None:
