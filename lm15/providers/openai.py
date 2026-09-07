@@ -107,6 +107,8 @@ from .base import (
     resolve_credential_value,
 )
 from .common import (
+    tool_result_error_text,
+    tool_result_output_openai,
     iso_utc,
     model_infos_from_entries,
     multipart_form_body,
@@ -693,13 +695,13 @@ class OpenAILM(BaseProviderLM):
             if msg.role == "tool":
                 for part in msg.parts:
                     if isinstance(part, ToolResultPart):
-                        output = parts_to_text(part.content)
-                        if not output:
-                            output = json.dumps([{"type": p.type} for p in part.content])
+                        # MAP-10: text-only → string; media → the documented
+                        # input_text/input_image/input_file array; a part
+                        # the preset does not admit raised before this line.
                         item = {
                             "type": "function_call_output",
                             "call_id": part.id,
-                            "output": output,
+                            "output": tool_result_output_openai(self.provider, part, compat.tool_result_media),
                         }
                         if compat.tool_result_name == "include" and part.name:
                             item["name"] = part.name
@@ -731,7 +733,7 @@ class OpenAILM(BaseProviderLM):
                             content_parts.append({"type": "output_text", "text": part.text})
             else:
                 content_parts = [
-                    part_to_openai_input(part)
+                    part_to_openai_input(part, provider=self.provider)
                     for part in msg.parts
                     if not isinstance(part, (ToolCallPart, ToolResultPart))
                 ]
@@ -838,6 +840,17 @@ class OpenAILM(BaseProviderLM):
             payload["temperature"] = request.config.temperature
         if request.config.top_p is not None:
             payload["top_p"] = request.config.top_p
+        if request.config.stop:
+            raise UnsupportedFeatureError(
+                f"{self.provider}: config.stop has no field on the Responses wire (the Chat Completions "
+                "dialect carries `stop`); a silent omission would run the model past the sequence",
+                provider=self.provider,
+            )
+        if request.config.top_k is not None:
+            raise UnsupportedFeatureError(
+                f"{self.provider}: config.top_k has no field on the Responses wire (Anthropic and Gemini carry it)",
+                provider=self.provider,
+            )
         if request.config.logprobs is not None:
             # Verified live 2026-09-01: include triggers per-token logprobs;
             # top_logprobs (0–20) controls the alternatives count.
@@ -1323,11 +1336,12 @@ class OpenAILM(BaseProviderLM):
                 for part in message.parts:
                     if not isinstance(part, ToolResultPart):
                         continue
-                    output = parts_to_text(part.content) or json.dumps([{"type": p.type} for p in part.content])
+                    # Realtime's function_call_output is a string; a media part raises (MAP-10).
+                    output = tool_result_error_text(part, parts_to_text(part.content, provider=self.provider, where="a Realtime function_call_output"))
                     frames.append({"type": "conversation.item.create", "item": {"type": "function_call_output", "call_id": part.id, "output": output}})
                 continue
 
-            content = [part_to_openai_input(p) for p in message.parts if not isinstance(p, (ToolCallPart, ToolResultPart))]
+            content = [part_to_openai_input(p, provider=self.provider) for p in message.parts if not isinstance(p, (ToolCallPart, ToolResultPart))]
             if content:
                 frames.append({"type": "conversation.item.create", "item": {"type": "message", "role": message.role, "content": content}})
             for part in message.parts:
@@ -1513,7 +1527,7 @@ class OpenAILM(BaseProviderLM):
                 {"type": "response.create"},
             ]
         if isinstance(event, LiveClientToolResultEvent):
-            output = parts_to_text(event.content) or json.dumps([{"type": p.type} for p in event.content])
+            output = parts_to_text(event.content, provider=self.provider, where="a Realtime function_call_output")
             return [
                 {"type": "conversation.item.create", "item": {"type": "function_call_output", "call_id": event.id, "output": output}},
                 {"type": "response.create"},

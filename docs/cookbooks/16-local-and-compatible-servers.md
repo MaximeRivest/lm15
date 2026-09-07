@@ -138,7 +138,7 @@ A preset is data, not magic. Print one and you see the whole policy:
 print(OpenAIChatCompat.preset("groq"))
 ```
 ```output
-OpenAIChatCompat(instruction_role='system', max_tokens_field='max_tokens', stream_usage='include', tool_result_name='omit', assistant_after_tool_result=None, thinking_format='reasoning_effort', thinking_replay=None, assistant_reasoning_content=None, strict_tools='omit', cache_control='none', routing=None, extensions=None)
+OpenAIChatCompat(instruction_role='system', max_tokens_field='max_tokens', stream_usage='include', tool_result_name='omit', assistant_after_tool_result=None, thinking_format='reasoning_effort', thinking_replay=None, assistant_reasoning_content=None, strict_tools='omit', builtin_tools='groq', tool_result_media='reject', cache_control='none', user_field=None, forced_tool_choice=None, json_schema=None, reasoning_efforts=None, routing=None, extensions=None, model_overrides=())
 ```
 
 ## How it works
@@ -155,7 +155,9 @@ ollama still want `max_tokens` where OpenAI now wants
 `max_completion_tokens`; ollama has no reasoning fields
 (`thinking_format="none"`) while OpenRouter has its own
 (`"openrouter"`); prompt-cache markers are OpenAI-only
-(`cache_control`). Fields left None inherit; `"auto"` is an explicit
+(`cache_control`); an image inside a tool result is a content array
+on xAI, Kimi and Z.AI and a refusal on Groq, DeepSeek and the base
+OpenAI wire (`tool_result_media`, measured 2026-09-07 — MAP-10). Fields left None inherit; `"auto"` is an explicit
 "use the adapter heuristic" — the distinction matters because policies
 layer (`lm15/compat.py`).
 

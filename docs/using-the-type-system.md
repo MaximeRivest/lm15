@@ -69,7 +69,25 @@ several = Message.tool({          # answer several calls in one message
 with_error = Message.tool(        # tool failures go back to the model
     tool_result("call_123", "KeyError: 'city'", name="weather", is_error=True)
 )
+
+from lm15 import ImagePart, TextPart
+with_image = Message.tool(        # what the tool returned, as it returned it
+    tool_result("call_123", (TextPart(text="The chart:"), ImagePart(media_type="image/png", data=png_b64)))
+)
 ```
+
+A tool result carries whatever the tool returned — text, images,
+documents — and the adapter puts each part on the wire as the provider's
+own block (MAP-10). A provider that cannot carry a part raises
+`UnsupportedFeatureError` **before** sending, naming the part, the
+preset's `tool_result_media` verdict and the dialects that carry it. It
+never renders an image as a caption or a placeholder: a request that got
+through means the model received the content. Measured per provider on
+2026-09-07 (`lm15-contract/research/tool-result-content/`): native on
+OpenAI Responses, Anthropic, Gemini 3, xAI, Kimi, Meta (Responses),
+Z.AI; refused on OpenAI Chat Completions, Groq, DeepSeek, Meta Chat,
+Bedrock Chat. To send an image where the preset refuses, render it to
+text yourself — that choice is yours, not lm15's.
 
 ## Configure a request
 

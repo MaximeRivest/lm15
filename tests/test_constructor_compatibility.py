@@ -58,16 +58,16 @@ CHAT_VALUES = (
 )
 COMPAT_CASES = [
     (AnthropicCompat, ANTHROPIC_NAMES, ANTHROPIC_VALUES,
-     {"thinking_replay": "unsigned", "sampling_params": "reject", "reasoning_efforts": ("low", "high")}),
+     {"thinking_replay": "unsigned", "sampling_params": "reject", "reasoning_efforts": ("low", "high"), "tool_result_media": "reject"}),
     (ResolvedAnthropicCompat, ANTHROPIC_NAMES, ANTHROPIC_VALUES,
-     {"thinking_replay": "unsigned", "sampling_params": "reject", "reasoning_efforts": ("low", "high")}),
+     {"thinking_replay": "unsigned", "sampling_params": "reject", "reasoning_efforts": ("low", "high"), "tool_result_media": "reject"}),
     (OpenAIResponsesCompat, RESPONSES_NAMES, RESPONSES_VALUES,
-     {"commentary_phase": "tag", "edit_image_field": "indexed", "builtin_tools": "verbatim"}),
+     {"commentary_phase": "tag", "edit_image_field": "indexed", "builtin_tools": "verbatim", "tool_result_media": "images"}),
     (ResolvedOpenAIResponsesCompat, RESPONSES_NAMES, RESPONSES_VALUES,
-     {"commentary_phase": "tag", "edit_image_field": "indexed", "builtin_tools": "verbatim"}),
+     {"commentary_phase": "tag", "edit_image_field": "indexed", "builtin_tools": "verbatim", "tool_result_media": "images"}),
     (OpenAIChatCompat, CHAT_NAMES, CHAT_VALUES,
-     {"reasoning_efforts": ("low", "high"), "model_overrides": (("review-", {"json_schema": "send"}),)}),
-    (ResolvedOpenAIChatCompat, CHAT_NAMES, CHAT_VALUES, {"reasoning_efforts": ("low", "high")}),
+     {"reasoning_efforts": ("low", "high"), "model_overrides": (("review-", {"json_schema": "send"}),), "tool_result_media": "native"}),
+    (ResolvedOpenAIChatCompat, CHAT_NAMES, CHAT_VALUES, {"reasoning_efforts": ("low", "high"), "tool_result_media": "native"}),
 ]
 
 
@@ -232,14 +232,14 @@ def test_anthropic_new_keywords_and_replace_still_validate(kwargs, match):
 
 def test_compat_resolution_merge_and_model_copy_keep_new_fields():
     anthropic = AnthropicCompat(*ANTHROPIC_VALUES, thinking_replay="unsigned",
-                                sampling_params="reject", reasoning_efforts=("low", "high"))
+                                sampling_params="reject", reasoning_efforts=("low", "high"), tool_result_media="reject")
     assert resolve_anthropic_compat(anthropic) == ResolvedAnthropicCompat(**dataclasses.asdict(anthropic))
     responses = OpenAIResponsesCompat(*RESPONSES_VALUES, commentary_phase="tag",
-                                      edit_image_field="indexed", builtin_tools="verbatim")
+                                      edit_image_field="indexed", builtin_tools="verbatim", tool_result_media="images")
     merged = merge_openai_responses_compat(responses, OpenAIResponsesCompat(extensions={"new": 3}))
     assert merged == dataclasses.replace(responses, extensions={"e": 2, "new": 3})
     assert resolve_openai_responses_compat(responses) == ResolvedOpenAIResponsesCompat(**dataclasses.asdict(responses))
-    chat = OpenAIChatCompat(*CHAT_VALUES, reasoning_efforts=("low", "high"))
+    chat = OpenAIChatCompat(*CHAT_VALUES, reasoning_efforts=("low", "high"), tool_result_media="native")
     merged_chat = merge_openai_chat_compat(chat, OpenAIChatCompat(extensions={"new": 3}))
     assert merged_chat == dataclasses.replace(chat, extensions={"e": 2, "new": 3})
     resolved_kwargs = dataclasses.asdict(chat)

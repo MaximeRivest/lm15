@@ -99,6 +99,12 @@ OpenAIResponsesEditImageField = Literal["auto", "array", "indexed"]
 # server that needed it (renamed from "meta" on 2026-09-03, same day, before
 # any port or release carried the old value).
 OpenAIResponsesBuiltinTools = Literal["auto", "openai", "verbatim"]
+# MAP-10 (2026-09-07): what a ToolResultPart's media parts may become on the
+# wire.  "native" = images and documents as native blocks inside the result
+# item; "images" = images only (documents raise); "reject" = every media part
+# raises before the wire.  Measured per preset:
+# lm15-contract/research/tool-result-content/30-model.md.
+ToolResultMedia = Literal["auto", "native", "images", "reject"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,10 +125,12 @@ class OpenAIResponsesCompat:
     commentary_phase: OpenAIResponsesCommentaryPhase | None = field(default=None, kw_only=True)
     edit_image_field: OpenAIResponsesEditImageField | None = field(default=None, kw_only=True)
     builtin_tools: OpenAIResponsesBuiltinTools | None = field(default=None, kw_only=True)
+    tool_result_media: ToolResultMedia | None = field(default=None, kw_only=True)
     routing: JsonObject | None = None
     extensions: JsonObject | None = None
 
     def __post_init__(self) -> None:
+        _check_literal_or_none(self.tool_result_media, ToolResultMedia, "tool_result_media")
         _check_literal_or_none(self.developer_role, OpenAIResponsesDeveloperRole, "developer_role")
         _check_literal_or_none(self.commentary_phase, OpenAIResponsesCommentaryPhase, "commentary_phase")
         _check_literal_or_none(self.edit_image_field, OpenAIResponsesEditImageField, "edit_image_field")
@@ -172,6 +180,7 @@ OPENAI_RESPONSES_PRESETS: dict[str, OpenAIResponsesCompat] = {
         tool_result_name="omit",
         strict_tools="omit",
         cache_control="openai",
+        tool_result_media="reject",  # MAP-10: no receipt on this door — reject until one exists
     ),
     "ollama": OpenAIResponsesCompat(
         developer_role="system",
@@ -180,6 +189,7 @@ OPENAI_RESPONSES_PRESETS: dict[str, OpenAIResponsesCompat] = {
         tool_result_name="omit",
         strict_tools="omit",
         cache_control="none",
+        tool_result_media="reject",  # MAP-10: no receipt on this door — reject until one exists
     ),
     "vllm": OpenAIResponsesCompat(
         developer_role="system",
@@ -188,6 +198,7 @@ OPENAI_RESPONSES_PRESETS: dict[str, OpenAIResponsesCompat] = {
         tool_result_name="omit",
         strict_tools="omit",
         cache_control="none",
+        tool_result_media="reject",  # MAP-10: no receipt on this door — reject until one exists
     ),
     "sglang": OpenAIResponsesCompat(
         developer_role="system",
@@ -196,6 +207,7 @@ OPENAI_RESPONSES_PRESETS: dict[str, OpenAIResponsesCompat] = {
         tool_result_name="omit",
         strict_tools="omit",
         cache_control="none",
+        tool_result_media="reject",  # MAP-10: no receipt on this door — reject until one exists
     ),
     "qwen": OpenAIResponsesCompat(
         developer_role="system",
@@ -204,6 +216,7 @@ OPENAI_RESPONSES_PRESETS: dict[str, OpenAIResponsesCompat] = {
         tool_result_name="omit",
         strict_tools="omit",
         cache_control="none",
+        tool_result_media="reject",  # MAP-10: no receipt on this door — reject until one exists
     ),
     "deepseek": OpenAIResponsesCompat(
         developer_role="system",
@@ -212,6 +225,7 @@ OPENAI_RESPONSES_PRESETS: dict[str, OpenAIResponsesCompat] = {
         tool_result_name="omit",
         strict_tools="omit",
         cache_control="none",
+        tool_result_media="reject",  # MAP-10: its Chat and Messages doors both show the model [Unsupported Image] — reject
     ),
     "zai": OpenAIResponsesCompat(
         developer_role="system",
@@ -220,6 +234,7 @@ OPENAI_RESPONSES_PRESETS: dict[str, OpenAIResponsesCompat] = {
         tool_result_name="omit",
         strict_tools="omit",
         cache_control="none",
+        tool_result_media="reject",  # MAP-10: no receipt on this door (zai Chat carries images) — reject until one exists
     ),
     # Meta Model API (dev.meta.ai, scraped 2026-09-03 —
     # lm15-contract/scrapes/meta/pages): the Responses wire as OpenAI
@@ -239,6 +254,7 @@ OPENAI_RESPONSES_PRESETS: dict[str, OpenAIResponsesCompat] = {
         commentary_phase="tag",
         edit_image_field="indexed",
         builtin_tools="verbatim",
+        tool_result_media="native",  # MAP-10: FunctionCallOutputContentListParam; image/mixed/pair/pdf received (muse-spark-1.3)
     ),
     # Moonshot AI over the Responses wire (platform.kimi.ai responses--
     # create.md OpenAPI, scraped 2026-09-03): kimi-k3 only; `instructions`
@@ -256,6 +272,7 @@ OPENAI_RESPONSES_PRESETS: dict[str, OpenAIResponsesCompat] = {
         strict_tools="omit",
         cache_control="openai_implicit",
         builtin_tools="verbatim",
+        tool_result_media="images",  # MAP-10: images received (kimi-k3); input_file is 400 "unknown content part type"
     ),
 }
 
@@ -293,6 +310,9 @@ class ResolvedOpenAIResponsesCompat:
     commentary_phase: Literal["omit", "tag"] = field(default="omit", kw_only=True)
     edit_image_field: Literal["array", "indexed"] = field(default="array", kw_only=True)
     builtin_tools: Literal["openai", "verbatim"] = field(default="openai", kw_only=True)
+    # The documented Responses wire takes input_image and input_file in a
+    # function_call_output array (MAP-10; openai gpt-5.4 exact, 2026-09-07).
+    tool_result_media: Literal["native", "images", "reject"] = field(default="native", kw_only=True)
     routing: JsonObject | None = None
     extensions: JsonObject | None = None
 
@@ -303,7 +323,7 @@ class ResolvedOpenAIResponsesCompat:
 _CHAT_OVERRIDABLE: frozenset[str] = frozenset({
     "instruction_role", "max_tokens_field", "stream_usage", "thinking_format", "thinking_replay",
     "assistant_reasoning_content", "strict_tools", "cache_control", "user_field",
-    "forced_tool_choice", "json_schema", "reasoning_efforts",
+    "forced_tool_choice", "json_schema", "reasoning_efforts", "tool_result_media",
 })
 
 OpenAIChatInstructionRole = Literal["auto", "developer", "system"]
@@ -388,6 +408,7 @@ class OpenAIChatCompat:
     assistant_reasoning_content: OpenAIChatAssistantReasoningContent | None = None
     strict_tools: OpenAIStrictTools | None = None
     builtin_tools: OpenAIChatBuiltinTools | None = None
+    tool_result_media: ToolResultMedia | None = field(default=None, kw_only=True)
     cache_control: OpenAICacheControl | None = None
     user_field: OpenAIChatUserField | None = None
     forced_tool_choice: OpenAIChatForcedToolChoice | None = None
@@ -432,6 +453,7 @@ class OpenAIChatCompat:
         )
         _check_literal_or_none(self.strict_tools, OpenAIStrictTools, "strict_tools")
         _check_literal_or_none(self.builtin_tools, OpenAIChatBuiltinTools, "builtin_tools")
+        _check_literal_or_none(self.tool_result_media, ToolResultMedia, "tool_result_media")
         _check_literal_or_none(self.cache_control, OpenAICacheControl, "cache_control")
         _check_literal_or_none(self.user_field, OpenAIChatUserField, "user_field")
         _check_literal_or_none(self.forced_tool_choice, OpenAIChatForcedToolChoice, "forced_tool_choice")
@@ -504,6 +526,7 @@ OPENAI_CHAT_PRESETS: dict[str, OpenAIChatCompat] = {
         tool_result_name="omit",
         strict_tools="omit",
         cache_control="openai",
+        tool_result_media="reject",  # MAP-10: text-only tool row; gpt-5.4 received the USER image and not the tool image
     ),
     # ollama / LM Studio: max_tokens, no reasoning dial on the wire.
     "ollama": OpenAIChatCompat(
@@ -514,6 +537,7 @@ OPENAI_CHAT_PRESETS: dict[str, OpenAIChatCompat] = {
         tool_result_name="omit",
         strict_tools="omit",
         cache_control="none",
+        tool_result_media="reject",  # MAP-10: openai.go builds image rows without ToolCallID; no receipt — reject until one exists
     ),
     # Groq: server-executed builtin tools (browser_search / code_interpreter,
     # live 2026-09-01); reasoning_effort dial; no cache_control field.
@@ -526,6 +550,7 @@ OPENAI_CHAT_PRESETS: dict[str, OpenAIChatCompat] = {
         strict_tools="omit",
         builtin_tools="groq",
         cache_control="none",
+        tool_result_media="reject",  # MAP-10: server 400 "messages[2].content must be a string" despite the SDK union
     ),
     # OpenRouter: unified reasoning object; OpenAI-shaped cache_control.
     "openrouter": OpenAIChatCompat(
@@ -536,6 +561,7 @@ OPENAI_CHAT_PRESETS: dict[str, OpenAIChatCompat] = {
         tool_result_name="omit",
         strict_tools="omit",
         cache_control="openai",
+        tool_result_media="reject",  # MAP-10: schema says image; no receipt (401 during the pass) — reject until one exists
     ),
     # xAI, pinned live 2026-09-01 against grok-4.6: max_tokens accepted,
     # reasoning arrives as message.reasoning_content (deepseek shape),
@@ -549,6 +575,7 @@ OPENAI_CHAT_PRESETS: dict[str, OpenAIChatCompat] = {
         tool_result_name="omit",
         strict_tools="omit",
         cache_control="none",
+        tool_result_media="images",  # MAP-10: image tool results received (grok-4.20); documents 400 "use /v1/responses"
     ),
     "vllm": OpenAIChatCompat(
         instruction_role="system",
@@ -558,6 +585,7 @@ OPENAI_CHAT_PRESETS: dict[str, OpenAIChatCompat] = {
         tool_result_name="omit",
         strict_tools="omit",
         cache_control="none",
+        tool_result_media="reject",  # MAP-10: parser carries it; no server reachable in the pass — reject until a receipt
     ),
     "sglang": OpenAIChatCompat(
         instruction_role="system",
@@ -567,6 +595,7 @@ OPENAI_CHAT_PRESETS: dict[str, OpenAIChatCompat] = {
         tool_result_name="omit",
         strict_tools="omit",
         cache_control="none",
+        tool_result_media="reject",  # MAP-10: schema carries it; no server reachable in the pass — reject until a receipt
     ),
     # DeepSeek (api-docs.deepseek.com, scraped 2026-09-03 —
     # lm15-contract/scrapes/deepseek/pages): thinking={"type": enabled|
@@ -588,6 +617,7 @@ OPENAI_CHAT_PRESETS: dict[str, OpenAIChatCompat] = {
         strict_tools="omit",
         cache_control="none",
         user_field="user_id",
+        tool_result_media="reject",  # MAP-10: HTTP 200 and the model sees [Unsupported Image] — silent degrade
     ),
     "qwen": OpenAIChatCompat(
         instruction_role="system",
@@ -630,6 +660,7 @@ OPENAI_CHAT_PRESETS: dict[str, OpenAIChatCompat] = {
             ("openai.gpt-oss", {"forced_tool_choice": "reject", "json_schema": "reject"}),
             ("google.gemma", {"forced_tool_choice": "reject"}),
         ),
+        tool_result_media="reject",  # MAP-10: 400 validation_error on the array form
     ),
     # Bedrock-mantle Chat Completions (live 2026-09-04, openai.gpt-oss-20b and
     # deepseek.v3.2; receipts/2026-09-04-bedrock-chat/probe-mantle-chat-* and
@@ -669,6 +700,7 @@ OPENAI_CHAT_PRESETS: dict[str, OpenAIChatCompat] = {
         user_field="user_id",
         forced_tool_choice="reject",
         json_schema="reject",
+        tool_result_media="images",  # MAP-10: image tool results received (glm-4.6v); a file part is 400 (code 1210)
     ),
     # Meta Model API (dev.meta.ai, scraped 2026-09-03 — lm15-contract/scrapes/
     # meta/pages, protocols--chat-completions.md): `developer` is the
@@ -690,6 +722,7 @@ OPENAI_CHAT_PRESETS: dict[str, OpenAIChatCompat] = {
         strict_tools="omit",
         cache_control="openai_implicit",
         user_field="safety_identifier",
+        tool_result_media="reject",  # MAP-10: 400 "did not match any supported type"; Meta's Responses door carries media
     ),
     # Moonshot AI / Kimi API Platform (platform.kimi.ai, scraped 2026-09-03 —
     # lm15-contract/scrapes/moonshotai/pages, chat--create.md OpenAPI):
@@ -714,6 +747,7 @@ OPENAI_CHAT_PRESETS: dict[str, OpenAIChatCompat] = {
         cache_control="openai_implicit",
         user_field="safety_identifier",
         reasoning_efforts=("low", "high", "max"),
+        tool_result_media="images",  # MAP-10: image tool results received (kimi-k2.6); a file part is 400
     ),
 }
 
@@ -766,6 +800,10 @@ class ResolvedOpenAIChatCompat:
     assistant_reasoning_content: Literal["include_empty", "omit"] = "omit"
     strict_tools: Literal["include", "omit"] = "omit"
     builtin_tools: Literal["reject", "groq"] = "reject"
+    # The base Chat wire's tool row takes text only (OpenAI's own schema; a
+    # 200 with the image not received on gpt-5.4, 2026-09-07): reject unless
+    # a preset proved the array form live (MAP-10).
+    tool_result_media: Literal["native", "images", "reject"] = field(default="reject", kw_only=True)
     cache_control: Literal["none", "openai", "openai_implicit", "anthropic"] = "openai"
     user_field: Literal["user", "user_id"] = "user"
     forced_tool_choice: Literal["send", "reject"] = "send"
@@ -786,6 +824,7 @@ _CHAT_AUTO_DEFAULTS: dict[str, str] = {
     "assistant_reasoning_content": "omit",
     "strict_tools": "omit",
     "builtin_tools": "reject",
+    "tool_result_media": "reject",
     "cache_control": "openai",
     "user_field": "user",
     "forced_tool_choice": "send",
@@ -897,11 +936,13 @@ class AnthropicCompat:
     structured_output: AnthropicStructuredOutput | None = None
     parallel_tool_calls: AnthropicParallelToolCalls | None = None
     sampling_params: AnthropicSamplingParams | None = field(default=None, kw_only=True)
+    tool_result_media: ToolResultMedia | None = field(default=None, kw_only=True)
     reasoning_efforts: tuple[str, ...] | None = field(default=None, kw_only=True)
     model_prefixes: tuple[str, ...] | None = None
     extensions: JsonObject | None = None
 
     def __post_init__(self) -> None:
+        _check_literal_or_none(self.tool_result_media, ToolResultMedia, "tool_result_media")
         _check_literal_or_none(self.thinking_format, AnthropicThinkingFormat, "thinking_format")
         _check_literal_or_none(self.thinking_replay, AnthropicThinkingReplay, "thinking_replay")
         _check_literal_or_none(self.cache_control, AnthropicCacheControl, "cache_control")
@@ -946,6 +987,7 @@ ANTHROPIC_PRESETS: dict[str, AnthropicCompat] = {
         structured_output="reject",
         parallel_tool_calls="reject",
         model_prefixes=("deepseek-",),
+        tool_result_media="reject",  # MAP-10: 200 and the model sees [Unsupported Image] — silent degrade
     ),
     # Meta Model API over the Anthropic wire (dev.meta.ai protocols--
     # messages.md, scraped 2026-09-03): thinking={"type": "adaptive"} +
@@ -958,6 +1000,7 @@ ANTHROPIC_PRESETS: dict[str, AnthropicCompat] = {
         cache_control="none",
         structured_output="send",
         parallel_tool_calls="send",
+        tool_result_media="native",  # MAP-10: image/mixed/pair/pdf received (muse-spark-1.3)
     ),
     # Moonshot AI over the Anthropic wire (platform.kimi.ai messages--
     # create.md OpenAPI, scraped 2026-09-03): kimi-k3 only, always reasons;
@@ -980,6 +1023,7 @@ ANTHROPIC_PRESETS: dict[str, AnthropicCompat] = {
         sampling_params="reject",
         reasoning_efforts=("low", "high", "max"),
         model_prefixes=("kimi-",),
+        tool_result_media="images",  # MAP-10: images received (kimi-k3); document block 400 "unsupported content type"
     ),
 }
 
@@ -1009,6 +1053,9 @@ class ResolvedAnthropicCompat:
     structured_output: Literal["send", "reject"] = "send"
     parallel_tool_calls: Literal["send", "reject"] = "send"
     sampling_params: Literal["send", "reject"] = field(default="send", kw_only=True)
+    # tool_result.content takes image and document blocks (SDK ToolResultBlockParam;
+    # anthropic/claude-code exact 2026-09-07): native unless a server proved otherwise.
+    tool_result_media: Literal["native", "images", "reject"] = field(default="native", kw_only=True)
     reasoning_efforts: tuple[str, ...] | None = field(default=None, kw_only=True)
     model_prefixes: tuple[str, ...] | None = None
     extensions: JsonObject | None = None
@@ -1021,6 +1068,7 @@ _ANTHROPIC_AUTO_DEFAULTS: dict[str, str] = {
     "structured_output": "send",
     "parallel_tool_calls": "send",
     "sampling_params": "send",
+    "tool_result_media": "native",
 }
 
 
@@ -1103,6 +1151,10 @@ def resolve_openai_responses_compat(partial: OpenAIResponsesCompat) -> ResolvedO
     if builtin_tools in {None, "auto"}:
         builtin_tools = "openai"
 
+    tool_result_media = partial.tool_result_media
+    if tool_result_media in {None, "auto"}:
+        tool_result_media = "native"
+
     return ResolvedOpenAIResponsesCompat(
         developer_role=developer_role,  # type: ignore[arg-type]
         max_output_tokens_field=max_field,  # type: ignore[arg-type]
@@ -1113,6 +1165,7 @@ def resolve_openai_responses_compat(partial: OpenAIResponsesCompat) -> ResolvedO
         commentary_phase=commentary_phase,  # type: ignore[arg-type]
         edit_image_field=edit_image_field,  # type: ignore[arg-type]
         builtin_tools=builtin_tools,  # type: ignore[arg-type]
+        tool_result_media=tool_result_media,  # type: ignore[arg-type]
         routing=partial.routing,
         extensions=partial.extensions,
     )

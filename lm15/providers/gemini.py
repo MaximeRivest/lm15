@@ -104,7 +104,7 @@ from .base import (
     default_transport,
     resolve_credential,
 )
-from .common import EFFORT_THINKING_BUDGETS, build_url, iso_utc, model_infos_from_entries, multipart_related_body, parts_to_text
+from .common import EFFORT_THINKING_BUDGETS, MEDIA_KINDS, build_url, iso_utc, model_infos_from_entries, multipart_related_body, parts_to_text
 
 # Canonical builtin tool name → Gemini tool key
 _GEMINI_BUILTIN_MAP: dict[str, str] = {
@@ -561,7 +561,43 @@ class GeminiLM(BaseProviderLM):
     def _auth_params(self, extra: dict[str, Any] | None = None) -> dict[str, Any]:
         return dict(extra or {})
 
-    def _part(self, part) -> dict[str, Any]:
+    def _function_response(self, part: ToolResultPart, names: dict[str, str] | None) -> dict[str, Any]:
+        """`functionResponse` (MAP-10 on this wire): text in `response.result`
+        (`response.error` when is_error), media nested under `parts[]` as
+        inlineData/fileData in the caller's order; the name resolved from the
+        transcript's matching functionCall when the caller gave none (rule 6).
+        Every model takes the shape; Gemini 2.5 answers HTTP 400 itself."""
+        text_parts = tuple(p for p in part.content if p.type not in MEDIA_KINDS)
+        media_parts = [p for p in part.content if p.type in MEDIA_KINDS]
+        for p in media_parts:
+            if p.type not in ("image", "document"):
+                raise UnsupportedFeatureError(
+                    f"{self.provider}: a {p.type} part in tool_result {part.id!r} cannot reach a functionResponse — "
+                    "multimodal function responses take images (png/jpeg/webp) and documents (pdf, text/plain) only (MAP-10)",
+                    provider=self.provider,
+                )
+        name = part.name or (names or {}).get(part.id)
+        if not name:
+            raise UnsupportedFeatureError(
+                f"{self.provider}: tool_result {part.id!r} needs a function name on the Gemini wire and no preceding "
+                "assistant tool_call with that id is in the transcript; set ToolResultPart.name (MAP-10 rule 6)",
+                provider=self.provider,
+            )
+        text = parts_to_text(text_parts, provider=self.provider, where="functionResponse.response")
+        if part.is_error:
+            response: dict[str, Any] = {"error": text}
+        elif media_parts and not text_parts:
+            response = {}  # the media IS the result; no fabricated text (live 2026-09-07: accepted)
+        else:
+            response = {"result": text}
+        fr: dict[str, Any] = {"name": name, "response": response}
+        if part.id:
+            fr["id"] = part.id
+        if media_parts:
+            fr["parts"] = [self._part(p) for p in media_parts]
+        return {"functionResponse": fr}
+
+    def _part(self, part, names: dict[str, str] | None = None) -> dict[str, Any]:
         if isinstance(part, TextPart):
             out: dict[str, Any] = {"text": part.text}
             thought = continuation_data(part, "gemini", "thought_signature")
@@ -587,11 +623,7 @@ class GeminiLM(BaseProviderLM):
                 out["thoughtSignature"] = thought["value"]
             return out
         if isinstance(part, ToolResultPart):
-            result_text = parts_to_text(part.content)
-            fr: dict[str, Any] = {"name": part.name or "tool", "response": {"result": result_text}}
-            if part.id:
-                fr["id"] = part.id
-            return {"functionResponse": fr}
+            return self._function_response(part, names)
         if isinstance(part, ThinkingPart):
             out: dict[str, Any] = {"text": part.text}
             thought = continuation_data(part, "gemini", "thought_signature")
@@ -601,11 +633,21 @@ class GeminiLM(BaseProviderLM):
             return out
         return {"text": getattr(part, "text", "") or ""}
 
-    def _message(self, msg: Message) -> dict[str, Any]:
+    def _message(self, msg: Message, names: dict[str, str] | None = None) -> dict[str, Any]:
         role = "model" if msg.role == "assistant" else "user"
         if msg.role == "developer":
-            return {"role": "user", "parts": [{"text": f"[developer]\n{parts_to_text(msg.parts)}"}]}
-        return {"role": role, "parts": [self._part(part) for part in msg.parts]}
+            return {"role": "user", "parts": [{"text": f"[developer]\n{parts_to_text(msg.parts, provider=self.provider, where='a developer turn')}"}]}
+        return {"role": role, "parts": [self._part(part, names) for part in msg.parts]}
+
+    @staticmethod
+    def _call_names(messages) -> dict[str, str]:
+        """tool_call id → function name, over the transcript (MAP-10 rule 6)."""
+        names: dict[str, str] = {}
+        for m in messages:
+            for p in m.parts:
+                if isinstance(p, ToolCallPart) and p.id:
+                    names[p.id] = p.name
+        return names
 
     def _tool_config_payload(self, request: Request) -> dict[str, Any] | None:
         tc = request.config.tool_choice
@@ -675,7 +717,8 @@ class GeminiLM(BaseProviderLM):
         if resource is not None and not wire_messages:
             raise ValueError("gemini: a request against a stored cache needs at least one message after the prefix")
 
-        payload: dict[str, Any] = {"contents": [self._message(m) for m in wire_messages]}
+        names = self._call_names(request.messages)
+        payload: dict[str, Any] = {"contents": [self._message(m, names) for m in wire_messages]}
         if resource is not None:
             payload["cachedContent"] = self._cache_resource(resource)
         if request.system and resource is None:
@@ -1115,7 +1158,8 @@ class GeminiLM(BaseProviderLM):
             return self._build_realtime_input_payloads(request)
         if len(request.messages) == 1 and request.messages[0].role == "user" and all(isinstance(p, TextPart) for p in request.messages[0].parts):
             return [{"realtimeInput": {"text": parts_to_text(request.messages[0].parts)}}]
-        return [{"clientContent": {"turns": [self._message(m) for m in request.messages], "turnComplete": True}}]
+        names = self._call_names(request.messages)
+        return [{"clientContent": {"turns": [self._message(m, names) for m in request.messages], "turnComplete": True}}]
 
     def _build_realtime_input_payloads(self, request: Request) -> list[dict[str, Any]]:
         text_payloads: list[dict[str, Any]] = []
@@ -1540,7 +1584,7 @@ class GeminiLM(BaseProviderLM):
     def _cache_create_request(self, prefix: Request, ttl_seconds: int | None, label: str | None) -> TransportRequest:
         body: dict[str, Any] = {
             "model": self._model_path(prefix.model),
-            "contents": [self._message(m) for m in prefix.messages],
+            "contents": [self._message(m, self._call_names(prefix.messages)) for m in prefix.messages],
         }
         if prefix.system:
             text = prefix.system if isinstance(prefix.system, str) else parts_to_text(prefix.system)

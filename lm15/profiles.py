@@ -174,6 +174,7 @@ def openai_responses_compat_from_extensions(extensions: JsonObject | None) -> Op
         "commentary_phase",
         "edit_image_field",
         "builtin_tools",
+        "tool_result_media",
         "routing",
         "extensions",
     }

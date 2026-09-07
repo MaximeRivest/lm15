@@ -50,11 +50,32 @@ def openai_file_readiness(status: object) -> FileReadiness:
     return _OPENAI_FILE_READINESS.get(status, "ready")
 
 
-def parts_to_text(parts: tuple[Part, ...]) -> str:
-    """Lossy text rendering used for provider fields that only accept text."""
+# The part kinds that carry bytes/addresses rather than words (MAP-10: a
+# native block or a raise; never text).
+MEDIA_KINDS: frozenset[str] = frozenset({"image", "audio", "video", "document", "binary"})
+
+
+def parts_to_text(parts: tuple[Part, ...], *, provider: str | None = None,
+                  where: str = "a text-only wire field") -> str:
+    """Text rendering for wire fields that take text only.
+
+    Renders text-bearing parts (text, thinking, citation). A media part
+    RAISES `UnsupportedFeatureError` before any wire (MAP-10 rule 2): the
+    field cannot carry it, and rendering a caption or a type name in its
+    place is the silent substitution the rule forbids. Callers that own a
+    slot for the part must not be here.
+    """
+    from ..errors import UnsupportedFeatureError
 
     out: list[str] = []
     for part in parts:
+        if part.type in MEDIA_KINDS:
+            head = f"{provider}: " if provider else ""
+            raise UnsupportedFeatureError(
+                f"{head}a {part.type} part cannot reach {where}, which takes text only; "
+                "no text rendering of a media part is made (MAP-10)",
+                provider=provider,
+            )
         if isinstance(part, TextPart):
             out.append(part.text)
         elif isinstance(part, ThinkingPart) and part.text:
@@ -70,10 +91,59 @@ def message_text(msg: Message) -> str:
     return parts_to_text(msg.parts)
 
 
+def media_base64(part: ImagePart | AudioPart | VideoPart | DocumentPart | BinaryPart) -> str:
+    """The part's bytes as base64: inline `data`, or the `path` read now.
+    A url/file_id-addressed part has no bytes here; the caller maps those."""
+    if part.data is not None:
+        return part.data
+    if part.path is not None:
+        return base64.b64encode(part.path.read_bytes()).decode("ascii")
+    raise ValueError(f"{part.type} part has no inline data or path")
+
+
 def media_data_uri(part: ImagePart | AudioPart | VideoPart | DocumentPart | BinaryPart) -> str:
-    if part.data is None:
-        raise ValueError(f"{part.type} part has no inline data")
-    return f"data:{part.media_type};base64,{part.data}"
+    return f"data:{part.media_type};base64,{media_base64(part)}"
+
+
+# ─── MAP-10: tool-result media policy ──────────────────────────────
+
+# Which part kinds a `tool_result_media` value admits inside a result item.
+_TOOL_RESULT_MEDIA_ADMITS: dict[str, frozenset[str]] = {
+    "native": frozenset({"image", "document"}),
+    "images": frozenset({"image"}),
+    "reject": frozenset(),
+}
+
+# The door that carries the part, named in the refusal (MAP-10 rule 3).
+_MEDIA_DOORS: dict[str, str] = {
+    "image": "the OpenAI Responses, Anthropic Messages and Gemini dialects (and the xai/moonshotai/zai chat presets)",
+    "document": "the OpenAI Responses, Anthropic Messages and Gemini dialects",
+}
+
+
+def check_tool_result_media(provider: str, part: ToolResultPart, policy: str, *, wire: str) -> None:
+    """Raise before any wire when `part.content` carries a part kind the
+    preset's `tool_result_media` policy does not admit (MAP-10 rules 1–3).
+    `wire` names the field for the message ("a tool row", "function_call_output")."""
+    from ..errors import UnsupportedFeatureError
+
+    admits = _TOOL_RESULT_MEDIA_ADMITS[policy]
+    for p in part.content:
+        if p.type in MEDIA_KINDS and p.type not in admits:
+            why = ("this server takes text-only tool results" if policy == "reject"
+                   else f"this server carries images but not {p.type} parts in a tool result")
+            raise UnsupportedFeatureError(
+                f"{provider}: a {p.type} part in tool_result {part.id!r} cannot reach {wire} — {why} "
+                f"(compat tool_result_media={policy!r}, measured: lm15-contract/research/tool-result-content/). "
+                f"Carried natively by {_MEDIA_DOORS.get(p.type, 'no lm15 door yet')}; "
+                "or render the part to text yourself before building the tool result (MAP-10)",
+                provider=provider,
+            )
+
+
+def tool_result_error_text(part: ToolResultPart, text: str) -> str:
+    """MAP-10 rule 5 on wires with no error flag: the text carries it."""
+    return f"[error] {text}" if part.is_error else text
 
 
 def media_bytes(part: ImagePart | AudioPart | VideoPart | DocumentPart | BinaryPart) -> bytes:
@@ -159,65 +229,79 @@ def model_infos_from_entries(
     return tuple(out)
 
 
-def part_to_openai_input(part: Part) -> dict[str, Any]:
+def part_to_openai_input(part: Part, *, provider: str | None = None) -> dict[str, Any]:
+    """One prompt part → one Responses input block. Every media source form
+    maps (url, file_id, inline data, a path read now); a part with no slot
+    RAISES (MAP-10) instead of becoming empty text."""
+    from ..errors import UnsupportedFeatureError
+
     if isinstance(part, TextPart):
         return {"type": "input_text", "text": part.text}
 
     if isinstance(part, ImagePart):
-        if part.url is not None:
-            payload = {"type": "input_image", "image_url": part.url}
-            if part.detail:
-                payload["detail"] = part.detail
-            return payload
-        if part.data is not None:
-            payload = {"type": "input_image", "image_url": media_data_uri(part)}
-            if part.detail:
-                payload["detail"] = part.detail
-            return payload
         if part.file_id is not None:
             return {"type": "input_image", "file_id": part.file_id}
+        payload = {"type": "input_image", "image_url": part.url if part.url is not None else media_data_uri(part)}
+        if part.detail:
+            payload["detail"] = part.detail
+        return payload
 
     if isinstance(part, AudioPart):
-        if part.data is not None:
-            media = (part.media_type or "audio/wav").split("/", 1)[-1]
-            if media in {"mpeg", "mp3"}:
-                media = "mp3"
-            return {"type": "input_audio", "audio": part.data, "format": media}
         if part.url is not None:
             return {"type": "input_audio", "audio_url": part.url}
         if part.file_id is not None:
             return {"type": "input_audio", "file_id": part.file_id}
+        media = (part.media_type or "audio/wav").split("/", 1)[-1]
+        if media in {"mpeg", "mp3"}:
+            media = "mp3"
+        return {"type": "input_audio", "audio": media_base64(part), "format": media}
 
     if isinstance(part, (DocumentPart, BinaryPart)):
         if part.url is not None:
             return {"type": "input_file", "file_url": part.url}
-        if part.data is not None:
-            # OpenAI requires a filename alongside inline file_data (live
-            # 2026-06-11: 400 missing_required_parameter without one); derive
-            # a deterministic name from the media-type subtype.
-            ext = (part.media_type or "application/octet-stream").split("/", 1)[-1].split("+", 1)[0] or "bin"
-            return {"type": "input_file", "filename": f"file.{ext}", "file_data": media_data_uri(part)}
         if part.file_id is not None:
             return {"type": "input_file", "file_id": part.file_id}
+        # OpenAI requires a filename alongside inline file_data (live
+        # 2026-06-11: 400 missing_required_parameter without one); derive
+        # a deterministic name from the media-type subtype.
+        ext = (part.media_type or "application/octet-stream").split("/", 1)[-1].split("+", 1)[0] or "bin"
+        return {"type": "input_file", "filename": f"file.{ext}", "file_data": media_data_uri(part)}
 
     if isinstance(part, VideoPart):
         if part.url is not None:
             return {"type": "input_video", "video_url": part.url}
-        if part.data is not None:
-            return {"type": "input_video", "video_data": media_data_uri(part)}
         if part.file_id is not None:
             return {"type": "input_video", "file_id": part.file_id}
+        return {"type": "input_video", "video_data": media_data_uri(part)}
 
-    if isinstance(part, ToolResultPart):
-        return {"type": "input_text", "text": parts_to_text(part.content)}
-
-    if isinstance(part, CitationPart):
+    if isinstance(part, (CitationPart, ThinkingPart)):
         return {"type": "input_text", "text": parts_to_text((part,))}
 
-    if isinstance(part, ThinkingPart):
-        return {"type": "input_text", "text": part.text}
+    head = f"{provider}: " if provider else ""
+    raise UnsupportedFeatureError(
+        f"{head}a {part.type} part has no input block on the Responses wire (MAP-10)", provider=provider,
+    )
 
-    return {"type": "input_text", "text": getattr(part, "text", "") or ""}
+
+def tool_result_output_openai(provider: str, part: ToolResultPart, policy: str) -> str | list[dict[str, Any]]:
+    """`function_call_output.output` (MAP-10): a string when the content is
+    text-only, the documented array of input_text/input_image/input_file
+    blocks otherwise; a media part the preset does not admit raises first.
+    `is_error` rides as an `[error] ` prefix on the text (rule 5)."""
+    check_tool_result_media(provider, part, policy, wire="function_call_output")
+    if all(p.type not in MEDIA_KINDS for p in part.content):
+        return tool_result_error_text(part, parts_to_text(part.content, provider=provider, where="function_call_output"))
+    blocks: list[dict[str, Any]] = []
+    for p in part.content:
+        block = part_to_openai_input(p, provider=provider)
+        blocks.append(block)
+    if part.is_error:
+        first = next((b for b in blocks if b.get("type") == "input_text"), None)
+        if first is None:
+            blocks.insert(0, {"type": "input_text", "text": "[error]"})
+        else:
+            first["text"] = "[error] " + first["text"]
+    return blocks
 
 
 def message_to_openai_input(msg: Message) -> dict[str, Any]:

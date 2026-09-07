@@ -69,7 +69,7 @@ from .base import (
     batch_entry_request,
     default_transport,
 )
-from .common import EFFORT_THINKING_BUDGETS, anthropic_source, iso_utc, model_infos_from_entries, multipart_form_body, parts_to_text
+from .common import EFFORT_THINKING_BUDGETS, MEDIA_KINDS, anthropic_source, check_tool_result_media, iso_utc, model_infos_from_entries, multipart_form_body, parts_to_text
 
 # Canonical builtin tool name → Anthropic tool format
 _ANTHROPIC_BUILTIN_MAP: dict[str, str] = {
@@ -416,6 +416,7 @@ class AnthropicLM(BaseProviderLM):
         if isinstance(part, ToolCallPart):
             return {"type": "tool_use", "id": part.id, "name": part.name, "input": part.input}
         if isinstance(part, ToolResultPart):
+            check_tool_result_media(self.provider, part, self._resolved_compat.tool_result_media, wire="a tool_result block")
             content_blocks = [self._tool_result_content(p) for p in part.content]
             out: dict[str, Any] = {"type": "tool_result", "tool_use_id": part.id}
             if content_blocks:
@@ -454,7 +455,13 @@ class AnthropicLM(BaseProviderLM):
             return {"type": "image", "source": anthropic_source(part)}
         if isinstance(part, DocumentPart):
             return {"type": "document", "source": anthropic_source(part)}
-        return {"type": "text", "text": getattr(part, "text", "") or ""}
+        if part.type in MEDIA_KINDS:
+            # ToolResultBlockParam takes text, image and document blocks only.
+            raise UnsupportedFeatureError(
+                f"{self.provider}: a {part.type} part cannot reach a tool_result block (text, image and document only; MAP-10)",
+                provider=self.provider,
+            )
+        return {"type": "text", "text": parts_to_text((part,), provider=self.provider)}
 
     def _message(self, msg: Message) -> dict[str, Any]:
         role = "assistant" if msg.role == "assistant" else "user"

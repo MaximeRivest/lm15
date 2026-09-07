@@ -50,7 +50,10 @@ from ..types import (
 )
 from .base import BaseProviderLM, Credential, HttpResponse, SyncTransport, default_transport
 from .common import (
+    MEDIA_KINDS,
+    check_tool_result_media,
     media_data_uri,
+    tool_result_error_text,
     model_infos_from_entries,
     openai_token_logprobs,
     parse_json_object,
@@ -86,12 +89,28 @@ _FINISH_REASON_MAP: dict[str, str] = {
 }
 
 
-def _chat_content_parts(msg: Message, *, force_array: bool = False) -> str | list[dict[str, Any]]:
+def _chat_image_block(part: Any, provider: str) -> dict[str, Any]:
+    """`{"type": "image_url", "image_url": {url, detail?}}`: a URL verbatim,
+    inline data or a path as a data URI. `file_id` has no slot on this wire."""
+    if part.file_id is not None:
+        raise UnsupportedFeatureError(
+            f"{provider}: an image addressed by file_id cannot be sent on the Chat Completions wire "
+            "(no file reference form); pass a URL or inline data", provider=provider,
+        )
+    payload: dict[str, Any] = {"url": part.url if part.url is not None else media_data_uri(part)}
+    if getattr(part, "detail", None):
+        payload["detail"] = part.detail
+    return {"type": "image_url", "image_url": payload}
+
+
+def _chat_content_parts(msg: Message, *, force_array: bool = False, provider: str = "openai_chat") -> str | list[dict[str, Any]]:
     """Map non-assistant message parts to chat-completions content.
 
     Single text part → plain string; anything multimodal → content array.
     ``force_array`` keeps the array form for a lone text part (a cache
     breakpoint rides on a text content block, never on a bare string).
+    A part the wire has no slot for RAISES (MAP-10); it is never rendered
+    as text or dropped.
     """
     parts = [p for p in msg.parts if not isinstance(p, (ToolCallPart, ToolResultPart))]
     if len(parts) == 1 and isinstance(parts[0], TextPart) and not force_array:
@@ -101,19 +120,41 @@ def _chat_content_parts(msg: Message, *, force_array: bool = False) -> str | lis
         if isinstance(part, TextPart):
             out.append({"type": "text", "text": part.text})
         elif part.type == "image":
-            url = part.url if part.url is not None else media_data_uri(part)
-            payload: dict[str, Any] = {"url": url}
-            if getattr(part, "detail", None):
-                payload["detail"] = part.detail
-            out.append({"type": "image_url", "image_url": payload})
+            out.append(_chat_image_block(part, provider))
         elif isinstance(part, ThinkingPart):
             continue  # thinking is never replayed as user content
+        elif part.type in MEDIA_KINDS:
+            raise UnsupportedFeatureError(
+                f"{provider}: a {part.type} part in a {msg.role} message has no slot on the Chat Completions wire "
+                "(text and image_url only); the OpenAI Responses, Anthropic and Gemini dialects carry it (MAP-10)",
+                provider=provider,
+            )
         else:
-            # Lossy text rendering for part kinds the dialect cannot carry.
-            text = parts_to_text((part,))
-            if text:
-                out.append({"type": "text", "text": text})
+            out.append({"type": "text", "text": parts_to_text((part,), provider=provider)})
     return out
+
+
+def _tool_row_content(provider: str, part: ToolResultPart, policy: str) -> str | list[dict[str, Any]]:
+    """A `role: tool` row's content (MAP-10): a string when text-only; on a
+    preset that proved the array form live, text and image_url blocks; a
+    media part the preset does not admit raises first. `is_error` rides
+    as an `[error] ` prefix (rule 5: the wire has no flag)."""
+    check_tool_result_media(provider, part, policy, wire="a Chat Completions tool row")
+    if all(p.type not in MEDIA_KINDS for p in part.content):
+        return tool_result_error_text(part, parts_to_text(part.content, provider=provider, where="a Chat Completions tool row"))
+    blocks: list[dict[str, Any]] = []
+    for p in part.content:
+        if p.type == "image":
+            blocks.append(_chat_image_block(p, provider))
+        else:
+            blocks.append({"type": "text", "text": parts_to_text((p,), provider=provider)})
+    if part.is_error:
+        first = next((b for b in blocks if b["type"] == "text"), None)
+        if first is None:
+            blocks.insert(0, {"type": "text", "text": "[error]"})
+        else:
+            first["text"] = "[error] " + first["text"]
+    return blocks
 
 
 def _response_format_to_chat(format_config: dict[str, Any]) -> dict[str, Any]:
@@ -243,13 +284,10 @@ class OpenAIChatLM(BaseProviderLM):
             if msg.role == "tool":
                 for part in msg.parts:
                     if isinstance(part, ToolResultPart):
-                        output = parts_to_text(part.content)
-                        if not output:
-                            output = json.dumps([{"type": p.type} for p in part.content])
                         item: dict[str, Any] = {
                             "role": "tool",
                             "tool_call_id": part.id,
-                            "content": output,
+                            "content": _tool_row_content(self.provider, part, compat.tool_result_media),
                         }
                         if compat.tool_result_name == "include" and part.name:
                             item["name"] = part.name
@@ -289,7 +327,7 @@ class OpenAIChatLM(BaseProviderLM):
 
             role = compat.instruction_role if msg.role == "developer" else msg.role
             at_breakpoint = msg_index == breakpoint_index
-            content = _chat_content_parts(msg, force_array=at_breakpoint)
+            content = _chat_content_parts(msg, force_array=at_breakpoint, provider=self.provider)
             if at_breakpoint:
                 # Same rule as the Responses dialect: the breakpoint rides on
                 # the last text content block of the prefix message
@@ -390,6 +428,13 @@ class OpenAIChatLM(BaseProviderLM):
             payload["temperature"] = request.config.temperature
         if request.config.top_p is not None:
             payload["top_p"] = request.config.top_p
+        if request.config.top_k is not None:
+            # No wire slot on Chat Completions (port.md rule 4: a raise or an
+            # extensions door, never omission).
+            raise UnsupportedFeatureError(
+                f"{self.provider}: config.top_k has no field on the Chat Completions wire; servers that accept "
+                "top_k take it through extensions", provider=self.provider,
+            )
         if request.config.stop:
             payload["stop"] = list(request.config.stop)
         if request.config.logprobs is not None:
