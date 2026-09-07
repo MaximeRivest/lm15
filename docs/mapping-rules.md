@@ -74,6 +74,16 @@ carrying `stop` would overwrite the `tool_call` that `response.completed`
 had already established. The event trace would then contradict the
 materialized `Response`.
 
+**`StreamEndEvent.provider_data` is the wire frame that supplied `usage`,
+verbatim (the JSON object of that frame); if no frame supplied usage, the
+frame that supplied `finish_reason`. Bare terminators contribute nothing.
+It is an escape hatch, not a canonical fact: the harness compares it for
+presence and JSON type only.** Chat: the usage chunk. Anthropic: the
+`message_delta` frame. Responses: `response.completed` (the event
+payload's `response` object, as today). Gemini: the last chunk. xAI: same
+as its wire. (Ratified 2026-09-06,
+lm15-contract/changes/2026-09-06-ratification.md D9.)
+
 **Usage counters at the wire boundary (INV-029).** An adapter never invents
 `0` for a counter the provider did not send; absent stays `None` and
 `Usage` auto-sums `total_tokens` only when both primaries are present. One
@@ -267,13 +277,36 @@ cells) and 17 sources (lm15-contract/research/reasoning/).
    "summary": [...]}` — `summary` is required even when empty, 400
    without). Without state, a `ThinkingPart` is replayed as assistant
    text on every provider (decision G); the chat dialect's
-   `thinking_replay` default is `as_text`.
+   `thinking_replay` default is `as_text`. **`ContinuationState.provider`
+   names the dialect that consumes the state (`openai`, `anthropic`,
+   `gemini`, `xai` where xAI has its own wire), never the door. A Meta or
+   Azure reasoning item is `openai:reasoning_item`. State replays
+   verbatim on any door of that dialect; the server judges.** (Ratified
+   2026-09-06, D7.)
 9. **An OpenAI reasoning item with no summary is an empty `ThinkingPart`**
    carrying its replay state, never dropped. `Usage.reasoning_tokens`
    comes from every provider's exact field.
 10. **Model-class detection** (Anthropic adaptive vs manual; Gemini 2.5
     vs 3.x) is by model-name table — a table that rots; the server 400s
     loudly when wrong; `extensions` overrides.
+11. **Hidden thinking is a `ThinkingPart` with empty `text` and
+    continuation state. There is no flag and no placeholder text.**
+    Anthropic `redacted_thinking` → `ThinkingPart(text="",
+    continuation=[anthropic:redacted_thinking {"data": <blob>}])`. In a
+    stream: `ThinkingDelta(text="")` at `content_block_start`,
+    `ContinuationDelta(part_index=i)` at `content_block_stop`. Replay is
+    unchanged (the blob goes back as `redacted_thinking`). A Responses
+    reasoning item with no summary is already "empty text + state" (rule
+    9): one concept, not two. `[redacted]` was English presentation text,
+    not provider text. (Ratified 2026-09-06, D5; `ThinkingPart.redacted`
+    removed.)
+12. **Thinking comes only from a typed wire field. lm15 never parses
+    delimiters (`<think>`, `<reasoning>`, …) out of provider text. Where
+    a server knob separates reasoning (Groq `reasoning_format: parsed`,
+    rule 7), the preset sends the knob.** Bedrock runtime gpt-oss inline
+    tags stay literal text; a live cell (does the runtime accept a
+    parsed-reasoning knob?) is a follow-up, not done here. (Ratified
+    2026-09-06, D10.)
 
 **Why:** the reference knew one Anthropic class and one Gemini class, so
 every `Reasoning` on Sonnet 5 was a 400 and every one on Gemini 3.x used
@@ -366,6 +399,15 @@ after the independent review found it lived only in code):
    chat dialect has no start frame and its per-chunk `id` is **not**
    lifted into the Response (pinned by the reviewed `openai_chat.streaming`
    and by `xai.streaming`; a wire fact dropped by rule, stated here).
+   The fields the wire withholds on the stream path (INV-051), per
+   dialect, today: chat dialect — `id` (this rule). Continuation state
+   is never withheld: state known at start is emitted immediately after
+   `start` as a message-level `ContinuationDelta`; state known at a
+   part's end is emitted at that end. No dialect emits
+   `openai:response_id`, `gemini:response_id`, or `anthropic:message_id`
+   continuation: `Response.id` (and `StreamStartEvent.id`) carry the id;
+   server-side chaining knobs (`previous_response_id`, `conversation`)
+   stay `extensions` per INV-049. (Ratified 2026-09-06, D8.)
 
 **Why:** an unnamed call is not actionable (MAP-1), and every shipped
 dialect names a call on its first fragment — pinned 2026-09-02 as four
@@ -405,3 +447,8 @@ positional name guess that had lived in the accumulator since its first
 version, then replaced the same day by the refusal rule after the
 maintainer chose it over the guess
 (`lm15-contract/changes/2026-09-02-stream-assembly-no-guess.md`).
+On 2026-09-06 the ratification session added the MAP-3 `provider_data`
+rule, MAP-7 rules 11–12 and the MAP-7.8 dialect sentence, and the
+MAP-9.6 withheld-field list with INV-051
+(`lm15-contract/verify/DECISIONS-2026-09-06.md`,
+`lm15-contract/changes/2026-09-06-ratification.md`).
