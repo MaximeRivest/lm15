@@ -454,8 +454,8 @@ Check API key: ('OPENAI_API_KEY',)
 ## Design notes
 
 - [docs/design-rationale.md](docs/design-rationale.md) — why `config=Config(...)` instead of kwargs, why there is no automatic tool loop, why request `extensions` and response `provider_data` are different names on purpose.
-- [docs/serde-rules.md](docs/serde-rules.md) — the canonical JSON omission and round-trip rules.
-- [docs/mapping-rules.md](docs/mapping-rules.md) — the provider mapping invariants (MAP-1, MAP-2, MAP-3, ...).
+- `lm15-contract/docs/serde-rules.md` — the canonical JSON omission and round-trip rules (normative; [docs/serde-rules.md](docs/serde-rules.md) forwards there).
+- `lm15-contract/docs/mapping-rules.md` — the provider mapping invariants MAP-1..MAP-10 (normative; [docs/mapping-rules.md](docs/mapping-rules.md) forwards there).
 - Behavior is pinned by a cross-language conformance corpus: the sibling `lm15-contract` repository is the spec; this package is the reference implementation, not the authority — the full story is in [How lm15 is specified](https://lm15-dev.github.io/lm15-python/how-lm15-is-specified/).
 
 ## Documentation

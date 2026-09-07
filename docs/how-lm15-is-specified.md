@@ -21,8 +21,9 @@ its constitution,
   reasons, error codes…), `spec/invariants.md` (49 numbered
   construction-time rules, INV-001..INV-049), and `spec/SCOPE.md` (what is
   frozen for 1.0 versus provisional). Serde and response-mapping rules are
-  normative in this repo's [serde-rules](serde-rules.md) and
-  [mapping-rules](mapping-rules.md).
+  normative in the contract repository (`lm15-contract/docs/serde-rules.md`,
+  `lm15-contract/docs/mapping-rules.md`); this repo keeps forwarding stubs at
+  [serde-rules](serde-rules.md) and [mapping-rules](mapping-rules.md).
 - **A fixture corpus** — canonical requests paired with the exact HTTP
   request each provider must receive, verbatim captured provider response
   and SSE bodies, provider error vectors, and canonical-JSON round-trip
