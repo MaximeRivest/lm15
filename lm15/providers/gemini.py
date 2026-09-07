@@ -104,7 +104,7 @@ from .base import (
     default_transport,
     resolve_credential,
 )
-from .common import EFFORT_THINKING_BUDGETS, MEDIA_KINDS, build_url, iso_utc, model_infos_from_entries, multipart_related_body, parts_to_text
+from .common import EFFORT_THINKING_BUDGETS, MEDIA_KINDS, build_url, iso_utc, model_infos_from_entries, multipart_related_body, parts_to_text, unnamed_tool_call_error
 
 # Canonical builtin tool name → Gemini tool key
 _GEMINI_BUILTIN_MAP: dict[str, str] = {
@@ -889,11 +889,13 @@ class GeminiLM(BaseProviderLM):
                             data={"value": str(thought_signature)},
                         ),
                     )
+                if not fc.get("name"):
+                    raise unnamed_tool_call_error(self.provider, f"{path_prefix}[{part_index}]")
                 parts.append(ToolCallPart(
                     # MAP-9: a missing call id is the lm15 correlator tool_call_<index>,
                     # the same one the stream assembler mints (INV-051 parity).
                     id=str(fc.get("id") or f"tool_call_{len(parts)}"),
-                    name=str(fc.get("name") or "tool"),
+                    name=str(fc["name"]),
                     input=fc.get("args") if isinstance(fc.get("args"), dict) else {},
                     continuation=continuation,
                 ))

@@ -69,7 +69,7 @@ from .base import (
     batch_entry_request,
     default_transport,
 )
-from .common import EFFORT_THINKING_BUDGETS, MEDIA_KINDS, anthropic_source, check_tool_result_media, iso_utc, model_infos_from_entries, multipart_form_body, parts_to_text
+from .common import EFFORT_THINKING_BUDGETS, MEDIA_KINDS, anthropic_source, check_tool_result_media, iso_utc, model_infos_from_entries, multipart_form_body, parts_to_text, unnamed_tool_call_error
 
 # Canonical builtin tool name → Anthropic tool format
 _ANTHROPIC_BUILTIN_MAP: dict[str, str] = {
@@ -787,9 +787,11 @@ class AnthropicLM(BaseProviderLM):
                     if citation is not None:
                         parts.append(citation)
             elif block_type == "tool_use":
+                if not block.get("name"):
+                    raise unnamed_tool_call_error(self.provider, f"content[{block_index}]")
                 parts.append(ToolCallPart(
                     id=str(block.get("id") or f"tool_{len(parts)}"),
-                    name=str(block.get("name") or "tool"),
+                    name=str(block["name"]),
                     input=block.get("input") if isinstance(block.get("input"), dict) else {},
                 ))
             elif block_type == "thinking":

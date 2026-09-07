@@ -116,6 +116,7 @@ from .common import (
     openai_token_logprobs,
     parse_json_object,
     part_to_openai_input,
+    unnamed_tool_call_error,
     parts_to_text,
 )
 
@@ -1048,10 +1049,12 @@ class OpenAILM(BaseProviderLM):
                     else:
                         _record_unmapped(unmapped, f"output[{item_index}].content[{content_index}]", ctype)
             elif item_type == "function_call":
+                if not item.get("name"):
+                    raise unnamed_tool_call_error(self.provider, f"output[{item_index}]")
                 parts.append(
                     ToolCallPart(
                         id=str(item.get("call_id") or item.get("id") or f"call_{len(parts)}"),
-                        name=str(item.get("name") or "tool"),
+                        name=str(item["name"]),
                         input=parse_json_object(item.get("arguments")),
                     )
                 )

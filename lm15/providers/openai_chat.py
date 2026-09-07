@@ -57,6 +57,7 @@ from .common import (
     model_infos_from_entries,
     openai_token_logprobs,
     parse_json_object,
+    unnamed_tool_call_error,
     parts_to_text,
 )
 from .openai import (
@@ -682,10 +683,12 @@ class OpenAIChatLM(BaseProviderLM):
                 _record_unmapped(unmapped, f"choices[0].message.tool_calls[{call_index}]", call_type)
                 continue
             function = call.get("function") if isinstance(call.get("function"), dict) else {}
+            if not function.get("name"):
+                raise unnamed_tool_call_error(self.provider, f"choices[0].message.tool_calls[{call_index}]")
             parts.append(
                 ToolCallPart(
                     id=str(call.get("id") or f"call_{len(parts)}"),
-                    name=str(function.get("name") or "tool"),
+                    name=str(function["name"]),
                     input=parse_json_object(function.get("arguments")),
                 )
             )

@@ -358,6 +358,19 @@ def openai_token_logprobs(entries: Any) -> tuple[TokenLogprob, ...]:
     return tuple(out)
 
 
+def unnamed_tool_call_error(provider: str, path: str) -> "ProviderError":
+    """MAP-9 on the complete path (changes/2026-09-07-complete-tool-call-no-guess.md):
+    a tool call the provider sent without a name is not actionable, and lm15
+    never guesses which tool the model meant."""
+    from ..errors import ProviderError
+
+    return ProviderError(
+        f"{provider}: {path} is a tool call with no name; lm15 does not guess "
+        "which tool the model meant (MAP-9)",
+        provider=provider,
+    )
+
+
 def parse_json_object(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
