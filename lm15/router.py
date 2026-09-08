@@ -65,7 +65,7 @@ from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import AsyncIterator, Iterator, Mapping
 
-from .errors import LM15Error, NotConfiguredError
+from .errors import AmbiguousModelError, NotConfiguredError, UnknownModelError
 from .models import ModelInfo, ModelRegistry
 from .providers import Credential
 from .registry import PROVIDERS, ProviderDefinition, canonical_provider as _canonical_provider
@@ -220,58 +220,19 @@ def _bound_ids(adapters: Mapping[str, type]) -> set[str]:
 
 
 # --------------------------------------------------------------- errors ----
+#
+# The router's failures are ErrorCode vocabulary entries (spec/vocabularies.md,
+# 2026-09-08): UnknownModelError / AmbiguousModelError live in lm15.errors
+# under ConfigurationError and are re-exported here.  There is no router-wide
+# base class or code: a code names a failure the caller can act on, not the
+# component that raised it.
 
 
-class RouterError(LM15Error):
-    """Base for all routing failures."""
-
-    default_code = "router"
-
-
-class UnknownModelError(RouterError):
-    """No resolution rung matched the model string."""
-
-    default_code = "unknown_model"
-
-    def __init__(
-        self,
-        message: str = "",
-        *,
-        model: str = "",
-        rules_tried: tuple[RouteRule, ...] = (),
-        catalog_searched: bool = False,
-        **kwargs,
-    ) -> None:
-        self.model = model
-        self.rules_tried = tuple(rules_tried)
-        self.catalog_searched = catalog_searched
-        super().__init__(message, **kwargs)
-
-
-class AmbiguousModelError(RouterError):
-    """Catalog matched the model id under more than one provider."""
-
-    default_code = "ambiguous_model"
-
-    def __init__(
-        self,
-        message: str = "",
-        *,
-        model: str = "",
-        providers: tuple[str, ...] = (),
-        **kwargs,
-    ) -> None:
-        self.model = model
-        self.providers = tuple(providers)
-        self.candidates = self.providers  # alias: full candidate list
-        super().__init__(message, **kwargs)
-
-
-class MissingCredentialError(RouterError, NotConfiguredError):
+class MissingCredentialError(NotConfiguredError):
     """Provider resolved but no API key was found.
 
-    Subclasses the existing :class:`lm15.errors.NotConfiguredError` —
-    semantically the credential case IS not-configured — so existing
+    A :class:`lm15.errors.NotConfiguredError` (code ``not_configured``) —
+    semantically the credential case IS not-configured — so
     ``except NotConfiguredError`` handlers keep working.  Carries
     ``provider`` and ``env_keys`` straight from the ProviderManifest.
     """

@@ -40,6 +40,7 @@ ALL_OPS = [
     "parse_response",
     "replay_live",
     "replay_stream",
+    "resolve_model",
     "serde_roundtrip",
     "sigv4_sign",
     "surface_dump",

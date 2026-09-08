@@ -26,8 +26,9 @@ Rules this table enforces (``tests/test_registry.py``):
 - a provider string names ONE wire behavior — the same service reachable
   over two dialects is two entries (spec rule: a provider name describes
   wire behavior, not credential ownership);
-- ``access.provider`` equals the entry id (hyphenated form; the chat
-  dialect's own manifest keeps its historical ``openai_chat`` spelling);
+- ``access.provider`` equals the entry id (hyphenated form; the underscore
+  form is an input alias only — spec/vocabularies.md § Open string
+  namespaces, 2026-09-08);
 - a bound entry's ``access.base_url`` equals its dialect's compat table
   URL for the same preset — one copy of each URL;
 - an entry with ``placeholder_key`` declares no env keys (keyless local

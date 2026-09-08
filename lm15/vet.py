@@ -21,7 +21,7 @@ from typing import Any, Callable, Iterator, Literal, get_args, get_origin
 
 from . import types as lm15_types
 from . import serde
-from .errors import LM15Error, StreamAssemblyError, canonical_error_code
+from .errors import AmbiguousModelError, LM15Error, StreamAssemblyError, UnknownModelError, canonical_error_code
 from .providers import HttpResponse
 from .providers.base import BaseProviderLM
 from .result import coalesce_stream, materialize_response
@@ -310,6 +310,23 @@ def op_validate(msg: JsonObject) -> JsonObject:
     from_dict, to_dict = _serde_for_kind(str(msg["kind"]))
     obj = from_dict(msg["value"])
     return {"ok": True, "normalized": to_dict(obj)}
+
+
+def op_resolve_model(msg: JsonObject) -> JsonObject:
+    """PROTOCOL.md resolve_model: the router's pure ``resolve`` over
+    harness-supplied inputs only — the env map (never the process env) and,
+    when given, an explicit catalog of canonical ModelInfo values."""
+    from .models import ModelRegistry
+    from .router import LMRouter, RouterConfig
+
+    env = {str(k): str(v) for k, v in (msg.get("env") or {}).items()}
+    registry = None
+    if "catalog" in msg:
+        registry = ModelRegistry()
+        for entry in msg["catalog"] or []:
+            registry.add(serde.model_info_from_dict(entry), replace=False)
+    resolution = LMRouter(RouterConfig(registry=registry, env=env)).resolve(str(msg["model"]))
+    return {"provider": resolution.provider, "model": resolution.model, "source": resolution.source}
 
 
 def op_build_models_request(msg: JsonObject) -> JsonObject:
@@ -757,6 +774,7 @@ HANDLERS: dict[str, Callable[[JsonObject], JsonObject]] = {
     "validate": op_validate,
     "surface_dump": op_surface_dump,
     "explain_auth": op_explain_auth,
+    "resolve_model": op_resolve_model,
     "token_exchange_build": op_token_exchange_build,
     "token_exchange_parse": op_token_exchange_parse,
     "sigv4_sign": op_sigv4_sign,
@@ -799,6 +817,11 @@ def _error_reply(req_id: Any, exc: BaseException) -> JsonObject:
         error["code"] = exc.code
     if isinstance(exc, StreamAssemblyError) and exc.partial is not None:
         error["partial_response"] = _response_result(exc.partial)["canonical_response"]
+    if isinstance(exc, (UnknownModelError, AmbiguousModelError)):
+        # The payload spec/vocabularies.md pins for the router codes.
+        error["model"] = exc.model
+        if isinstance(exc, AmbiguousModelError):
+            error["providers"] = list(exc.providers)
     error.update(extra)
     return {"id": req_id, "ok": False, "error": error}
 

@@ -134,7 +134,7 @@ OPENAI_CODEX = AccessPolicy(
 )
 
 OPENAI_CHAT_API = AccessPolicy(
-    provider="openai_chat",
+    provider="openai-chat",
     supports=EndpointSupport(complete=True, stream=True, models=True),
     auth_modes=("bearer",),
     env_keys=("OPENAI_API_KEY",),

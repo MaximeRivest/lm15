@@ -32,7 +32,6 @@ from lm15.router import (
     Resolution,
     RouteRule,
     RouterConfig,
-    RouterError,
     UnknownModelError,
 )
 from lm15.types import Message, Request, TextPart
@@ -343,10 +342,29 @@ class TestLM:
         assert "api_keys" in str(err)
 
     def test_missing_credential_is_not_configured(self) -> None:
-        # MissingCredentialError hooks the existing taxonomy.
+        # MissingCredentialError hooks the existing taxonomy; there is no
+        # router-wide base class (spec/vocabularies.md, 2026-09-08).
         assert issubclass(MissingCredentialError, lm15.NotConfiguredError)
-        assert issubclass(MissingCredentialError, RouterError)
-        assert issubclass(RouterError, lm15.LM15Error)
+        assert MissingCredentialError.__mro__[1] is lm15.NotConfiguredError
+        assert not hasattr(lm15, "RouterError")
+
+    def test_router_codes_are_vocabulary_entries(self) -> None:
+        # unknown_model / ambiguous_model are ErrorCode literals under
+        # ConfigurationError (changes/2026-09-08-router-error-codes.md);
+        # before that entry ErrorDetail could not even carry them.
+        from lm15.errors import canonical_error_code, error_class_for_code
+        from lm15.types import ERROR_CODES, ErrorDetail
+
+        for cls, code in ((UnknownModelError, "unknown_model"), (AmbiguousModelError, "ambiguous_model")):
+            assert issubclass(cls, lm15.ConfigurationError)
+            assert not issubclass(cls, lm15.NotConfiguredError)
+            assert cls("x").code == code
+            assert canonical_error_code(cls) == code
+            assert error_class_for_code(code) is cls
+            assert code in ERROR_CODES
+            assert ErrorDetail(code=code, message="m").code == code
+        err = AmbiguousModelError("x", model="m", providers=("groq", "gemini"))
+        assert err.model == "m" and err.providers == ("groq", "gemini")
 
     def test_gemini_second_env_key(self) -> None:
         router = _router(env={"GOOGLE_API_KEY": "sk-g"})
@@ -523,7 +541,6 @@ def test_router_surface_placement() -> None:
         "AsyncLMRouter",
         "RouterConfig",
         "Resolution",
-        "RouterError",
         "UnknownModelError",
         "AmbiguousModelError",
         "MissingCredentialError",
@@ -538,10 +555,11 @@ def test_router_surface_placement() -> None:
         assert hasattr(router_mod, name), name
 
 
-def test_router_error_code_is_bare_noun() -> None:
+def test_router_error_codes_are_bare_nouns() -> None:
     # Taxonomy convention: codes are bare nouns ('transport', 'provider',
     # ...), never suffixed with '_error'.
-    assert RouterError("boom").code == "router"
+    assert UnknownModelError("boom").code == "unknown_model"
+    assert AmbiguousModelError("boom").code == "ambiguous_model"
 
 
 # ─── object-provider rung (rung 0) ───────────────────────────────────

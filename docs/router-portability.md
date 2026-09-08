@@ -140,22 +140,27 @@ language-neutrally so each port can implement it idiomatically.
    ModelInfo JSON. Catalog data stays advisory: it never changes
    `build_request` output.
 
-### Error taxonomy additions
+### Error taxonomy
 
-All subordinate to the existing `LM15Error` root:
+The router's failures are ErrorCode vocabulary entries
+(`lm15-contract/spec/vocabularies.md`, ratified 2026-09-08), all under
+`ConfigurationError` — local, pre-network, "your setup is wrong":
 
-| error | code | required payload |
+| error | code | contract payload |
 |---|---|---|
-| `RouterError` (base) | `router` | — |
-| `UnknownModelError` | `unknown_model` | `model`, `rules_tried`, `catalog_searched` |
-| `AmbiguousModelError` | `ambiguous_model` | `model`, `providers` (full candidate list) |
-| `MissingCredentialError` | `not_configured` | `provider`, `env_keys` |
+| `UnknownModelError` | `unknown_model` | `model` |
+| `AmbiguousModelError` | `ambiguous_model` | `model`, `providers` (full candidate list, catalog order) |
+| `MissingCredentialError` | `not_configured` | `provider`, `env_keys` (a `NotConfiguredError`) |
 
-`MissingCredentialError` deliberately reuses the existing
+There is no router-wide base class or code: a code names a failure the
+caller can act on, not the component that raised it. `rules_tried` and
+`catalog_searched` on the Python `UnknownModelError` are diagnostics, not
+contract payload. `MissingCredentialError` reuses the existing
 `not_configured` code and (where the language has subtyping) the
 existing `NotConfiguredError` type, so current handlers keep working.
 Error messages must state the concrete fix (which env var to set, which
-explicit prefix to use).
+explicit prefix to use). The harness pins all of this:
+`harness/check.py --direction router` over `router/resolution.json`.
 
 ### Per-language notes (router)
 

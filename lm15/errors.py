@@ -10,7 +10,9 @@ Hierarchy:
     ├── TransportError              (network/connection failures at the LM layer)
     ├── StreamAssemblyError         (a stream cannot become a Response without inventing a fact; MAP-9)
     ├── ConfigurationError          (local SDK/configuration failures)
-    │   └── NotConfiguredError      (no API key or required provider config)
+    │   ├── NotConfiguredError      (no API key or required provider config)
+    │   ├── UnknownModelError       (the router: a model string that routes nowhere)
+    │   └── AmbiguousModelError     (the router: a catalog match under more than one provider)
     ├── CapabilityError             (local provider-adapter capability failures)
     │   └── UnsupportedFeatureError
     └── ProviderError               (provider returned an error response)
@@ -300,6 +302,58 @@ class NotConfiguredError(ConfigurationError):
         super().__init__(message, **kwargs)
 
 
+class UnknownModelError(ConfigurationError):
+    """The router found no provider for a model string.
+
+    No routable provider prefix, no catalog match, and no rule matched
+    (spec/vocabularies.md ``unknown_model``, 2026-09-08).  Local and
+    pre-network: no provider was asked — a provider's own "no such model"
+    reply is :class:`UnsupportedModelError`.  Carries ``model`` (the string
+    as requested); ``rules_tried`` and ``catalog_searched`` are the
+    reference's diagnostics, not contract payload.
+    """
+
+    default_code = "unknown_model"
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        model: str = "",
+        rules_tried: tuple = (),
+        catalog_searched: bool = False,
+        **kwargs,
+    ) -> None:
+        self.model = model
+        self.rules_tried = tuple(rules_tried)
+        self.catalog_searched = catalog_searched
+        super().__init__(message, **kwargs)
+
+
+class AmbiguousModelError(ConfigurationError):
+    """The catalog matched a model string under more than one provider, or
+    under more than one entry of one provider (``ambiguous_model``,
+    2026-09-08).  The fix is an explicit ``provider:`` prefix.  Carries
+    ``model`` and ``providers`` (every candidate, catalog order,
+    deduplicated).
+    """
+
+    default_code = "ambiguous_model"
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        model: str = "",
+        providers: tuple[str, ...] = (),
+        **kwargs,
+    ) -> None:
+        self.model = model
+        self.providers = tuple(providers)
+        self.candidates = self.providers  # alias: full candidate list
+        super().__init__(message, **kwargs)
+
+
 _GUIDANCE_MARKER = "\n\n  To fix:"
 
 
@@ -381,6 +435,8 @@ _CLASS_TO_CODE: dict[type[LM15Error], str] = {
     ServerError: "server",
     UnsupportedFeatureError: "unsupported_feature",
     NotConfiguredError: "not_configured",
+    UnknownModelError: "unknown_model",
+    AmbiguousModelError: "ambiguous_model",
     TransportError: "transport",
     ProviderError: "provider",
 }

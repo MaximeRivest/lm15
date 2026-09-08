@@ -634,7 +634,7 @@ class AsyncOpenAIChatLM(AsyncBaseProviderLM):
     settings: "Mapping[str, str] | None" = None
     clock: "Callable[[], datetime] | None" = field(default=None, repr=False)
 
-    provider: str = field(default="openai_chat", init=False)
+    provider: str = field(default="openai-chat", init=False)
     manifest: ClassVar[ProviderManifest] = OpenAIChatLM.manifest
 
     _inner: OpenAIChatLM = field(init=False, repr=False, compare=False)

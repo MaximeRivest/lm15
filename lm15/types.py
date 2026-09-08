@@ -92,6 +92,8 @@ ErrorCode = Literal[
     "unsupported_model",
     "unsupported_feature",
     "not_configured",
+    "unknown_model",
+    "ambiguous_model",
     "transport",
     "stream_assembly",
     "provider",

@@ -196,7 +196,6 @@ from .router import (
     MissingCredentialError,
     Resolution,
     RouterConfig,
-    RouterError,
     UnknownModelError,
 )
 
@@ -259,7 +258,7 @@ __all__ = [
     "ModelInfo", "ModelRegistry",
     # router (lm15.router; the rule/preset tables live there too)
     "LMRouter", "AsyncLMRouter", "RouterConfig", "Resolution",
-    "RouterError", "UnknownModelError",
+    "UnknownModelError",
     "AmbiguousModelError", "MissingCredentialError",
     # tool derivation (lm15.tools)
     "tool", "derive_tool", "ToolConfig", "ToolDerivation", "DerivedParam",

@@ -104,7 +104,7 @@ def _chat_image_block(part: Any, provider: str) -> dict[str, Any]:
     return {"type": "image_url", "image_url": payload}
 
 
-def _chat_content_parts(msg: Message, *, force_array: bool = False, provider: str = "openai_chat") -> str | list[dict[str, Any]]:
+def _chat_content_parts(msg: Message, *, force_array: bool = False, provider: str = "openai-chat") -> str | list[dict[str, Any]]:
     """Map non-assistant message parts to chat-completions content.
 
     Single text part → plain string; anything multimodal → content array.
@@ -203,7 +203,7 @@ class OpenAIChatLM(BaseProviderLM):
     settings: "Mapping[str, str] | None" = None
     clock: "Callable[[], datetime] | None" = field(default=None, repr=False)
 
-    provider: str = field(default="openai_chat", init=False)
+    provider: str = field(default="openai-chat", init=False)
     account_id: str | None = field(default=None, init=False, repr=False)
     manifest: ClassVar[ProviderManifest] = OPENAI_CHAT_API
 
