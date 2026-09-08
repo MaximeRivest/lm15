@@ -265,6 +265,17 @@ def op_build_request(msg: JsonObject) -> JsonObject:
     return normalize_transport_request(transport_req)
 
 
+def op_ingest_openai_chat(msg: JsonObject) -> JsonObject:
+    """MAP-12: a Chat Completions request body → canonical Request, under the
+    compat the case's provider binds (the same adapter build_request uses).
+    Pure; no credential is read (PROTOCOL.md)."""
+    lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg), settings=_settings_of(msg), clock=_clock_of(msg))
+    ingest = getattr(lm, "request_from_openai_chat", None)
+    if ingest is None:
+        raise ValueError(f"provider {msg['provider']!r} does not speak the Chat Completions wire; nothing to ingest")
+    return {"canonical_request": serde.request_to_dict(ingest(msg["body"]))}
+
+
 def op_parse_response(msg: JsonObject) -> JsonObject:
     lm = adapter_for_provider(str(msg["provider"]), _PARSE_ONLY_KEY, _base_url(msg), settings=_settings_of(msg), clock=_clock_of(msg))
     request = serde.request_from_dict(msg["canonical_request"])
@@ -767,6 +778,7 @@ def _string_vocabulary(obj: Any) -> list[str] | None:
 HANDLERS: dict[str, Callable[[JsonObject], JsonObject]] = {
     "capabilities": op_capabilities,
     "build_request": op_build_request,
+    "ingest_openai_chat": op_ingest_openai_chat,
     "parse_response": op_parse_response,
     "replay_stream": op_replay_stream,
     "normalize_error": op_normalize_error,

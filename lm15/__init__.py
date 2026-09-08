@@ -38,6 +38,11 @@ loopback listener, credential store), `lm15.doctor` (`explain_auth`:
 rung-by-rung credential resolution, no secrets rendered), and
 `lm15.vet` (the conformance shim CLI: `python -m lm15.vet`).
 
+Migrating from an OpenAI-shaped client: `request_from_openai_chat(body,
+compat=...)` reads the JSON a client would POST to `/chat/completions` into
+a `Request`, or refuses with the key named (MAP-12; docs/migrating-from-
+openai-chat.md).  It is the only place lm15 reads a foreign request format.
+
 The lowercase part-factory helpers (`text`, `image`, `tool_call`, ...) live in
 `lm15.types`, not at the top level — generic lowercase names at package top
 level invite collisions with user code.
@@ -166,6 +171,7 @@ from .providers import (
     OpenAICodexLM,
     XaiLM,
 )
+from .providers.openai_chat import request_from_openai_chat
 from .protocols import ProviderLM
 from .providers.async_base import (
     AsyncOpenAILM,
@@ -249,6 +255,8 @@ __all__ = [
     # providers
     "OpenAILM", "OpenAIChatLM", "AnthropicLM", "GeminiLM", "ClaudeCodeLM", "OpenAICodexLM", "XaiLM",
     "ProviderLM",
+    # ingest (MAP-12): a Chat Completions request body -> Request
+    "request_from_openai_chat",
     # async mirror providers
     "AsyncOpenAILM", "AsyncOpenAIChatLM", "AsyncAnthropicLM", "AsyncGeminiLM",
     "AsyncClaudeCodeLM", "AsyncOpenAICodexLM", "AsyncXaiLM",

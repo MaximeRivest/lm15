@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import json
+import mimetypes
 import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, ClassVar, Iterator, Mapping
@@ -30,8 +31,13 @@ from ..sse import SSEEvent
 from ..transports import TransportRequest
 from ..types import (
     BuiltinTool,
+    CacheConfig,
+    Config,
     FunctionTool,
+    ImagePart,
     Message,
+    Part,
+    Reasoning,
     RefusalPart,
     Request,
     Response,
@@ -45,8 +51,12 @@ from ..types import (
     ThinkingPart,
     ToolCallDelta,
     ToolCallPart,
+    ToolChoice,
     ToolResultPart,
     Usage,
+    audio,
+    document,
+    image,
 )
 from .base import BaseProviderLM, Credential, HttpResponse, SyncTransport, default_transport
 from .common import (
@@ -166,6 +176,685 @@ def _response_format_to_chat(format_config: dict[str, Any]) -> dict[str, Any]:
     if "strict" in format_config:
         inner["strict"] = format_config["strict"]
     return {"type": "json_schema", "json_schema": inner}
+
+
+# ─── Ingest: a Chat Completions request body → canonical Request (MAP-12) ──
+#
+# The decoder for the encoders above and for OpenAIChatLM._build_messages /
+# _payload below.  It reads ONE preset's spellings (the same
+# ResolvedOpenAIChatCompat the builder writes with), so for every canonical
+# Request r that the builder can carry losslessly,
+# request_from_openai_chat(build(r)) == r; the lossy cells are enumerated in
+# docs/mapping-rules.md MAP-12 and pinned per case by the contract's `ingest`
+# direction.  Every wire key has exactly one verdict
+# (lm15-contract/tools/openai-chat-ingest-verdicts.json): it maps to a
+# canonical field, it passes verbatim through config.extensions, it is
+# refused with UnsupportedFeatureError, or — for the four call-mode /
+# default-valued keys only — it is ignored by rule.  A key with no verdict is
+# refused: lm15 never drops silently (port.md rule 4).
+#
+# Malformed input (a wrong JSON type, a missing required key, an unparsable
+# tool-call argument string) is a ValueError / TypeError, like serde.
+
+# Top-level keys forwarded verbatim into config.extensions: generation knobs
+# OpenAI documents that no canonical field expresses and that the builder
+# re-emits verbatim (payload.update(extensions)), so they round-trip.
+_INGEST_EXTENSIONS_KEYS: frozenset[str] = frozenset({
+    "seed", "logit_bias", "presence_penalty", "frequency_penalty", "metadata",
+    "verbosity", "moderation", "provider",
+})
+
+# Top-level keys refused with the reason a canonical Request cannot carry them.
+_INGEST_REFUSED_KEYS: dict[str, str] = {
+    "n": "lm15 reads one choice per response; n>1 would silently lose choices — fan out in the caller",
+    "functions": "the deprecated function-calling shape; declare tools with {type: function, function: {...}}",
+    "function_call": "the deprecated function-calling shape; use tool_choice",
+    "audio": "audio output parameters have no canonical slot on the chat surface",
+    "modalities": "output modality selection has no canonical slot on the chat surface",
+    "prediction": "predicted-output content has no canonical slot",
+    "web_search_options": "a server-executed search the chat dialect cannot map to parts (MAP-1); the Responses dialect carries web_search as a BuiltinTool",
+    "top_k": "the Chat Completions wire has no top_k (the builder raises on Config.top_k for the same reason); servers that take it do so through extensions",
+}
+
+# Call-mode keys: they say HOW the request is sent, not WHAT is asked.  A
+# canonical Request has no stream flag (stream=... is an argument of
+# complete()/stream()), so these are read and dropped — the one place ingest
+# drops anything, stated in MAP-12.
+_INGEST_CALL_MODE_KEYS: frozenset[str] = frozenset({"stream", "stream_options"})
+
+# Keys the config decoder consumes itself (every other key is looked up in
+# the tables above, and an unlisted key is refused).
+_INGEST_CONFIG_KEYS: frozenset[str] = frozenset({
+    "model", "messages", "tools", "tool_choice", "parallel_tool_calls",
+    "max_completion_tokens", "max_tokens", "temperature", "top_p", "stop",
+    "logprobs", "top_logprobs", "response_format", "service_tier", "store",
+    "user", "safety_identifier", "user_id",
+    "reasoning_effort", "reasoning", "thinking", "enable_thinking", "chat_template_kwargs", "reasoning_format",
+    "prompt_cache_key", "prompt_cache_retention", "prompt_cache_options",
+})
+
+_INGEST_GROQ_BUILTIN_INVERSE: dict[str, str] = {wire: name for name, wire in _GROQ_BUILTIN_MAP.items()}
+
+_INGEST_AUDIO_MEDIA_TYPES: dict[str, str] = {"wav": "audio/wav", "mp3": "audio/mpeg"}
+
+
+def _ingest_unsupported(provider: str, what: str, why: str) -> UnsupportedFeatureError:
+    return UnsupportedFeatureError(f"{provider}: {what} cannot be carried by a canonical Request — {why}", provider=provider)
+
+
+def _ingest_str(value: Any, where: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{where} must be a string, got {type(value).__name__}")
+    return value
+
+
+def _ingest_object(value: Any, where: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise TypeError(f"{where} must be a JSON object, got {type(value).__name__}")
+    return value
+
+
+def _ingest_only_keys(provider: str, obj: Mapping[str, Any], allowed: frozenset[str], where: str) -> None:
+    """An unlisted key inside a block or object is a refusal, never a drop."""
+    extra = sorted(set(obj) - allowed)
+    if extra:
+        raise _ingest_unsupported(provider, f"{where} key {extra[0]!r}", "no canonical slot for it")
+
+
+def _ingest_data_uri(value: str, where: str) -> tuple[str, str]:
+    """``data:<media_type>;base64,<payload>`` → (media_type, payload).  The
+    inverse of media_data_uri; anything else is malformed here."""
+    if not value.startswith("data:"):
+        raise ValueError(f"{where} must be a base64 data URI")
+    head, sep, payload = value[5:].partition(",")
+    if not sep or not head.endswith(";base64") or not payload:
+        raise ValueError(f"{where} must be a base64 data URI (data:<media-type>;base64,<payload>)")
+    media_type = head[: -len(";base64")]
+    if not media_type:
+        raise ValueError(f"{where} data URI has no media type")
+    return media_type, payload
+
+
+def _ingest_image_block(provider: str, block: Mapping[str, Any], where: str) -> ImagePart:
+    """Inverse of _chat_image_block.  A data URI becomes inline data with the
+    URI's media type; any other URL stays a URL (media_type guessed from the
+    path, else the ImagePart default — the wire carries no type for a URL)."""
+    _ingest_only_keys(provider, block, frozenset({"type", "image_url", "prompt_cache_breakpoint"}), where)
+    spec = _ingest_object(block.get("image_url"), f"{where}.image_url")
+    _ingest_only_keys(provider, spec, frozenset({"url", "detail"}), f"{where}.image_url")
+    url = _ingest_str(spec.get("url"), f"{where}.image_url.url")
+    detail = spec.get("detail")
+    if url.startswith("data:"):
+        media_type, payload = _ingest_data_uri(url, f"{where}.image_url.url")
+        return image(data=payload, media_type=media_type, detail=detail)
+    guessed = mimetypes.guess_type(url)[0]
+    return image(url=url, media_type=guessed if guessed and guessed.startswith("image/") else None, detail=detail)
+
+
+def _ingest_text_block(provider: str, block: Mapping[str, Any], where: str) -> TextPart:
+    _ingest_only_keys(provider, block, frozenset({"type", "text", "prompt_cache_breakpoint"}), where)
+    return TextPart(text=_ingest_str(block.get("text"), f"{where}.text"))
+
+
+def _ingest_has_breakpoint(block: Mapping[str, Any], where: str) -> bool:
+    mark = block.get("prompt_cache_breakpoint")
+    if mark is None:
+        return False
+    mark = _ingest_object(mark, f"{where}.prompt_cache_breakpoint")
+    if mark != {"mode": "explicit"}:
+        raise ValueError(f"{where}.prompt_cache_breakpoint must be {{\"mode\": \"explicit\"}}")
+    if block.get("type") != "text":
+        # The builder places a mark on a text block only (CacheConfig table).
+        raise ValueError(f"{where}: a prompt_cache_breakpoint rides on a text block, not {block.get('type')!r}")
+    return True
+
+
+def _ingest_content_blocks(
+    provider: str, content: Any, *, role: str, where: str,
+) -> tuple[list[Part], bool]:
+    """A row's ``content`` → parts, plus whether its LAST block carries the
+    prompt-cache breakpoint.  A string is one TextPart.  Which block types a
+    role admits follows the wire's own schema (chat--create.md)."""
+    if isinstance(content, str):
+        return [TextPart(text=content)], False
+    if not isinstance(content, list):
+        raise TypeError(f"{where}.content must be a string or an array of content parts")
+    parts: list[Part] = []
+    breakpoint_at_end = False
+    for index, block in enumerate(content):
+        block = _ingest_object(block, f"{where}.content[{index}]")
+        block_where = f"{where}.content[{index}]"
+        kind = block.get("type")
+        marked = _ingest_has_breakpoint(block, block_where)
+        if marked and index != len(content) - 1:
+            raise ValueError(f"{block_where}: a prompt_cache_breakpoint marks the end of a message; it must be on the last block")
+        breakpoint_at_end = breakpoint_at_end or marked
+        if kind == "text":
+            parts.append(_ingest_text_block(provider, block, block_where))
+        elif kind == "image_url" and role in ("user", "tool"):
+            parts.append(_ingest_image_block(provider, block, block_where))
+        elif kind == "input_audio" and role == "user":
+            _ingest_only_keys(provider, block, frozenset({"type", "input_audio", "prompt_cache_breakpoint"}), block_where)
+            spec = _ingest_object(block.get("input_audio"), f"{block_where}.input_audio")
+            _ingest_only_keys(provider, spec, frozenset({"data", "format"}), f"{block_where}.input_audio")
+            fmt = _ingest_str(spec.get("format"), f"{block_where}.input_audio.format")
+            media_type = _INGEST_AUDIO_MEDIA_TYPES.get(fmt)
+            if media_type is None:
+                raise ValueError(f"{block_where}.input_audio.format must be one of {sorted(_INGEST_AUDIO_MEDIA_TYPES)}")
+            parts.append(audio(data=_ingest_str(spec.get("data"), f"{block_where}.input_audio.data"), media_type=media_type))
+        elif kind == "file" and role == "user":
+            _ingest_only_keys(provider, block, frozenset({"type", "file", "prompt_cache_breakpoint"}), block_where)
+            spec = _ingest_object(block.get("file"), f"{block_where}.file")
+            _ingest_only_keys(provider, spec, frozenset({"file_data", "file_id", "filename"}), f"{block_where}.file")
+            if spec.get("filename") is not None:
+                raise _ingest_unsupported(provider, f"{block_where}.file.filename", "DocumentPart has no filename slot")
+            if spec.get("file_id") is not None and spec.get("file_data") is None:
+                parts.append(document(file_id=_ingest_str(spec["file_id"], f"{block_where}.file.file_id")))
+            elif spec.get("file_data") is not None and spec.get("file_id") is None:
+                media_type, payload = _ingest_data_uri(_ingest_str(spec["file_data"], f"{block_where}.file.file_data"), f"{block_where}.file.file_data")
+                parts.append(document(data=payload, media_type=media_type))
+            else:
+                raise ValueError(f"{block_where}.file needs exactly one of file_data / file_id")
+        elif kind == "refusal" and role == "assistant":
+            _ingest_only_keys(provider, block, frozenset({"type", "refusal"}), block_where)
+            parts.append(RefusalPart(text=_ingest_str(block.get("refusal"), f"{block_where}.refusal")))
+        else:
+            raise _ingest_unsupported(
+                provider, f"{block_where} of type {kind!r} in a {role} message",
+                "no canonical part for that block on this wire (a part is not a knob: there is no extensions door for content)",
+            )
+    return parts, breakpoint_at_end
+
+
+def _ingest_tool_calls(provider: str, calls: Any, where: str) -> list[ToolCallPart]:
+    if not isinstance(calls, list):
+        raise TypeError(f"{where}.tool_calls must be an array")
+    out: list[ToolCallPart] = []
+    for index, call in enumerate(calls):
+        call = _ingest_object(call, f"{where}.tool_calls[{index}]")
+        call_where = f"{where}.tool_calls[{index}]"
+        kind = call.get("type", "function")
+        if kind != "function":
+            raise _ingest_unsupported(provider, f"{call_where} of type {kind!r}", "only function tool calls have a canonical part")
+        _ingest_only_keys(provider, call, frozenset({"id", "type", "function"}), call_where)
+        function = _ingest_object(call.get("function"), f"{call_where}.function")
+        _ingest_only_keys(provider, function, frozenset({"name", "arguments"}), f"{call_where}.function")
+        arguments = function.get("arguments", "{}")
+        if isinstance(arguments, str):
+            # The builder writes json.dumps(input); the inverse is exact, and
+            # a caller-authored string that is not a JSON object is malformed
+            # (the lenient parse_json_object is for PROVIDER output only).
+            try:
+                parsed = json.loads(arguments) if arguments else {}
+            except ValueError as exc:
+                raise ValueError(f"{call_where}.function.arguments is not JSON: {exc}") from None
+        else:
+            parsed = arguments
+        if not isinstance(parsed, dict):
+            raise ValueError(f"{call_where}.function.arguments must encode a JSON object")
+        out.append(ToolCallPart(
+            id=_ingest_str(call.get("id"), f"{call_where}.id"),
+            name=_ingest_str(function.get("name"), f"{call_where}.function.name"),
+            input=parsed,
+        ))
+    return out
+
+
+def _ingest_messages(
+    provider: str, rows: Any, compat: ResolvedOpenAIChatCompat,
+) -> tuple[str | tuple[Part, ...] | None, list[Message], bool, int | None]:
+    """Wire rows → (system, messages, system_breakpoint, breakpoint_message_index).
+
+    Rules (MAP-12): the first row, when system/developer, is Request.system
+    (the builder renders system there under compat.instruction_role, so the
+    wire cannot tell a system prompt from a leading developer message);
+    a later system/developer row is a developer Message; consecutive tool
+    rows form one tool Message (the builder emits one row per result part);
+    a `name` on any row is refused (no canonical slot)."""
+    if not isinstance(rows, list):
+        raise TypeError("messages must be an array")
+    system: str | tuple[Part, ...] | None = None
+    system_breakpoint = False
+    breakpoint_index: int | None = None
+    messages: list[Message] = []
+    pending_results: list[ToolResultPart] = []
+
+    def flush_results() -> None:
+        if pending_results:
+            messages.append(Message(role="tool", parts=tuple(pending_results)))
+            pending_results.clear()
+
+    for index, row in enumerate(rows):
+        row = _ingest_object(row, f"messages[{index}]")
+        where = f"messages[{index}]"
+        role = row.get("role")
+        if row.get("name") is not None and role != "tool":
+            raise _ingest_unsupported(provider, f"{where}.name", "a per-message participant name has no canonical slot")
+
+        if role in ("system", "developer"):
+            flush_results()
+            _ingest_only_keys(provider, row, frozenset({"role", "content"}), where)
+            parts, marked = _ingest_content_blocks(provider, row.get("content"), role="system", where=where)
+            if index == 0:
+                if marked:
+                    system_breakpoint = True
+                if len(parts) == 1 and isinstance(parts[0], TextPart):
+                    system = parts[0].text
+                else:
+                    system = tuple(parts)
+            else:
+                if marked:
+                    breakpoint_index = len(messages)
+                messages.append(Message(role="developer", parts=tuple(parts)))
+            continue
+
+        if role == "user":
+            flush_results()
+            _ingest_only_keys(provider, row, frozenset({"role", "content", "name"}), where)
+            parts, marked = _ingest_content_blocks(provider, row.get("content"), role="user", where=where)
+            if marked:
+                if breakpoint_index is not None or system_breakpoint:
+                    raise ValueError(f"{where}: a request carries at most one prompt_cache_breakpoint")
+                breakpoint_index = len(messages)
+            messages.append(Message(role="user", parts=tuple(parts)))
+            continue
+
+        if role == "assistant":
+            flush_results()
+            _ingest_only_keys(
+                provider, row,
+                frozenset({"role", "content", "tool_calls", "refusal", "reasoning_content", "name", "audio", "function_call"}),
+                where,
+            )
+            if row.get("audio") is not None:
+                raise _ingest_unsupported(provider, f"{where}.audio", "an assistant audio reference has no canonical part")
+            if row.get("function_call") is not None:
+                raise _ingest_unsupported(provider, f"{where}.function_call", "the deprecated function-calling shape; use tool_calls")
+            parts: list[Part] = []
+            reasoning_text = row.get("reasoning_content")
+            if reasoning_text is not None:
+                parts.append(ThinkingPart(text=_ingest_str(reasoning_text, f"{where}.reasoning_content")))
+            content = row.get("content")
+            if content is not None:
+                text_parts, marked = _ingest_content_blocks(provider, content, role="assistant", where=where)
+                if marked:
+                    raise ValueError(f"{where}: a prompt_cache_breakpoint cannot mark an assistant message (the builder refuses the same cell)")
+                parts.extend(text_parts)
+            refusal_text = row.get("refusal")
+            if refusal_text is not None:
+                parts.append(RefusalPart(text=_ingest_str(refusal_text, f"{where}.refusal")))
+            if row.get("tool_calls") is not None:
+                parts.extend(_ingest_tool_calls(provider, row["tool_calls"], where))
+            if not parts:
+                parts.append(TextPart(text=""))  # the never-empty rule (MAP-2), applied to history
+            messages.append(Message(role="assistant", parts=tuple(parts)))
+            continue
+
+        if role == "tool":
+            _ingest_only_keys(provider, row, frozenset({"role", "content", "tool_call_id", "name"}), where)
+            parts, marked = _ingest_content_blocks(provider, row.get("content"), role="tool", where=where)
+            if marked:
+                raise ValueError(f"{where}: a prompt_cache_breakpoint cannot mark a tool message (the builder refuses the same cell)")
+            name = row.get("name")
+            pending_results.append(ToolResultPart(
+                id=_ingest_str(row.get("tool_call_id"), f"{where}.tool_call_id"),
+                content=tuple(parts),
+                name=_ingest_str(name, f"{where}.name") if name is not None else None,
+            ))
+            continue
+
+        if role == "function":
+            raise _ingest_unsupported(provider, f"{where} with role 'function'", "the deprecated function-calling shape; use a tool row with tool_call_id")
+        raise ValueError(f"{where}.role must be one of system, developer, user, assistant, tool; got {role!r}")
+
+    flush_results()
+    return system, messages, system_breakpoint, breakpoint_index
+
+
+def _ingest_tools(provider: str, raw: Any, compat: ResolvedOpenAIChatCompat) -> list[FunctionTool | BuiltinTool]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise TypeError("tools must be an array")
+    tools: list[FunctionTool | BuiltinTool] = []
+    for index, entry in enumerate(raw):
+        entry = _ingest_object(entry, f"tools[{index}]")
+        where = f"tools[{index}]"
+        kind = entry.get("type")
+        if kind == "function":
+            _ingest_only_keys(provider, entry, frozenset({"type", "function"}), where)
+            function = _ingest_object(entry.get("function"), f"{where}.function")
+            _ingest_only_keys(provider, function, frozenset({"name", "description", "parameters", "strict"}), f"{where}.function")
+            if function.get("strict") is True:
+                # A per-tool strict flag has no canonical slot; dropping it
+                # would lose an enforcement the caller asked for.  `false` is
+                # the wire default and carries nothing.
+                raise _ingest_unsupported(provider, f"{where}.function.strict = true", "no per-tool strict slot (compat.strict_tools is a preset policy)")
+            kwargs: dict[str, Any] = {"name": _ingest_str(function.get("name"), f"{where}.function.name")}
+            if function.get("description") is not None:
+                kwargs["description"] = _ingest_str(function["description"], f"{where}.function.description")
+            if function.get("parameters") is not None:
+                kwargs["parameters"] = _ingest_object(function["parameters"], f"{where}.function.parameters")
+            tools.append(FunctionTool(**kwargs))
+        elif kind in _INGEST_GROQ_BUILTIN_INVERSE and compat.builtin_tools == "groq":
+            config = {k: v for k, v in entry.items() if k != "type"}
+            tools.append(BuiltinTool(name=_INGEST_GROQ_BUILTIN_INVERSE[kind], config=config or None))
+        else:
+            raise _ingest_unsupported(provider, f"{where} of type {kind!r}", "only function tools (and, on the groq preset, its server-executed tools) have a canonical form")
+    return tools
+
+
+def _ingest_tool_choice(provider: str, raw: Any, parallel: Any) -> ToolChoice | None:
+    """Inverse of OpenAIChatLM._tool_choice_payload plus parallel_tool_calls."""
+    mode: str | None = None
+    allowed: tuple[str, ...] = ()
+    if raw is not None:
+        if raw in ("none", "auto", "required"):
+            mode = str(raw)
+        elif isinstance(raw, dict):
+            kind = raw.get("type")
+            if kind == "function":
+                _ingest_only_keys(provider, raw, frozenset({"type", "function"}), "tool_choice")
+                function = _ingest_object(raw.get("function"), "tool_choice.function")
+                _ingest_only_keys(provider, function, frozenset({"name"}), "tool_choice.function")
+                mode, allowed = "required", (_ingest_str(function.get("name"), "tool_choice.function.name"),)
+            elif kind == "allowed_tools":
+                _ingest_only_keys(provider, raw, frozenset({"type", "allowed_tools"}), "tool_choice")
+                spec = _ingest_object(raw.get("allowed_tools"), "tool_choice.allowed_tools")
+                _ingest_only_keys(provider, spec, frozenset({"mode", "tools"}), "tool_choice.allowed_tools")
+                mode = _ingest_str(spec.get("mode"), "tool_choice.allowed_tools.mode")
+                entries = spec.get("tools")
+                if not isinstance(entries, list) or not entries:
+                    raise ValueError("tool_choice.allowed_tools.tools must be a non-empty array")
+                names: list[str] = []
+                for index, entry in enumerate(entries):
+                    entry = _ingest_object(entry, f"tool_choice.allowed_tools.tools[{index}]")
+                    if entry.get("type") != "function":
+                        raise _ingest_unsupported(provider, f"tool_choice.allowed_tools.tools[{index}] of type {entry.get('type')!r}", "only function tools can be allowed on this wire")
+                    function = _ingest_object(entry.get("function"), f"tool_choice.allowed_tools.tools[{index}].function")
+                    names.append(_ingest_str(function.get("name"), f"tool_choice.allowed_tools.tools[{index}].function.name"))
+                allowed = tuple(names)
+            elif kind == "custom":
+                raise _ingest_unsupported(provider, "tool_choice of type 'custom'", "custom tools have no canonical form")
+            else:
+                raise ValueError(f"tool_choice.type must be function or allowed_tools; got {kind!r}")
+        else:
+            raise ValueError("tool_choice must be none, auto, required, or an object")
+    if parallel is not None and not isinstance(parallel, bool):
+        raise TypeError("parallel_tool_calls must be a boolean")
+    if mode is None and parallel is None:
+        return None
+    return ToolChoice(mode=mode or "auto", allowed=allowed, parallel=parallel)
+
+
+def _ingest_response_format(provider: str, raw: Any) -> dict[str, Any] | None:
+    """Inverse of _response_format_to_chat (INV-050 shapes).  ``{type: text}``
+    is the wire default and reads as absent.  A ``name`` of exactly
+    "response" is the builder's default label for an unnamed schema, so it
+    reads as absent too: the wire bytes are identical either way."""
+    raw = _ingest_object(raw, "response_format")
+    kind = raw.get("type")
+    if kind == "text":
+        _ingest_only_keys(provider, raw, frozenset({"type"}), "response_format")
+        return None
+    if kind == "json_object":
+        _ingest_only_keys(provider, raw, frozenset({"type"}), "response_format")
+        return {"type": "json_object"}
+    if kind == "json_schema":
+        _ingest_only_keys(provider, raw, frozenset({"type", "json_schema"}), "response_format")
+        inner = _ingest_object(raw.get("json_schema"), "response_format.json_schema")
+        _ingest_only_keys(provider, inner, frozenset({"name", "schema", "strict", "description"}), "response_format.json_schema")
+        if inner.get("description") is not None:
+            raise _ingest_unsupported(provider, "response_format.json_schema.description", "the canonical response_format has no description slot (INV-050)")
+        out: dict[str, Any] = {"type": "json_schema", "schema": _ingest_object(inner.get("schema"), "response_format.json_schema.schema")}
+        name = inner.get("name")
+        if name is not None and name != "response":
+            out["name"] = _ingest_str(name, "response_format.json_schema.name")
+        if inner.get("strict") is not None:
+            if not isinstance(inner["strict"], bool):
+                raise TypeError("response_format.json_schema.strict must be a boolean")
+            out["strict"] = inner["strict"]
+        return out
+    raise ValueError(f"response_format.type must be text, json_object or json_schema; got {kind!r}")
+
+
+def _ingest_reasoning(provider: str, body: Mapping[str, Any], compat: ResolvedOpenAIChatCompat) -> tuple[Reasoning | None, dict[str, Any]]:
+    """Inverse of the reasoning block of _payload for THIS preset's
+    thinking_format (MAP-7 spellings).  Returns the Reasoning and any
+    extensions entries the spelling implies (groq's `reasoning_format`
+    alone is the documented extensions door)."""
+    fmt = compat.thinking_format
+    present = {k for k in ("reasoning_effort", "reasoning", "thinking", "enable_thinking", "chat_template_kwargs", "reasoning_format") if k in body}
+    if not present:
+        return None, {}
+    spelled_by = {
+        "reasoning_effort": {"reasoning_effort"},
+        "openrouter": {"reasoning"},
+        "deepseek": {"thinking", "reasoning_effort"},
+        "kimi": {"thinking", "reasoning_effort"},
+        "qwen": {"enable_thinking"},
+        "qwen_chat_template": {"chat_template_kwargs"},
+        "none": set(),
+    }[fmt]
+    if compat.builtin_tools == "groq":
+        spelled_by = spelled_by | {"reasoning_format"}
+    foreign = sorted(present - spelled_by)
+    if foreign:
+        raise _ingest_unsupported(
+            provider, f"{foreign[0]!r}",
+            f"this server's reasoning dial is spelled {sorted(spelled_by) or 'nowhere (no dial)'}; another server's spelling would be sent and ignored",
+        )
+    extensions: dict[str, Any] = {}
+    effort: str | None = None
+    off = False
+
+    if "reasoning_effort" in present:
+        word = _ingest_str(body["reasoning_effort"], "reasoning_effort")
+        if word == "none":
+            off = True
+        else:
+            effort = word
+    if "thinking" in present:
+        spec = _ingest_object(body["thinking"], "thinking")
+        _ingest_only_keys(provider, spec, frozenset({"type"}), "thinking")
+        if spec.get("type") == "disabled":
+            if effort is not None:
+                raise ValueError("thinking.type=disabled next to a reasoning_effort level is contradictory")
+            off = True
+        elif spec.get("type") == "enabled":
+            if effort is None and not off:
+                raise _ingest_unsupported(provider, "thinking.type=enabled without reasoning_effort", "lm15's dial is a level (MAP-7); set config.reasoning with an effort word")
+        else:
+            raise ValueError(f"thinking.type must be enabled or disabled; got {spec.get('type')!r}")
+    if "reasoning" in present:
+        spec = _ingest_object(body["reasoning"], "reasoning")
+        _ingest_only_keys(provider, spec, frozenset({"effort", "enabled"}), "reasoning")
+        if spec.get("enabled") is False:
+            off = True
+        elif spec.get("effort") is not None:
+            effort = _ingest_str(spec["effort"], "reasoning.effort")
+        else:
+            raise ValueError("reasoning must carry effort or enabled: false")
+    if "enable_thinking" in present:
+        flag = body["enable_thinking"]
+        if flag is False:
+            off = True
+        elif flag is True:
+            raise _ingest_unsupported(provider, "enable_thinking = true", "this wire has no effort level; lm15's dial is a level (MAP-7) — set config.reasoning yourself")
+        else:
+            raise TypeError("enable_thinking must be a boolean")
+    if "chat_template_kwargs" in present:
+        spec = _ingest_object(body["chat_template_kwargs"], "chat_template_kwargs")
+        _ingest_only_keys(provider, spec, frozenset({"enable_thinking", "preserve_thinking"}), "chat_template_kwargs")
+        if spec.get("enable_thinking") is False:
+            off = True
+        elif spec.get("enable_thinking") is True:
+            raise _ingest_unsupported(provider, "chat_template_kwargs.enable_thinking = true", "this wire has no effort level; lm15's dial is a level (MAP-7) — set config.reasoning yourself")
+        else:
+            raise TypeError("chat_template_kwargs.enable_thinking must be a boolean")
+
+    summary: str | None = None
+    if "reasoning_format" in present:
+        value = body["reasoning_format"]
+        if value != "parsed":
+            raise _ingest_unsupported(provider, f"reasoning_format = {value!r}", "only 'parsed' maps (Reasoning.summary='auto', MAP-7 rule 7)")
+        if effort is None:
+            # The documented door: extensions={"reasoning_format": "parsed"}
+            # with reasoning absent (the Qwen dial has no levels).
+            extensions["reasoning_format"] = value
+        else:
+            summary = "auto"
+
+    if off:
+        return Reasoning(effort="off"), extensions
+    if effort is None:
+        return None, extensions
+    return Reasoning(effort=effort, summary=summary), extensions
+
+
+def _ingest_cache(
+    provider: str, body: Mapping[str, Any], compat: ResolvedOpenAIChatCompat,
+    *, system_breakpoint: bool, breakpoint_index: int | None,
+) -> CacheConfig | None:
+    """Inverse of _cache_common_payload and the breakpoint placement (MAP-6
+    on the OpenAI classes).  Under a preset with no OpenAI cache control the
+    keys are refused: the server has no such field."""
+    keys = {k for k in ("prompt_cache_key", "prompt_cache_retention", "prompt_cache_options") if k in body}
+    marked = system_breakpoint or breakpoint_index is not None
+    if not keys and not marked:
+        return None
+    if compat.cache_control not in ("openai", "openai_implicit"):
+        what = sorted(keys)[0] if keys else "prompt_cache_breakpoint"
+        raise _ingest_unsupported(provider, f"{what!r}", "this server has no OpenAI prompt-cache control (compat.cache_control)")
+    if marked and compat.cache_control != "openai":
+        raise _ingest_unsupported(provider, "prompt_cache_breakpoint", "this server swallows an explicit breakpoint silently (compat.cache_control=openai_implicit)")
+    key = body.get("prompt_cache_key")
+    retention = None
+    if "prompt_cache_retention" in body:
+        if body["prompt_cache_retention"] != "24h":
+            raise _ingest_unsupported(provider, f"prompt_cache_retention = {body['prompt_cache_retention']!r}", "only '24h' has a canonical value (CacheConfig.retention='long')")
+        retention = "long"
+    explicit = False
+    if "prompt_cache_options" in body:
+        spec = _ingest_object(body["prompt_cache_options"], "prompt_cache_options")
+        _ingest_only_keys(provider, spec, frozenset({"mode", "ttl"}), "prompt_cache_options")
+        if spec.get("ttl") is not None:
+            raise _ingest_unsupported(provider, "prompt_cache_options.ttl", "CacheConfig.retention names 24h only")
+        if spec.get("mode") == "explicit":
+            explicit = True
+        elif spec.get("mode") == "implicit":
+            raise _ingest_unsupported(provider, "prompt_cache_options.mode = 'implicit'", "the server default; a canonical CacheConfig names auto or off")
+        else:
+            raise ValueError(f"prompt_cache_options.mode must be explicit or implicit; got {spec.get('mode')!r}")
+    if explicit and not marked:
+        # Explicit mode with no mark is the cache-WRITE off switch (MAP-6 rule 2).
+        if key is not None or retention is not None:
+            raise ValueError("prompt_cache_options.mode=explicit with no breakpoint is the off switch; it cannot carry a key or retention (INV-027)")
+        return CacheConfig(mode="off")
+    if system_breakpoint:
+        return CacheConfig(prefix="stable", key=key, retention=retention)
+    if breakpoint_index is not None:
+        return CacheConfig(prefix_until_index=breakpoint_index, key=key, retention=retention)
+    return CacheConfig(key=key, retention=retention)
+
+
+def _ingest_config(
+    provider: str, body: Mapping[str, Any], compat: ResolvedOpenAIChatCompat,
+    *, system_breakpoint: bool, breakpoint_index: int | None,
+) -> Config:
+    kwargs: dict[str, Any] = {}
+    if "max_completion_tokens" in body or "max_tokens" in body:
+        values = {k: body[k] for k in ("max_completion_tokens", "max_tokens") if k in body}
+        if len(set(map(repr, values.values()))) > 1:
+            raise ValueError(f"max_tokens and max_completion_tokens disagree: {values}")
+        kwargs["max_tokens"] = next(iter(values.values()))
+    for key in ("temperature", "top_p", "service_tier", "store"):
+        if key in body:
+            kwargs[key] = body[key]
+    if "stop" in body:
+        kwargs["stop"] = body["stop"]
+    if body.get("logprobs") is True:
+        top = body.get("top_logprobs", 0)
+        kwargs["logprobs"] = top
+    elif body.get("logprobs") not in (None, False):
+        raise TypeError("logprobs must be a boolean")
+    elif "top_logprobs" in body:
+        raise ValueError("top_logprobs requires logprobs: true")
+    if "response_format" in body:
+        kwargs["response_format"] = _ingest_response_format(provider, body["response_format"])
+    kwargs["tool_choice"] = _ingest_tool_choice(provider, body.get("tool_choice"), body.get("parallel_tool_calls"))
+
+    user_keys = [k for k in ("user", "safety_identifier", "user_id") if k in body]
+    if "user_id" in user_keys and compat.user_field != "user_id":
+        raise _ingest_unsupported(provider, "'user_id'", f"this server spells the end-user field {compat.user_field!r}")
+    if len(user_keys) > 1:
+        raise ValueError(f"one end-user identifier only; got {user_keys}")
+    if user_keys:
+        kwargs["user_id"] = body[user_keys[0]]
+
+    reasoning, extensions = _ingest_reasoning(provider, body, compat)
+    kwargs["reasoning"] = reasoning
+    kwargs["cache"] = _ingest_cache(provider, body, compat, system_breakpoint=system_breakpoint, breakpoint_index=breakpoint_index)
+    for key in body:
+        if key in _INGEST_EXTENSIONS_KEYS:
+            extensions[key] = body[key]
+    kwargs["extensions"] = extensions or None
+    return Config(**kwargs)
+
+
+def _ingest_openai_chat(provider: str, body: Mapping[str, Any], compat: ResolvedOpenAIChatCompat) -> Request:
+    if not isinstance(body, Mapping):
+        raise TypeError(f"a Chat Completions request body is a JSON object, got {type(body).__name__}")
+    for key in body:
+        if key in _INGEST_REFUSED_KEYS:
+            raise _ingest_unsupported(provider, f"{key!r}", _INGEST_REFUSED_KEYS[key])
+        if key not in _INGEST_CONFIG_KEYS and key not in _INGEST_EXTENSIONS_KEYS and key not in _INGEST_CALL_MODE_KEYS:
+            raise _ingest_unsupported(provider, f"{key!r}", "no verdict for this key (lm15-contract/tools/openai-chat-ingest-verdicts.json); lm15 never drops a key silently")
+    model = body.get("model")
+    if not isinstance(model, str) or not model:
+        raise ValueError("model must be a non-empty string")
+    if "messages" not in body:
+        raise ValueError("messages is required")
+    system, messages, system_breakpoint, breakpoint_index = _ingest_messages(provider, body["messages"], compat)
+    tools = _ingest_tools(provider, body.get("tools"), compat)
+    config = _ingest_config(provider, body, compat, system_breakpoint=system_breakpoint, breakpoint_index=breakpoint_index)
+    return Request(model=model, messages=tuple(messages), system=system, tools=tuple(tools), config=config)
+
+
+def request_from_openai_chat(body: Mapping[str, Any], *, compat: OpenAIChatCompat | str | None = None) -> Request:
+    """A Chat Completions request body → the canonical :class:`Request` (MAP-12).
+
+    ``body`` is the JSON object a client would POST to ``/chat/completions``
+    (``model``, ``messages``, ``tools``, generation knobs).  ``compat`` names
+    the server dialect whose spellings are read — a preset name
+    (``"openai"``, ``"groq"``, ``"deepseek"``, …), an
+    :class:`OpenAIChatCompat`, or None for OpenAI's own — the same policy
+    :class:`OpenAIChatLM` writes with, so what that adapter emits for a
+    Request reads back as that Request wherever the wire can carry it.
+
+    Every key has one verdict: it maps to a canonical field, it passes
+    verbatim through ``config.extensions`` (``seed``, ``logit_bias``,
+    ``presence_penalty``, ``frequency_penalty``, ``metadata``, …), or it is
+    refused with :class:`UnsupportedFeatureError` naming the key (``n``,
+    the deprecated ``functions`` shape, a content block with no part, a
+    spelling another server owns).  ``stream`` / ``stream_options`` are
+    call-mode keys with no place on a Request and are read and dropped.
+    Malformed input raises ``ValueError`` / ``TypeError``.
+
+    On the adapter, ``lm.request_from_openai_chat(body)`` is the same
+    function under that adapter's compat, including its per-model overrides.
+    """
+    if isinstance(compat, str):
+        partial = OpenAIChatCompat.preset(compat)
+    elif isinstance(compat, OpenAIChatCompat):
+        partial = compat
+    elif compat is None:
+        partial = OpenAIChatCompat()
+    else:
+        raise TypeError("compat must be a preset name, an OpenAIChatCompat, or None")
+    model = body.get("model") if isinstance(body, Mapping) else None
+    resolved = resolve_openai_chat_compat(partial.for_model(model) if isinstance(model, str) else partial)
+    return _ingest_openai_chat("openai-chat", body, resolved)
 
 
 def _usage_from_chat(usage_data: dict[str, Any]) -> Usage:
@@ -340,6 +1029,14 @@ class OpenAIChatLM(BaseProviderLM):
             if content or content == "":
                 messages.append({"role": role, "content": content})
         return messages
+
+    def request_from_openai_chat(self, body: Mapping[str, Any]) -> Request:
+        """The inverse of :meth:`build_request`'s body under this adapter's
+        compat (MAP-12): a Chat Completions request body → canonical
+        :class:`Request`.  See :func:`request_from_openai_chat`."""
+        model = body.get("model") if isinstance(body, Mapping) else None
+        compat = self._compat_for(model) if isinstance(model, str) else self._resolved_compat
+        return _ingest_openai_chat(self.provider, body, compat)
 
     def _builtin_tool_payload(self, tool: BuiltinTool, compat: ResolvedOpenAIChatCompat) -> dict[str, Any]:
         """Map a BuiltinTool for the chat dialect, or raise.

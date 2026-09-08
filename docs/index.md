@@ -77,6 +77,10 @@ that materializes into the identical `Response`.
   [Providers & models](providers-and-models.md).
 - **Keys, rotating tokens, subscriptions:**
   [Authentication](authentication.md).
+- **Coming from litellm or the OpenAI SDK?**
+  [Migrating from an OpenAI-shaped client](migrating-from-openai-chat.md)
+  — `request_from_openai_chat` reads the messages you already have into
+  a `Request`, and names every key it cannot carry.
 - **"How do I do X?"** — nineteen [cookbook recipes](cookbooks/index.md),
   from [first request](cookbooks/01-first-request.md) to
   [video generation](cookbooks/14-video-generation.md) and

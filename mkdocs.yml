@@ -60,6 +60,7 @@ nav:
       - Cloud hosts (AWS, Azure, Google Cloud): cloud-hosts.md
       - The router: using-the-router.md
       - The type system: using-the-type-system.md
+      - Migrating from an OpenAI-shaped client: migrating-from-openai-chat.md
       - Tools from functions: tools-from-functions.md
       - Providers: using-the-a-provider.md
       - Model profiles & compat: using-model-profiles.md
