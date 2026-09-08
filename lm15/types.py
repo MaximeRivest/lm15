@@ -95,6 +95,7 @@ ErrorCode = Literal[
     "unknown_model",
     "ambiguous_model",
     "transport",
+    "lock_timeout",
     "stream_assembly",
     "provider",
 ]

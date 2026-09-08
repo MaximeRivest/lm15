@@ -36,12 +36,20 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from .errors import LockTimeoutError
+
 _DEFAULT_LOCK_TIMEOUT_S = 60.0
 _LOCK_POLL_INTERVAL_S = 0.05
 
 
-class CredentialLockTimeout(TimeoutError):
-    """Could not acquire the credential-file lock within the deadline."""
+class CredentialLockTimeout(LockTimeoutError, TimeoutError):
+    """Could not acquire the credential-file lock within the deadline.
+
+    An :class:`lm15.errors.LockTimeoutError` (ErrorCode ``lock_timeout``,
+    retryable; spec/auth.md AUTH-6) and the builtin ``TimeoutError`` at
+    once: inside the lm15 family for ``except LM15Error`` handlers, and a
+    ``TimeoutError`` for code written before the code existed.
+    """
 
 
 def _lock_dir() -> Path:
@@ -119,7 +127,9 @@ def hold_file_lock(
                     f"Could not lock credential file {path} within {timeout_s:.0f}s "
                     f"(lock file: {lock_file}). Another process may be refreshing "
                     "the same credential; retry, or remove a stale lock only if "
-                    "you are certain no other process holds it."
+                    "you are certain no other process holds it.",
+                    path=str(path),
+                    lock_path=str(lock_file),
                 )
             time.sleep(_LOCK_POLL_INTERVAL_S)
         try:

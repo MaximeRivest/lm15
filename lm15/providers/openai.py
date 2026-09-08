@@ -116,6 +116,7 @@ from .common import (
     openai_token_logprobs,
     parse_json_object,
     part_to_openai_input,
+    path_id,
     unnamed_tool_call_error,
     parts_to_text,
 )
@@ -1702,7 +1703,7 @@ class OpenAILM(BaseProviderLM):
 
     def _file_get_request(self, file_id: str) -> TransportRequest:
         return self._emit(
-            method="GET", url=f"{self.base_url.rstrip('/')}/files/{file_id}",
+            method="GET", url=f"{self.base_url.rstrip('/')}/files/{path_id(file_id)}",
             headers=self._headers(), read_timeout=60.0,
         )
 
@@ -1724,13 +1725,13 @@ class OpenAILM(BaseProviderLM):
 
     def _file_delete_request(self, file_id: str) -> TransportRequest:
         return self._emit(
-            method="DELETE", url=f"{self.base_url.rstrip('/')}/files/{file_id}",
+            method="DELETE", url=f"{self.base_url.rstrip('/')}/files/{path_id(file_id)}",
             headers=self._headers(), read_timeout=60.0,
         )
 
     def _file_download_request(self, file_id: str) -> TransportRequest:
         return self._emit(
-            method="GET", url=f"{self.base_url.rstrip('/')}/files/{file_id}/content",
+            method="GET", url=f"{self.base_url.rstrip('/')}/files/{path_id(file_id)}/content",
             headers=self._headers(), read_timeout=300.0,
         )
 
@@ -1804,13 +1805,13 @@ class OpenAILM(BaseProviderLM):
 
     def _batch_status_request(self, batch_id: str) -> TransportRequest:
         return self._emit(
-            method="GET", url=f"{self.base_url.rstrip('/')}/batches/{batch_id}",
+            method="GET", url=f"{self.base_url.rstrip('/')}/batches/{path_id(batch_id)}",
             headers=self._headers(), read_timeout=60.0,
         )
 
     def _batch_cancel_request(self, batch_id: str) -> TransportRequest:
         return self._emit(
-            method="POST", url=f"{self.base_url.rstrip('/')}/batches/{batch_id}/cancel",
+            method="POST", url=f"{self.base_url.rstrip('/')}/batches/{path_id(batch_id)}/cancel",
             headers=self._headers(), read_timeout=60.0,
         )
 
@@ -1820,7 +1821,7 @@ class OpenAILM(BaseProviderLM):
             file_id = status_body.get(key)
             if isinstance(file_id, str) and file_id:
                 fetches.append(self._emit(
-                    method="GET", url=f"{self.base_url.rstrip('/')}/files/{file_id}/content",
+                    method="GET", url=f"{self.base_url.rstrip('/')}/files/{path_id(file_id)}/content",
                     headers=self._headers(), read_timeout=300.0,
                 ))
         return tuple(fetches)
@@ -1939,12 +1940,12 @@ class OpenAILM(BaseProviderLM):
         )
 
     def _video_status_request(self, video_id: str) -> TransportRequest:
-        return self._emit(method="GET", url=f"{self.base_url.rstrip('/')}/videos/{video_id}", headers=self._headers(), read_timeout=60.0)
+        return self._emit(method="GET", url=f"{self.base_url.rstrip('/')}/videos/{path_id(video_id)}", headers=self._headers(), read_timeout=60.0)
 
     def _video_result_fetch(self, status_body: dict[str, Any]) -> TransportRequest:
         return self._emit(
             method="GET",
-            url=f"{self.base_url.rstrip('/')}/videos/{status_body.get('id')}/content",
+            url=f"{self.base_url.rstrip('/')}/videos/{path_id(str(status_body.get('id')))}/content",
             headers=self._headers(),
             read_timeout=600.0,
         )

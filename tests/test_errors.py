@@ -9,6 +9,7 @@ from lm15.errors import (
     ConfigurationError,
     ContextLengthError,
     InvalidRequestError,
+    LockTimeoutError,
     NotConfiguredError,
     ProviderError,
     RateLimitError,
@@ -37,6 +38,7 @@ def test_canonical_error_codes_cover_public_taxonomy() -> None:
         UnsupportedFeatureError: "unsupported_feature",
         NotConfiguredError: "not_configured",
         TransportError: "transport",
+        LockTimeoutError: "lock_timeout",
         ProviderError: "provider",
     }
 
@@ -46,6 +48,27 @@ def test_canonical_error_codes_cover_public_taxonomy() -> None:
 
     assert canonical_error_code(ConfigurationError) == "not_configured"
     assert canonical_error_code(CapabilityError) == "unsupported_feature"
+
+
+def test_lock_timeout_is_a_root_level_retryable_lm15_error() -> None:
+    # spec/auth.md AUTH-6 / changes/2026-09-08-lock-timeout-code.md: local
+    # and transient, inside the family, never a provider or auth failure.
+    import builtins
+
+    from lm15 import LM15Error, RETRYABLE_ERRORS
+    from lm15.auth import CredentialLockTimeout
+    from lm15.types import ERROR_CODES, ErrorDetail
+
+    assert LockTimeoutError.__mro__[1] is LM15Error
+    assert not issubclass(LockTimeoutError, ProviderError)
+    assert not issubclass(LockTimeoutError, AuthError)
+    assert not issubclass(LockTimeoutError, ConfigurationError)
+    assert LockTimeoutError in RETRYABLE_ERRORS
+    assert "lock_timeout" in ERROR_CODES
+    assert ErrorDetail(code="lock_timeout", message="m").code == "lock_timeout"
+    err = CredentialLockTimeout("locked", path="/c.json", lock_path="/l.lock")
+    assert isinstance(err, LockTimeoutError) and isinstance(err, builtins.TimeoutError)
+    assert err.code == "lock_timeout" and err.path == "/c.json" and err.lock_path == "/l.lock"
 
 
 def test_map_http_error_keeps_structured_metadata() -> None:
@@ -165,3 +188,15 @@ def test_gemini_model_not_found_maps_to_unsupported_model() -> None:
     assert err.provider == "gemini"
     assert err.provider_code == "NOT_FOUND"
     assert err.status == 404
+
+
+def test_path_id_follows_map_11() -> None:
+    # docs/mapping-rules.md MAP-11: RFC 3986 over UTF-8; '/' kept only on a
+    # resource-name wire; never decoded first.
+    from lm15.providers.common import path_id
+
+    odd = "odd id?x=1#frag%25/é"
+    assert path_id(odd) == "odd%20id%3Fx%3D1%23frag%2525%2F%C3%A9"
+    assert path_id("files/" + odd, resource_name=True) == "files/odd%20id%3Fx%3D1%23frag%2525/%C3%A9"
+    assert path_id("files/a:download", resource_name=True) == "files/a%3Adownload"
+    assert path_id("file-Abc_123.x~") == "file-Abc_123.x~"

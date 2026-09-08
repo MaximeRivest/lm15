@@ -8,6 +8,7 @@ serialization and wire formats.
 Hierarchy:
     LM15Error
     ├── TransportError              (network/connection failures at the LM layer)
+    ├── LockTimeoutError            (the credential-file lock could not be taken; local, transient)
     ├── StreamAssemblyError         (a stream cannot become a Response without inventing a fact; MAP-9)
     ├── ConfigurationError          (local SDK/configuration failures)
     │   ├── NotConfiguredError      (no API key or required provider config)
@@ -78,6 +79,34 @@ class TransportError(LM15Error):
     """
 
     default_code = "transport"
+
+
+class LockTimeoutError(LM15Error):
+    """The credential-file lock (spec/auth.md AUTH-4) could not be taken
+    within the timeout: another lm15 process is refreshing the same
+    credential (``lock_timeout``, 2026-09-08).
+
+    Local and transient — a root-level class beside :class:`TransportError`,
+    never a :class:`ProviderError` (no provider was asked) and never an
+    :class:`AuthError` (nothing is wrong with the credential; AUTH-6).
+    Retryable. Carries ``path`` (the guarded file) and ``lock_path``.
+    :class:`lm15.auth.CredentialLockTimeout` is this class and the builtin
+    ``TimeoutError`` at once, so ``except TimeoutError`` keeps working.
+    """
+
+    default_code = "lock_timeout"
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        path: str = "",
+        lock_path: str = "",
+        **kwargs,
+    ) -> None:
+        self.path = path
+        self.lock_path = lock_path
+        super().__init__(message, **kwargs)
 
 
 class StreamAssemblyError(LM15Error):
@@ -438,6 +467,7 @@ _CLASS_TO_CODE: dict[type[LM15Error], str] = {
     UnknownModelError: "unknown_model",
     AmbiguousModelError: "ambiguous_model",
     TransportError: "transport",
+    LockTimeoutError: "lock_timeout",
     ProviderError: "provider",
 }
 
@@ -461,7 +491,7 @@ def error_class_for_code(code: str) -> type[LM15Error]:
 
 # Errors that are safe to retry; lm15 never retries itself — this
 # classification is data for the caller's own retry policy.
-RETRYABLE_ERRORS = (RateLimitError, TimeoutError, ServerError, TransportError)
+RETRYABLE_ERRORS = (RateLimitError, TimeoutError, ServerError, TransportError, LockTimeoutError)
 
 
 def _append_guidance(message: str, guidance: str) -> str:

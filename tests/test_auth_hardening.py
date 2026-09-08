@@ -133,9 +133,12 @@ class TestFileLock:
         thread.start()
         assert entered.wait(timeout=5)
         try:
-            with pytest.raises(CredentialLockTimeout, match=re.escape(str(target))):
+            with pytest.raises(CredentialLockTimeout, match=re.escape(str(target))) as caught:
                 with hold_file_lock(target, timeout_s=0.2):
                     pass
+            assert caught.value.code == "lock_timeout"
+            assert caught.value.path == str(target)
+            assert caught.value.lock_path.endswith(".lock")
         finally:
             release.set()
             thread.join(timeout=5)

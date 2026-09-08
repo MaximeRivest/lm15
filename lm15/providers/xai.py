@@ -40,6 +40,7 @@ from ..access import DEFAULT_XAI_BASE_URL, XAI
 from ..errors import ProviderError, UnsupportedFeatureError
 from ..features import ProviderManifest
 from ..transports import TransportRequest
+from .common import path_id
 from ..types import ImageGenerationRequest, ImageGenerationResponse, ImagePart, Request, Usage, VideoGenerationRequest, VideoJobInfo, VideoPart
 from .base import Credential, HttpResponse, SyncTransport, default_transport
 from .openai_chat import OpenAIChatLM
@@ -209,7 +210,7 @@ class XaiLM(OpenAIChatLM):
 
     def _video_status_request(self, video_id: str) -> TransportRequest:
         return self._emit(
-            method="GET", url=f"{self.base_url.rstrip('/')}/videos/{video_id}",
+            method="GET", url=f"{self.base_url.rstrip('/')}/videos/{path_id(video_id)}",
             headers=self._headers(), read_timeout=60.0,
         )
 

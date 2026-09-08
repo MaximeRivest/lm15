@@ -158,6 +158,20 @@ def json_dumps(value: Any) -> bytes:
     return json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
+def path_id(value: str, *, resource_name: bool = False) -> str:
+    """A provider id placed in a URL path (docs/mapping-rules.md MAP-11).
+
+    RFC 3986 percent-encoding over UTF-8: every byte outside the unreserved
+    set becomes ``%XX``. ``resource_name`` keeps ``/`` literal for wires
+    whose ids are resource names (Gemini ``files/abc``); a flat-id wire
+    (OpenAI, Anthropic, xAI) encodes ``/`` too, since a literal slash would
+    turn one operation into another on the same route table. The id is
+    never decoded first: a pre-encoded id is double-encoded and answers 404
+    (loud), where a raw reserved byte would misroute (silent).
+    """
+    return urllib.parse.quote(value, safe="/" if resource_name else "")
+
+
 def build_url(url: str, params: dict[str, Any] | None = None) -> str:
     if not params:
         return url
