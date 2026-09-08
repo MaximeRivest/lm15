@@ -17,9 +17,11 @@ Failure behavior is typed and helpful, never a raw JSON traceback:
   call fails) raises :class:`lm15.errors.AuthError` with the same re-login
   guidance;
 - lock contention on a credential file raises
-  :class:`lm15.auth.CredentialLockTimeout` (a ``TimeoutError``): it is a
-  local, transient condition, not a provider error, so it deliberately does
-  not wear the AuthError type.
+  :class:`lm15.auth.CredentialLockTimeout` — an
+  :class:`lm15.errors.LockTimeoutError` (ErrorCode ``lock_timeout``,
+  retryable; spec/auth.md AUTH-6) and the builtin ``TimeoutError`` at
+  once: a local, transient condition, not a provider error, so it
+  deliberately does not wear the AuthError type.
 
 Token material never appears in error messages or reprs.
 
